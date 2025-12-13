@@ -207,7 +207,7 @@ curl -X POST http://localhost:7860/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer your-api-key-1" \
   -d '{
-    "model": "gemini-2.5-flash",
+    "model": "gemini-2.5-flash-lite",
     "messages": [
       {
         "role": "user",
@@ -221,7 +221,7 @@ curl -X POST http://localhost:7860/v1/chat/completions \
 ### ♊ Gemini Native API Format
 
 ```bash
-curl -X POST http://localhost:7860/proxy/v1beta/models/gemini-2.5-flash:generateContent \
+curl -X POST http://localhost:7860/proxy/v1beta/models/gemini-2.5-flash-lite:generateContent \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer your-api-key-1" \
   -d '{
@@ -246,7 +246,7 @@ curl -X POST http://localhost:7860/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer your-api-key-1" \
   -d '{
-    "model": "gemini-2.5-flash",
+    "model": "gemini-2.5-flash-lite",
     "messages": [
       {
         "role": "user",
@@ -259,7 +259,7 @@ curl -X POST http://localhost:7860/v1/chat/completions \
 
 ```bash
 # Gemini Native API Streaming Response
-curl -X POST http://localhost:7860/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse \
+curl -X POST http://localhost:7860/v1beta/models/gemini-2.5-flash-lite:streamGenerateContent?alt=sse \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer your-api-key-1" \
   -d '{

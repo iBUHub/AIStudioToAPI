@@ -131,13 +131,13 @@ class ConfigLoader {
                 this.logger.warn(
                     `[System] models.json file not found, using default model list.`
                 );
-                config.modelList = ["gemini-2.5-flash"];
+                config.modelList = ["gemini-2.5-flash-lite"];
             }
         } catch (error) {
             this.logger.error(
                 `[System] Failed to read or parse models.json: ${error.message}, using default model list.`
             );
-            config.modelList = ["gemini-2.5-flash"];
+            config.modelList = ["gemini-2.5-flash-lite"];
         }
 
         this._printConfiguration(config);

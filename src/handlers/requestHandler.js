@@ -177,7 +177,7 @@ class RequestHandler {
     async processOpenAIRequest(req, res) {
         const requestId = this._generateRequestId();
         const isOpenAIStream = req.body.stream === true;
-        const model = req.body.model || "gemini-2.5-flash";
+        const model = req.body.model || "gemini-2.5-flash-lite";
         const systemStreamMode = this.serverSystem.streamingMode;
         const useRealStream = isOpenAIStream && systemStreamMode === "real";
 
@@ -316,7 +316,7 @@ class RequestHandler {
 
         let connectionMaintainer;
         const scheduleNextKeepAlive = () => {
-            const randomInterval = 12000 + Math.floor(Math.random() * 6000); // 12-18秒随机
+            const randomInterval = 12000 + Math.floor(Math.random() * 6000); // 12 - 18 seconds
             connectionMaintainer = setTimeout(() => {
                 if (!res.headersSent) {
                     res.setHeader("Content-Type", "text/event-stream");
@@ -325,11 +325,11 @@ class RequestHandler {
                 }
                 if (!res.writableEnded) {
                     res.write(": keep-alive\n\n");
-                    scheduleNextKeepAlive(); // 递归调度下一次
+                    scheduleNextKeepAlive();
                 }
             }, randomInterval);
         };
-        scheduleNextKeepAlive(); // 启动随机间隔保活
+        scheduleNextKeepAlive();
 
         try {
             this._forwardRequest(proxyRequest);

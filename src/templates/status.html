@@ -471,11 +471,13 @@
                 const initialThinking = '{{forceThinking}}';
                 const initialWebSearch = '{{forceWebSearch}}';
                 const initialUrlContext = '{{forceUrlContext}}';
+
                 this.isUpdating = true;
                 this.streamingModeReal = initialMode === 'real';
                 this.forceThinkingEnabled = initialThinking === 'true' || initialThinking === true;
                 this.forceWebSearchEnabled = initialWebSearch === 'true' || initialWebSearch === true;
                 this.forceUrlContextEnabled = initialUrlContext === 'true' || initialUrlContext === true;
+
                 this.$nextTick(() => {
                     this.isUpdating = false;
                 });

@@ -190,7 +190,7 @@ class FormatConverter {
      * @param {string} modelName - The model name
      * @param {object} streamState - Optional state object to track thought mode
      */
-    translateGoogleToOpenAIStream(googleChunk, modelName = "gemini-2.5-flash", streamState = null) {
+    translateGoogleToOpenAIStream(googleChunk, modelName = "gemini-2.5-flash-lite", streamState = null) {
         if (!googleChunk || googleChunk.trim() === "") {
             return null;
         }
@@ -290,7 +290,7 @@ class FormatConverter {
     /**
      * Convert Google non-stream response to OpenAI format
      */
-    convertGoogleToOpenAINonStream(googleResponse, modelName = "gemini-2.5-flash") {
+    convertGoogleToOpenAINonStream(googleResponse, modelName = "gemini-2.5-flash-lite") {
         const candidate = googleResponse.candidates?.[0];
 
         if (!candidate) {
