@@ -9,38 +9,38 @@
 @import 'variables.less';
 
 body {
-    font-family: @font-family-mono;
     background-color: @background-light;
     color: @text-primary;
+    font-family: @font-family-mono;
     padding: 2em;
 }
 
 .container {
-    max-width: @container-max-width;
-    margin: 0 auto;
     background: @background-white;
-    padding: 1em 2em 2em 2em;
     border-radius: @border-radius-xl;
     box-shadow: @shadow-light;
+    margin: 0 auto;
+    max-width: @container-max-width;
+    padding: 1em 2em 2em 2em;
     position: relative;
 }
 
 h1,
 h2 {
-    color: @text-primary;
     border-bottom: 2px solid @border-light;
+    color: @text-primary;
     padding-bottom: 0.5em;
 }
 
 pre {
     background: @dark-background;
+    border-radius: @border-radius-md;
     color: @dark-text;
     font-size: @font-size-large;
+    line-height: 1.6;
     padding: 1.5em;
-    border-radius: @border-radius-md;
     white-space: pre-wrap;
     word-wrap: break-word;
-    line-height: 1.6;
 }
 
 #log-container {
@@ -65,14 +65,14 @@ pre {
 }
 
 .dot {
-    height: 10px;
-    width: 10px;
+    animation: blink 1s infinite alternate;
     background-color: #bbb;
     border-radius: @border-radius-circle;
     display: inline-block;
+    height: 10px;
     margin-left: @spacing-sm;
     vertical-align: middle;
-    animation: blink 1s infinite alternate;
+    width: 10px;
 
     &.status-running {
         background-color: @success-color;
@@ -94,25 +94,25 @@ pre {
 }
 
 .action-group {
+    align-items: center;
     display: flex;
     flex-wrap: wrap;
     gap: @spacing-md;
-    align-items: center;
 
     button,
     select {
-        font-size: @font-size-base;
+        align-items: center;
         border: 1px solid @border-color;
-        padding: @spacing-sm @spacing-md;
         border-radius: @border-radius-md;
+        box-sizing: border-box;
         cursor: pointer;
-        transition: background-color @transition-normal;
+        display: inline-flex;
+        font-size: @font-size-base;
+        justify-content: center;
         line-height: 1.5;
         min-height: @button-min-height;
-        box-sizing: border-box;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
+        padding: @spacing-sm @spacing-md;
+        transition: background-color @transition-normal;
         white-space: nowrap;
     }
 
@@ -127,18 +127,18 @@ pre {
 }
 
 .lang-switcher {
-    position: absolute;
-    top: 35px;
-    right: @spacing-lg;
+    align-items: center;
     background: transparent;
     border: none;
     color: @text-secondary;
-    padding: @spacing-xs;
     cursor: pointer;
-    transition: all @transition-fast;
     display: flex;
-    align-items: center;
     justify-content: center;
+    padding: @spacing-xs;
+    position: absolute;
+    right: @spacing-lg;
+    top: 35px;
+    transition: all @transition-fast;
 
     &:hover {
         color: @primary-color;
@@ -151,21 +151,21 @@ pre {
 }
 
 .switch-container {
-    display: flex;
     align-items: center;
+    display: flex;
     gap: @spacing-md;
     margin: @spacing-md 0;
 
     .switch-label {
-        font-size: @font-size-base;
         color: @text-primary;
-        min-width: 150px;
+        font-size: @font-size-base;
         font-weight: 500;
+        min-width: 150px;
     }
 
     .switch-status {
-        font-size: @font-size-small;
         color: @text-secondary;
+        font-size: @font-size-small;
         min-width: 60px;
     }
 }

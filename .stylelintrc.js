@@ -5,8 +5,12 @@
 
 module.exports = {
     extends: ['stylelint-config-standard', 'stylelint-config-standard-less'],
-    plugins: ['stylelint-less'],
+    plugins: ['stylelint-less', 'stylelint-order'],
     rules: {
+        // ==================== Property Ordering ====================
+        // Enforce alphabetical ordering of CSS properties (similar to ESLint sort-keys-fix)
+        'order/properties-alphabetical-order': true,
+        
         // Color format - allow short hex
         'color-hex-length': 'short',
         

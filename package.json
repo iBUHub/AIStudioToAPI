@@ -43,7 +43,8 @@
         "stylelint": "^16.26.1",
         "stylelint-config-standard": "^36.0.1",
         "stylelint-config-standard-less": "^3.0.1",
-        "stylelint-less": "^3.0.1"
+        "stylelint-less": "^3.0.1",
+        "stylelint-order": "^7.0.0"
     },
     "lint-staged": {
         "*.{js,jsx,ts,tsx}": "eslint --fix",

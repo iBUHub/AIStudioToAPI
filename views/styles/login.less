@@ -9,77 +9,77 @@
 @import 'variables.less';
 
 body {
-    display: flex;
-    justify-content: center;
     align-items: center;
-    height: 100vh;
-    font-family: @font-family-sans;
     background: @background-light;
+    display: flex;
+    font-family: @font-family-sans;
+    height: 100vh;
+    justify-content: center;
 }
 
 form {
     background: @background-white;
-    padding: @spacing-xl;
     border-radius: @border-radius-lg;
     box-shadow: @shadow-medium;
-    text-align: center;
+    padding: @spacing-xl;
     position: relative;
+    text-align: center;
 }
 
 input {
-    width: @input-width;
-    padding: @spacing-sm;
-    margin-top: @spacing-sm;
     border: 1px solid @border-color;
     border-radius: @border-radius-sm;
+    margin-top: @spacing-sm;
+    padding: @spacing-sm;
     transition: all @transition-normal;
+    width: @input-width;
 
     &:focus {
-        outline: none;
         border-color: @primary-color;
         box-shadow: @shadow-focus;
+        outline: none;
     }
 }
 
 button {
-    width: 100%;
-    padding: @spacing-sm;
+    align-items: center;
     background-color: @primary-color;
-    color: @background-white;
     border: none;
     border-radius: @border-radius-sm;
-    margin-top: @spacing-lg;
-    cursor: pointer;
-    line-height: 1.5;
-    min-height: @button-min-height;
     box-sizing: border-box;
+    color: @background-white;
+    cursor: pointer;
     display: inline-flex;
-    align-items: center;
-    justify-content: center;
     font-size: @font-size-base;
+    justify-content: center;
+    line-height: 1.5;
+    margin-top: @spacing-lg;
+    min-height: @button-min-height;
+    padding: @spacing-sm;
+    width: 100%;
 }
 
 .error {
     color: @error-color;
-    margin-top: 25px;
     margin-bottom: 0;
+    margin-top: 25px;
 }
 
 .lang-switcher {
-    position: absolute;
-    top: @spacing-sm;
-    right: @spacing-sm;
+    align-items: center;
     background: transparent;
     border: none;
     color: @text-secondary;
-    padding: @spacing-xs;
     cursor: pointer;
-    width: auto;
-    margin: 0;
     display: flex;
-    align-items: center;
     justify-content: center;
+    margin: 0;
+    padding: @spacing-xs;
+    position: absolute;
+    right: @spacing-sm;
+    top: @spacing-sm;
     transition: all @transition-fast;
+    width: auto;
 
     &:hover {
         color: @primary-color;
