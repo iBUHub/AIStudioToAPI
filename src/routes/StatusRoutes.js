@@ -37,24 +37,23 @@ class StatusRoutes {
         // Health check endpoint (public, no authentication required)
         app.get("/health", (req, res) => {
             const now = new Date();
-            const timezone = process.env.TZ || Intl.DateTimeFormat()
-                .resolvedOptions().timeZone;
+            const timezone = process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
             let timestamp;
 
             try {
-                timestamp = now.toLocaleString("zh-CN", {
-                    day: "2-digit",
-                    hour: "2-digit",
-                    hour12: false,
-                    minute: "2-digit",
-                    month: "2-digit",
-                    second: "2-digit",
-                    timeZone: timezone,
-                    year: "numeric",
-                })
-                    .replace(/\//g, "-") + `.${now.getMilliseconds()
-                    .toString()
-                    .padStart(3, "0")} [${timezone}]`;
+                timestamp =
+                    now
+                        .toLocaleString("zh-CN", {
+                            day: "2-digit",
+                            hour: "2-digit",
+                            hour12: false,
+                            minute: "2-digit",
+                            month: "2-digit",
+                            second: "2-digit",
+                            timeZone: timezone,
+                            year: "numeric",
+                        })
+                        .replace(/\//g, "-") + `.${now.getMilliseconds().toString().padStart(3, "0")} [${timezone}]`;
             } catch (err) {
                 timestamp = now.toISOString();
             }
@@ -65,13 +64,11 @@ class StatusRoutes {
                 timestamp,
                 uptime: process.uptime(),
             };
-            res.status(200)
-                .json(healthStatus);
+            res.status(200).json(healthStatus);
         });
 
         app.get("/", isAuthenticated, (req, res) => {
-            res.status(200)
-                .sendFile(this.distIndexPath);
+            res.status(200).sendFile(this.distIndexPath);
         });
 
         app.get("/auth", isAuthenticated, (req, res) => {
@@ -94,7 +91,9 @@ class StatusRoutes {
                 const currentAuthIndex = requestHandler.currentAuthIndex;
 
                 if (currentAuthIndex !== null && !authSource.availableIndices.includes(currentAuthIndex)) {
-                    this.logger.warn(`[System] Current auth index #${currentAuthIndex} is no longer valid after reload (e.g., file deleted).`);
+                    this.logger.warn(
+                        `[System] Current auth index #${currentAuthIndex} is no longer valid after reload (e.g., file deleted).`
+                    );
                     this.logger.warn("[System] Closing browser connection due to invalid auth.");
                     try {
                         // Await closing to prevent repeated checks on subsequent status polls
@@ -114,12 +113,8 @@ class StatusRoutes {
             try {
                 const { targetIndex } = req.body;
                 if (targetIndex !== undefined && targetIndex !== null) {
-                    this.logger.info(
-                        `[WebUI] Received request to switch to specific account #${targetIndex}...`
-                    );
-                    const result = await this.serverSystem.requestHandler._switchToSpecificAuth(
-                        targetIndex
-                    );
+                    this.logger.info(`[WebUI] Received request to switch to specific account #${targetIndex}...`);
+                    const result = await this.serverSystem.requestHandler._switchToSpecificAuth(targetIndex);
                     if (result.success) {
                         res.status(200).json({ message: "accountSwitchSuccess", newIndex: result.newIndex });
                     } else {
@@ -215,7 +210,7 @@ class StatusRoutes {
      */
     _escapeHtml(text) {
         const htmlEscapeMap = {
-            "\"": "&quot;",
+            '"': "&quot;",
             "&": "&amp;",
             "'": "&#x27;",
             "/": "&#x2F;",
@@ -228,29 +223,27 @@ class StatusRoutes {
     _getStatusData() {
         const { config, requestHandler, authSource, browserManager } = this.serverSystem;
         const initialIndices = authSource.initialIndices || [];
-        const invalidIndices = initialIndices.filter(
-            i => !authSource.availableIndices.includes(i)
-        );
+        const invalidIndices = initialIndices.filter(i => !authSource.availableIndices.includes(i));
         const logs = this.logger.logBuffer || [];
         const accountNameMap = authSource.accountNameMap;
         const accountDetails = initialIndices.map(index => {
             const isInvalid = invalidIndices.includes(index);
-            const name = isInvalid
-                ? "N/A (JSON format error)"
-                : accountNameMap.get(index) || "N/A (Unnamed)";
+            const name = isInvalid ? "N/A (JSON format error)" : accountNameMap.get(index) || "N/A (Unnamed)";
             return { index, name };
         });
 
         const currentAuthIndex = requestHandler.currentAuthIndex;
         const currentAccountName = accountNameMap.get(currentAuthIndex) || "N/A";
 
-        const usageCount = config.switchOnUses > 0
-            ? `${requestHandler.usageCount} / ${config.switchOnUses}`
-            : requestHandler.usageCount;
+        const usageCount =
+            config.switchOnUses > 0
+                ? `${requestHandler.usageCount} / ${config.switchOnUses}`
+                : requestHandler.usageCount;
 
-        const failureCount = config.failureThreshold > 0
-            ? `${requestHandler.failureCount} / ${config.failureThreshold}`
-            : requestHandler.failureCount;
+        const failureCount =
+            config.failureThreshold > 0
+                ? `${requestHandler.failureCount} / ${config.failureThreshold}`
+                : requestHandler.failureCount;
 
         return {
             logCount: logs.length,
@@ -271,6 +264,7 @@ class StatusRoutes {
                         : "Disabled",
                 initialIndicesRaw: initialIndices,
                 invalidIndicesRaw: invalidIndices,
+                isSystemBusy: requestHandler.isSystemBusy,
                 streamingMode: this.serverSystem.streamingMode,
                 usageCount,
             },
@@ -281,18 +275,14 @@ class StatusRoutes {
         const { config, requestHandler, authSource, browserManager } = this.serverSystem;
         const initialIndices = authSource.initialIndices || [];
         const availableIndices = authSource.availableIndices || [];
-        const invalidIndices = initialIndices.filter(
-            i => !availableIndices.includes(i)
-        );
+        const invalidIndices = initialIndices.filter(i => !availableIndices.includes(i));
         const logs = this.logger.logBuffer || [];
 
         const accountNameMap = authSource.accountNameMap;
         const accountDetailsHtml = initialIndices
             .map(index => {
                 const isInvalid = invalidIndices.includes(index);
-                const name = isInvalid
-                    ? "N/A (JSON format error)"
-                    : accountNameMap.get(index) || "N/A (Unnamed)";
+                const name = isInvalid ? "N/A (JSON format error)" : accountNameMap.get(index) || "N/A (Unnamed)";
 
                 // Escape account name to prevent XSS
                 const escapedName = this._escapeHtml(String(name));
@@ -310,13 +300,15 @@ class StatusRoutes {
 
         const currentAccountName = accountNameMap.get(currentAuthIndex) || "N/A";
 
-        const usageCount = config.switchOnUses > 0
-            ? `${requestHandler.usageCount} / ${config.switchOnUses}`
-            : requestHandler.usageCount;
+        const usageCount =
+            config.switchOnUses > 0
+                ? `${requestHandler.usageCount} / ${config.switchOnUses}`
+                : requestHandler.usageCount;
 
-        const failureCount = config.failureThreshold > 0
-            ? `${requestHandler.failureCount} / ${config.failureThreshold}`
-            : requestHandler.failureCount;
+        const failureCount =
+            config.failureThreshold > 0
+                ? `${requestHandler.failureCount} / ${config.failureThreshold}`
+                : requestHandler.failureCount;
 
         return this._loadTemplate("status.html", {
             accountDetailsHtml,

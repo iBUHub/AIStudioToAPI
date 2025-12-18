@@ -92,7 +92,7 @@ echo.==========================================
 echo.
 timeout /t 2 >nul
 
-node scripts\saveAuth.js
+node scripts\auth\saveAuth.js
 
 if errorlevel 1 (
     echo.

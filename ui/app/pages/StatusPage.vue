@@ -12,7 +12,7 @@
             :offset="20"
             position="bottom"
             class="mobile-only"
-            style="position: fixed; right: 20px; bottom: 20px; z-index: 999;"
+            style="position: fixed; right: 20px; bottom: 20px; z-index: 999"
         >
             <div class="floating-actions">
                 <button
@@ -59,12 +59,7 @@
                     >
                         <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
                         <polyline points="16 17 21 12 16 7" />
-                        <line
-                            x1="21"
-                            x2="9"
-                            y1="12"
-                            y2="12"
-                        />
+                        <line x1="21" x2="9" y1="12" y2="12" />
                     </svg>
                 </button>
             </div>
@@ -115,16 +110,11 @@
                 >
                     <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
                     <polyline points="16 17 21 12 16 7" />
-                    <line
-                        x1="21"
-                        x2="9"
-                        y1="12"
-                        y2="12"
-                    />
+                    <line x1="21" x2="9" y1="12" y2="12" />
                 </svg>
             </button>
             <h1>
-                <span>{{ t('statusHeading') }}</span>
+                <span>{{ t("statusHeading") }}</span>
                 <span class="dot" />
             </h1>
             <div id="status-section">
@@ -148,14 +138,14 @@
 <span class="label">{{ t('formatErrors') }}</span>: <span>{{ formatErrorsText }}</span></template>
                 </pre>
             </div>
-            <div id="actions-section" style="margin-top: 2em;">
-                <h2>{{ t('actionsPanel') }}</h2>
+            <div id="actions-section" style="margin-top: 2em">
+                <h2>{{ t("actionsPanel") }}</h2>
                 <div class="action-group">
                     <el-select
                         v-model="state.selectedAccount"
                         :placeholder="t('noActiveAccount')"
                         :disabled="state.isSwitchingAccount"
-                        style="width: 240px;"
+                        style="width: 240px"
                     >
                         <el-option
                             v-for="item in state.accountDetails"
@@ -186,11 +176,7 @@
                             />
                         </svg>
                     </button>
-                    <button
-                        :disabled="state.isSwitchingAccount"
-                        :title="t('btnAddUser')"
-                        @click="addUser"
-                    >
+                    <button :disabled="state.isSwitchingAccount" :title="t('btnAddUser')" @click="addUser">
                         <svg
                             t="1765912197860"
                             class="icon"
@@ -230,7 +216,7 @@
                     </button>
                 </div>
                 <div class="switch-container">
-                    <span class="switch-label">{{ t('streamingMode') }}</span>
+                    <span class="switch-label">{{ t("streamingMode") }}</span>
                     <el-switch
                         v-model="state.streamingModeReal"
                         :before-change="handleStreamingModeBeforeChange"
@@ -239,7 +225,7 @@
                     <span class="switch-status">{{ streamingModeText }}</span>
                 </div>
                 <div class="switch-container">
-                    <span class="switch-label">{{ t('forceThinking') }}</span>
+                    <span class="switch-label">{{ t("forceThinking") }}</span>
                     <el-switch
                         v-model="state.forceThinkingEnabled"
                         :before-change="handleForceThinkingBeforeChange"
@@ -248,7 +234,7 @@
                     <span class="switch-status">{{ forceThinkingText }}</span>
                 </div>
                 <div class="switch-container">
-                    <span class="switch-label">{{ t('forceWebSearch') }}</span>
+                    <span class="switch-label">{{ t("forceWebSearch") }}</span>
                     <el-switch
                         v-model="state.forceWebSearchEnabled"
                         :before-change="handleForceWebSearchBeforeChange"
@@ -257,7 +243,7 @@
                     <span class="switch-status">{{ forceWebSearchText }}</span>
                 </div>
                 <div class="switch-container">
-                    <span class="switch-label">{{ t('forceUrlContext') }}</span>
+                    <span class="switch-label">{{ t("forceUrlContext") }}</span>
                     <el-switch
                         v-model="state.forceUrlContextEnabled"
                         :before-change="handleForceUrlContextBeforeChange"
@@ -266,12 +252,13 @@
                     <span class="switch-status">{{ forceUrlContextText }}</span>
                 </div>
             </div>
-            <div id="log-section" style="margin-top: 2em;">
+            <div id="log-section" style="margin-top: 2em">
                 <h2>
-                    <span>{{ t('realtimeLogs') }}</span>
-                    (<span>{{ t('latestEntries') }}</span>
+                    <span>{{ t("realtimeLogs") }}</span>
+                    (<span>{{ t("latestEntries") }}</span>
                     {{ state.logCount }}
-                    <span>{{ t('entries') }}</span>)
+                    <span>{{ t("entries") }}</span
+                    >)
                 </h2>
                 <pre id="log-container">{{ state.logs }}</pre>
             </div>
@@ -324,13 +311,9 @@ const apiKeySourceText = computed(() => {
     return translated === key ? state.apiKeySource : translated || state.apiKeySource;
 });
 
-const browserConnectedClass = computed(() =>
-    (state.browserConnected ? "status-ok" : "status-error")
-);
+const browserConnectedClass = computed(() => (state.browserConnected ? "status-ok" : "status-error"));
 
-const browserConnectedText = computed(() =>
-    (state.browserConnected ? t("running") : t("disconnected"))
-);
+const browserConnectedText = computed(() => (state.browserConnected ? t("running") : t("disconnected")));
 
 const currentAccountName = computed(() => {
     if (state.currentAuthIndex === null || state.currentAuthIndex < 0) {
@@ -340,43 +323,25 @@ const currentAccountName = computed(() => {
     return account ? account.name : t("noActiveAccount");
 });
 
-const forceThinkingIcon = computed(() =>
-    (state.forceThinkingEnabled ? "✅" : "❌")
-);
-const forceThinkingText = computed(() =>
-    (state.forceThinkingEnabled ? t("enabled") : t("disabled"))
-);
+const forceThinkingIcon = computed(() => (state.forceThinkingEnabled ? "✅" : "❌"));
+const forceThinkingText = computed(() => (state.forceThinkingEnabled ? t("enabled") : t("disabled")));
 
-const forceUrlContextIcon = computed(() =>
-    (state.forceUrlContextEnabled ? "✅" : "❌")
-);
-const forceUrlContextText = computed(() =>
-    (state.forceUrlContextEnabled ? t("enabled") : t("disabled"))
-);
+const forceUrlContextIcon = computed(() => (state.forceUrlContextEnabled ? "✅" : "❌"));
+const forceUrlContextText = computed(() => (state.forceUrlContextEnabled ? t("enabled") : t("disabled")));
 
-const forceWebSearchIcon = computed(() =>
-    (state.forceWebSearchEnabled ? "✅" : "❌")
-);
-const forceWebSearchText = computed(() =>
-    (state.forceWebSearchEnabled ? t("enabled") : t("disabled"))
-);
+const forceWebSearchIcon = computed(() => (state.forceWebSearchEnabled ? "✅" : "❌"));
+const forceWebSearchText = computed(() => (state.forceWebSearchEnabled ? t("enabled") : t("disabled")));
 
 const formatErrorsText = computed(() => {
     const indices = state.invalidIndicesRaw || [];
     return `[${indices.join(", ")}] (${t("total")}: ${indices.length})`;
 });
 
-const serviceConnectedClass = computed(() =>
-    (state.serviceConnected ? "status-ok" : "status-error")
-);
+const serviceConnectedClass = computed(() => (state.serviceConnected ? "status-ok" : "status-error"));
 
-const serviceConnectedText = computed(() =>
-    (state.serviceConnected ? t("running") : t("disconnected"))
-);
+const serviceConnectedText = computed(() => (state.serviceConnected ? t("running") : t("disconnected")));
 
-const streamingModeText = computed(() =>
-    (state.streamingModeReal ? t("real") : t("fake"))
-);
+const streamingModeText = computed(() => (state.streamingModeReal ? t("real") : t("fake")));
 
 const totalScannedAccountsText = computed(() => {
     const indices = state.initialIndicesRaw || [];
@@ -397,15 +362,12 @@ const deleteUser = () => {
     const targetAccount = state.accountDetails.find(acc => acc.index === targetIndex);
     const accountSuffix = targetAccount ? ` (${targetAccount.name})` : "";
 
-    ElMessageBox.confirm(
-        `${t("confirmDelete")} #${targetIndex}${accountSuffix}?`,
-        {
-            cancelButtonText: t("cancel"),
-            confirmButtonText: t("ok"),
-            lockScroll: false,
-            type: "warning",
-        }
-    )
+    ElMessageBox.confirm(`${t("confirmDelete")} #${targetIndex}${accountSuffix}?`, {
+        cancelButtonText: t("cancel"),
+        confirmButtonText: t("ok"),
+        lockScroll: false,
+        type: "warning",
+    })
         .then(async () => {
             state.isSwitchingAccount = true;
             try {
@@ -420,9 +382,7 @@ const deleteUser = () => {
                     ElMessage.error(message);
                 }
             } catch (err) {
-                ElMessage.error(
-                    t("deleteFailed", { message: err.message || err })
-                );
+                ElMessage.error(t("deleteFailed", { message: err.message || err }));
             } finally {
                 state.isSwitchingAccount = false;
                 updateContent();
@@ -435,14 +395,12 @@ const deleteUser = () => {
         });
 };
 
-const handleForceThinkingBeforeChange = () =>
-    handleSettingChange("/api/settings/force-thinking", "forceThinking");
+const handleForceThinkingBeforeChange = () => handleSettingChange("/api/settings/force-thinking", "forceThinking");
 
 const handleForceUrlContextBeforeChange = () =>
     handleSettingChange("/api/settings/force-url-context", "forceUrlContext");
 
-const handleForceWebSearchBeforeChange = () =>
-    handleSettingChange("/api/settings/force-web-search", "forceWebSearch");
+const handleForceWebSearchBeforeChange = () => handleSettingChange("/api/settings/force-web-search", "forceWebSearch");
 
 const handleLogout = () => {
     ElMessageBox.confirm(t("logoutConfirm"), {
@@ -545,15 +503,12 @@ const switchSpecificAccount = () => {
     const targetAccount = state.accountDetails.find(acc => acc.index === targetIndex);
     const accountSuffix = targetAccount ? ` (${targetAccount.name})` : "";
 
-    ElMessageBox.confirm(
-        `${t("confirmSwitch")} #${targetIndex}${accountSuffix}?`,
-        {
-            cancelButtonText: t("cancel"),
-            confirmButtonText: t("ok"),
-            lockScroll: false,
-            type: "warning",
-        }
-    )
+    ElMessageBox.confirm(`${t("confirmSwitch")} #${targetIndex}${accountSuffix}?`, {
+        cancelButtonText: t("cancel"),
+        confirmButtonText: t("ok"),
+        lockScroll: false,
+        type: "warning",
+    })
         .then(async () => {
             const notification = ElNotification({
                 duration: 0,
@@ -576,9 +531,7 @@ const switchSpecificAccount = () => {
                     ElMessage.error(message);
                 }
             } catch (err) {
-                ElMessage.error(
-                    t("settingFailed", { message: err.message || err })
-                );
+                ElMessage.error(t("settingFailed", { message: err.message || err }));
             } finally {
                 state.isSwitchingAccount = false;
                 notification.close();
@@ -620,15 +573,14 @@ const updateStatus = data => {
     state.logs = data.logs || "";
     state.initialIndicesRaw = data.status.initialIndicesRaw;
     state.invalidIndicesRaw = data.status.invalidIndicesRaw;
+    if (data.status.isSystemBusy) {
+        state.isSwitchingAccount = true;
+    }
 
-    const isSelectedAccountValid = state.accountDetails.some(
-        acc => acc.index === state.selectedAccount
-    );
+    const isSelectedAccountValid = state.accountDetails.some(acc => acc.index === state.selectedAccount);
 
     if (!isSelectedAccountValid) {
-        const isActiveAccountValid = state.accountDetails.some(
-            acc => acc.index === state.currentAuthIndex
-        );
+        const isActiveAccountValid = state.accountDetails.some(acc => acc.index === state.currentAuthIndex);
         state.selectedAccount = isActiveAccountValid ? state.currentAuthIndex : null;
     }
 
@@ -707,7 +659,7 @@ watchEffect(() => {
 </script>
 
 <style lang="less" scoped>
-@import '../styles/variables.less';
+@import "../styles/variables.less";
 
 .status-page {
     min-height: 100vh;

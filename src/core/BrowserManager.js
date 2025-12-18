@@ -26,6 +26,9 @@ class BrowserManager {
         this.currentAuthIndex = 0;
         this.scriptFileName = "build.js";
 
+        // Added for background wakeup logic from new core
+        this.noButtonCount = 0;
+
         // Optimized launch arguments for low-memory Docker/cloud environments
         this.launchArgs = [
             "--disable-dev-shm-usage",
@@ -48,17 +51,9 @@ class BrowserManager {
         } else {
             const platform = os.platform();
             if (platform === "linux") {
-                this.browserExecutablePath = path.join(
-                    process.cwd(),
-                    "camoufox-linux",
-                    "camoufox"
-                );
+                this.browserExecutablePath = path.join(process.cwd(), "camoufox-linux", "camoufox");
             } else if (platform === "win32") {
-                this.browserExecutablePath = path.join(
-                    process.cwd(),
-                    "camoufox",
-                    "camoufox.exe"
-                );
+                this.browserExecutablePath = path.join(process.cwd(), "camoufox", "camoufox.exe");
             } else if (platform === "darwin") {
                 this.browserExecutablePath = path.join(
                     process.cwd(),
@@ -74,12 +69,416 @@ class BrowserManager {
         }
     }
 
+    /**
+     * Interface: Notify user activity
+     * Used to force wake up the Launch detection when a request comes in
+     */
+    notifyUserActivity() {
+        if (this.noButtonCount > 0) {
+            this.logger.info("[Browser] ⚡ User activity detected, forcing Launch detection wakeup...");
+            this.noButtonCount = 0;
+        }
+    }
+
+    /**
+     * Helper: Generate a consistent numeric seed from a string
+     * Used to keep fingerprints consistent for the same account index
+     */
+    _generateIdentitySeed(str) {
+        let hashValue = 0;
+        for (let i = 0; i < str.length; i++) {
+            const charCode = str.charCodeAt(i);
+            hashValue = (hashValue << 5) - hashValue + charCode;
+            hashValue |= 0; // Convert to 32bit integer
+        }
+        return Math.abs(hashValue);
+    }
+
+    /**
+     * Feature: Generate Privacy Protection Script (Stealth Mode)
+     * Injects specific GPU info and masks webdriver properties to avoid bot detection.
+     */
+    _getPrivacyProtectionScript(authIndex) {
+        // Use a consistent seed so the fingerprint remains static for this specific account
+        let seed = this._generateIdentitySeed(`account_salt_${authIndex}`);
+
+        // Pseudo-random generator based on the seed
+        const deterministicRandom = () => {
+            const x = Math.sin(seed++) * 10000;
+            return x - Math.floor(x);
+        };
+
+        // Select a GPU profile consistent with this account
+        const gpuProfiles = [
+            { renderer: "Intel Iris OpenGL Engine", vendor: "Intel Inc." },
+            {
+                renderer: "ANGLE (NVIDIA, NVIDIA GeForce GTX 1050 Ti Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                vendor: "Google Inc. (NVIDIA)",
+            },
+            {
+                renderer: "ANGLE (AMD, AMD Radeon RX 580 Series Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                vendor: "Google Inc. (AMD)",
+            },
+        ];
+        const profile = gpuProfiles[Math.floor(deterministicRandom() * gpuProfiles.length)];
+
+        // We inject a noise variable to make the environment unique but stable
+        const randomArtifact = Math.floor(deterministicRandom() * 1000);
+
+        return `
+            (function() {
+                if (window._privacyProtectionInjected) return;
+                window._privacyProtectionInjected = true;
+
+                try {
+                    // 1. Mask WebDriver property
+                    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+
+                    // 2. Mock Plugins if empty
+                    if (navigator.plugins.length === 0) {
+                        Object.defineProperty(navigator, 'plugins', {
+                            get: () => new Array(${3 + Math.floor(deterministicRandom() * 3)}),
+                        });
+                    }
+
+                    // 3. Spoof WebGL Renderer (High Impact)
+                    const getParameterProxy = WebGLRenderingContext.prototype.getParameter;
+                    WebGLRenderingContext.prototype.getParameter = function(parameter) {
+                        // 37445: UNMASKED_VENDOR_WEBGL
+                        // 37446: UNMASKED_RENDERER_WEBGL
+                        if (parameter === 37445) return '${profile.vendor}';
+                        if (parameter === 37446) return '${profile.renderer}';
+                        return getParameterProxy.apply(this, arguments);
+                    };
+
+                    // 4. Inject benign noise
+                    window['_canvas_noise_${randomArtifact}'] = '${randomArtifact}';
+
+                    if (window === window.top) {
+                        console.log("[ProxyClient] Privacy protection layer active: ${profile.renderer}");
+                    }
+                } catch (err) {
+                    console.error("[ProxyClient] Failed to inject privacy script", err);
+                }
+            })();
+        `;
+    }
+
+    /**
+     * Feature: Natural Mouse Movement
+     * Simulates human-like mouse jitters instead of instant teleportation
+     */
+    async _simulateHumanMovement(page, targetX, targetY) {
+        try {
+            // Split movement into 3 segments with random deviations
+            const steps = 3;
+            for (let i = 1; i <= steps; i++) {
+                const intermediateX = targetX + (Math.random() - 0.5) * (100 / i);
+                const intermediateY = targetY + (Math.random() - 0.5) * (100 / i);
+
+                // Final step must be precise
+                const destX = i === steps ? targetX : intermediateX;
+                const destY = i === steps ? targetY : intermediateY;
+
+                await page.mouse.move(destX, destY, {
+                    steps: 10 + Math.floor(Math.random() * 10), // Random speed
+                });
+            }
+        } catch (e) {
+            // Ignore movement errors if page is closed
+        }
+    }
+
+    /**
+     * Feature: Smart "Code" Button Clicking
+     * Tries multiple selectors (Code, Develop, Edit, Icons) to be robust against UI changes.
+     */
+    async _smartClickCode(page) {
+        const selectors = [
+            // Priority 1: Exact text match (Fastest)
+            'button:text("Code")',
+            // Priority 2: Alternative texts used by Google
+            'button:text("Develop")',
+            'button:text("Edit")',
+            // Priority 3: Fuzzy attribute matching
+            'button[aria-label*="Code"]',
+            'button[aria-label*="code"]',
+            // Priority 4: Icon based
+            'button mat-icon:text("code")',
+            'button span:has-text("Code")',
+        ];
+
+        this.logger.info('[Browser] Trying to locate "Code" entry point using smart selectors...');
+
+        for (const selector of selectors) {
+            try {
+                // Use a short timeout for quick fail-over
+                const element = page.locator(selector).first();
+                if (await element.isVisible({ timeout: 2000 })) {
+                    this.logger.info(`[Browser] ✅ Smart match: "${selector}", clicking...`);
+                    // Direct click with force as per new logic
+                    await element.click({ force: true, timeout: 10000 });
+                    return true;
+                }
+            } catch (e) {
+                // Ignore timeout for single selector, try next
+            }
+        }
+
+        throw new Error('Unable to find "Code" button or alternatives (Smart Click Failed)');
+    }
+
+    /**
+     * Feature: Background Health Monitor (The "Scavenger")
+     * Periodically cleans up popups and keeps the session alive.
+     */
+    _startHealthMonitor() {
+        // Clear existing interval if any
+        if (this.healthMonitorInterval) clearInterval(this.healthMonitorInterval);
+
+        this.logger.info("[Browser] 🛡️ Background health monitor service (Scavenger) started...");
+
+        let tickCount = 0;
+
+        // Run every 4 seconds
+        this.healthMonitorInterval = setInterval(async () => {
+            const page = this.page;
+            if (!page || page.isClosed()) {
+                clearInterval(this.healthMonitorInterval);
+                return;
+            }
+
+            tickCount++;
+
+            try {
+                // 1. Keep-Alive: Random micro-actions (30% chance)
+                if (Math.random() > 0.3) {
+                    try {
+                        // Scroll
+                        // eslint-disable-next-line no-undef
+                        await page.evaluate(() => window.scrollBy(0, (Math.random() - 0.5) * 20));
+                        // Mouse jitter
+                        const x = Math.floor(Math.random() * 500);
+                        const y = Math.floor(Math.random() * 500);
+                        await page.mouse.move(x, y, { steps: 5 });
+                    } catch (e) {
+                        /* empty */
+                    }
+                }
+
+                // 2. Anti-Timeout: Click (1,1) every ~1 minute (15 ticks)
+                if (tickCount % 15 === 0) {
+                    try {
+                        await page.mouse.move(1, 1, { steps: 5 });
+                        await page.mouse.down();
+                        await page.waitForTimeout(100 + Math.random() * 100);
+                        await page.mouse.up();
+                    } catch (e) {
+                        /* empty */
+                    }
+                }
+
+                // 2. Popup & Overlay Cleanup
+                await page.evaluate(() => {
+                    const blockers = [
+                        "div.cdk-overlay-backdrop",
+                        "div.cdk-overlay-container",
+                        "div.cdk-global-overlay-wrapper",
+                    ];
+
+                    const targetTexts = ["Reload", "Retry", "Got it", "Dismiss", "Not now"];
+
+                    // Remove passive blockers
+                    blockers.forEach(selector => {
+                        // eslint-disable-next-line no-undef
+                        document.querySelectorAll(selector).forEach(el => el.remove());
+                    });
+
+                    // Click active buttons if visible
+                    // eslint-disable-next-line no-undef
+                    document.querySelectorAll("button").forEach(btn => {
+                        // 检查元素是否占据空间（简单的可见性检查）
+                        const rect = btn.getBoundingClientRect();
+                        const isVisible = rect.width > 0 && rect.height > 0;
+
+                        if (isVisible) {
+                            const text = (btn.innerText || "").trim();
+                            const ariaLabel = btn.getAttribute("aria-label");
+
+                            // 匹配文本 或 aria-label
+                            if (targetTexts.includes(text) || ariaLabel === "Close") {
+                                console.log(`[ProxyClient] HealthMonitor clicking: ${text || "Close Button"}`);
+                                btn.click();
+                            }
+                        }
+                    });
+                });
+            } catch (err) {
+                // Silent catch to prevent log spamming on navigation
+            }
+        }, 4000);
+    }
+
+    /**
+     * Feature: Background Wakeup & "Launch" Button Handler
+     * Specifically handles the "Rocket/Launch" button which blocks model loading.
+     */
+    async _startBackgroundWakeup() {
+        const currentPage = this.page;
+        // Initial buffer
+        await new Promise(r => setTimeout(r, 1500));
+
+        if (!currentPage || currentPage.isClosed() || this.page !== currentPage) return;
+
+        this.logger.info("[Browser] 🛡️ Background Wakeup Service (Rocket Handler) started...");
+
+        while (currentPage && !currentPage.isClosed() && this.page === currentPage) {
+            try {
+                // 1. Force page wake-up
+                await currentPage.bringToFront().catch(() => {});
+
+                // Micro-movements to trigger rendering frames in headless mode
+                await currentPage.mouse.move(10, 10);
+                await currentPage.mouse.move(20, 20);
+
+                // 2. Intelligent Scan for "Launch" or "Rocket" button
+                const targetInfo = await currentPage.evaluate(() => {
+                    // Optimized precise check
+                    try {
+                        const preciseCandidates = Array.from(
+                            // eslint-disable-next-line no-undef
+                            document.querySelectorAll(".interaction-modal p, .interaction-modal button")
+                        );
+                        for (const el of preciseCandidates) {
+                            if (/Launch|rocket_launch/i.test((el.innerText || "").trim())) {
+                                const rect = el.getBoundingClientRect();
+                                if (rect.width > 0 && rect.height > 0) {
+                                    return {
+                                        found: true,
+                                        tagName: el.tagName,
+                                        text: (el.innerText || "").trim().substring(0, 15),
+                                        x: rect.left + rect.width / 2,
+                                        y: rect.top + rect.height / 2,
+                                    };
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        /* empty */
+                    }
+
+                    const MIN_Y = 400;
+                    const MAX_Y = 800;
+
+                    const isValid = rect => rect.width > 0 && rect.height > 0 && rect.top > MIN_Y && rect.top < MAX_Y;
+
+                    // eslint-disable-next-line no-undef
+                    const candidates = Array.from(document.querySelectorAll("button, span, div, a, i"));
+
+                    for (const el of candidates) {
+                        const text = (el.innerText || "").trim();
+                        // Match "Launch" or material icon "rocket_launch"
+                        if (!/Launch|rocket_launch/i.test(text)) continue;
+
+                        let targetEl = el;
+                        let rect = targetEl.getBoundingClientRect();
+
+                        // Recursive parent check (up to 3 levels)
+                        let parentDepth = 0;
+                        while (parentDepth < 3 && targetEl.parentElement) {
+                            if (targetEl.tagName === "BUTTON" || targetEl.getAttribute("role") === "button") break;
+                            const parent = targetEl.parentElement;
+                            const pRect = parent.getBoundingClientRect();
+                            if (isValid(pRect)) {
+                                targetEl = parent;
+                                rect = pRect;
+                            }
+                            parentDepth++;
+                        }
+
+                        if (isValid(rect)) {
+                            return {
+                                found: true,
+                                tagName: targetEl.tagName,
+                                text: text.substring(0, 15),
+                                x: rect.left + rect.width / 2,
+                                y: rect.top + rect.height / 2,
+                            };
+                        }
+                    }
+                    return { found: false };
+                });
+
+                // 3. Execute Click if found
+                if (targetInfo.found) {
+                    this.logger.info(`[Browser] 🎯 Found Rocket/Launch button [${targetInfo.tagName}], engaging...`);
+
+                    // Physical Click
+                    await currentPage.mouse.move(targetInfo.x, targetInfo.y, { steps: 5 });
+                    await new Promise(r => setTimeout(r, 300));
+                    await currentPage.mouse.down();
+                    await new Promise(r => setTimeout(r, 400));
+                    await currentPage.mouse.up();
+
+                    this.logger.info(`[Browser] 🖱️ Physical click executed. Verifying...`);
+                    await new Promise(r => setTimeout(r, 1500));
+
+                    // Strategy B: JS Click (Fallback)
+                    const isStillThere = await currentPage.evaluate(() => {
+                        // eslint-disable-next-line no-undef
+                        const els = Array.from(document.querySelectorAll('button, span, div[role="button"]'));
+                        return els.some(el => {
+                            const r = el.getBoundingClientRect();
+                            return (
+                                /Launch|rocket_launch/i.test(el.innerText) && r.top > 400 && r.top < 800 && r.height > 0
+                            );
+                        });
+                    });
+
+                    if (isStillThere) {
+                        this.logger.warn(`[Browser] ⚠️ Physical click ineffective, attempting JS force click...`);
+                        await currentPage.evaluate(() => {
+                            const candidates = Array.from(
+                                // eslint-disable-next-line no-undef
+                                document.querySelectorAll('button, span, div[role="button"]')
+                            );
+                            for (const el of candidates) {
+                                const r = el.getBoundingClientRect();
+                                if (/Launch|rocket_launch/i.test(el.innerText) && r.top > 400 && r.top < 800) {
+                                    (el.closest("button") || el).click();
+                                    return true;
+                                }
+                            }
+                        });
+                        await new Promise(r => setTimeout(r, 2000));
+                    } else {
+                        this.logger.info(`[Browser] ✅ Click successful, button disappeared.`);
+                        await new Promise(r => setTimeout(r, 60000)); // Long sleep on success
+                    }
+                } else {
+                    this.noButtonCount++;
+                    // Smart Sleep
+                    if (this.noButtonCount > 20) {
+                        // Long sleep, but check for user activity
+                        for (let i = 0; i < 30; i++) {
+                            if (this.noButtonCount === 0) break; // Woken up by request
+                            await new Promise(r => setTimeout(r, 1000));
+                        }
+                    } else {
+                        await new Promise(r => setTimeout(r, 1500));
+                    }
+                }
+            } catch (e) {
+                // Ignore errors during page navigation/reload
+                await new Promise(r => setTimeout(r, 1000));
+            }
+        }
+    }
+
     async launchBrowserForVNC(extraArgs = {}) {
         this.logger.info("🚀 [VNC] Launching a new, separate, headful browser instance for VNC session...");
         if (!fs.existsSync(this.browserExecutablePath)) {
-            throw new Error(
-                `Browser executable not found at path: ${this.browserExecutablePath}`
-            );
+            throw new Error(`Browser executable not found at path: ${this.browserExecutablePath}`);
         }
 
         // This browser instance is temporary and specific to the VNC session.
@@ -121,12 +520,14 @@ class BrowserManager {
     }
 
     async launchOrSwitchContext(authIndex) {
+        if (typeof authIndex !== "number" || authIndex <= 0) {
+            this.logger.error(`[Browser] Invalid authIndex: ${authIndex}. authIndex must be > 0.`);
+            throw new Error(`Invalid authIndex: ${authIndex}. Must be > 0.`);
+        }
         if (!this.browser) {
             this.logger.info("🚀 [Browser] Main browser instance not running, performing first-time launch...");
             if (!fs.existsSync(this.browserExecutablePath)) {
-                throw new Error(
-                    `Browser executable not found at path: ${this.browserExecutablePath}`
-                );
+                throw new Error(`Browser executable not found at path: ${this.browserExecutablePath}`);
             }
             this.browser = await firefox.launch({
                 args: this.launchArgs,
@@ -142,9 +543,17 @@ class BrowserManager {
             this.logger.info("✅ [Browser] Main browser instance successfully launched.");
         }
 
+        if (this.healthMonitorInterval) {
+            clearInterval(this.healthMonitorInterval);
+            this.healthMonitorInterval = null;
+            this.logger.info("[Browser] Stopped background tasks (Scavenger) for old page.");
+        }
+
         if (this.context) {
             this.logger.info("[Browser] Closing old API browser context...");
-            await this.context.close();
+            const closePromise = this.context.close();
+            const timeoutPromise = new Promise(r => setTimeout(r, 5000)); // 5秒超时
+            await Promise.race([closePromise, timeoutPromise]);
             this.context = null;
             this.page = null;
             this.logger.info("[Browser] Old API context closed.");
@@ -152,17 +561,13 @@ class BrowserManager {
 
         const sourceDescription = `File auth-${authIndex}.json`;
         this.logger.info("==================================================");
-        this.logger.info(
-            `🔄 [Browser] Creating new API browser context for account #${authIndex}`
-        );
+        this.logger.info(`🔄 [Browser] Creating new API browser context for account #${authIndex}`);
         this.logger.info(`   • Auth source: ${sourceDescription}`);
         this.logger.info("==================================================");
 
         const storageStateObject = this.authSource.getAuth(authIndex);
         if (!storageStateObject) {
-            throw new Error(
-                `Failed to get or parse auth source for index ${authIndex}.`
-            );
+            throw new Error(`Failed to get or parse auth source for index ${authIndex}.`);
         }
 
         let buildScriptContent = fs.readFileSync(
@@ -184,32 +589,66 @@ class BrowserManager {
         }
 
         try {
+            // Viewport Randomization
+            const randomWidth = 1920 + Math.floor(Math.random() * 50);
+            const randomHeight = 1080 + Math.floor(Math.random() * 50);
+
             this.context = await this.browser.newContext({
+                deviceScaleFactor: 1,
                 storageState: storageStateObject,
-                viewport: { height: 1080, width: 1920 },
+                viewport: { height: randomHeight, width: randomWidth },
             });
+
+            // Inject Privacy Script immediately after context creation
+            const privacyScript = this._getPrivacyProtectionScript(authIndex);
+            await this.context.addInitScript(privacyScript);
+
             this.page = await this.context.newPage();
+
+            // Pure JS Wakeup (Focus & Click)
+            try {
+                await this.page.bringToFront();
+                // eslint-disable-next-line no-undef
+                await this.page.evaluate(() => window.focus());
+                await this._simulateHumanMovement(this.page, 10, 10);
+                await this.page.mouse.down();
+                await this.page.waitForTimeout(100);
+                await this.page.mouse.up();
+                this.logger.info("[Browser] ⚡ Forced window wake-up via JS focus.");
+            } catch (e) {
+                this.logger.warn(`[Browser] Wakeup minor error: ${e.message}`);
+            }
+
             this.page.on("console", msg => {
                 const msgText = msg.text();
                 if (msgText.includes("[ProxyClient]")) {
-                    this.logger.info(
-                        `[Browser] ${msgText.replace("[ProxyClient] ", "")}`
-                    );
+                    this.logger.info(`[Browser] ${msgText.replace("[ProxyClient] ", "")}`);
                 } else if (msg.type() === "error") {
                     this.logger.error(`[Browser Page Error] ${msgText}`);
                 }
             });
 
             this.logger.info(`[Browser] Navigating to target page...`);
-            const targetUrl
-                = "https://aistudio.google.com/u/0/apps/bundled/blank?showPreview=true&showCode=true&showAssistant=true";
+            const targetUrl =
+                "https://aistudio.google.com/u/0/apps/bundled/blank?showPreview=true&showCode=true&showAssistant=true";
             await this.page.goto(targetUrl, {
                 timeout: 180000,
                 waitUntil: "domcontentloaded",
             });
             this.logger.info("[Browser] Page loaded.");
-
-            await this.page.waitForTimeout(3000);
+            // Wake up window using JS and Human Movement
+            try {
+                await this.page.bringToFront();
+                await this._simulateHumanMovement(this.page, 10, 10); // Move to safe corner
+                await this.page.mouse.down();
+                await this.page.waitForTimeout(50 + Math.random() * 150);
+                await this.page.mouse.up();
+                await this._simulateHumanMovement(this.page, 100, 100);
+                this.logger.info("[Browser] ✅ Executed human-like page activation (path + click).");
+            } catch (e) {
+                /* Ignore wakeup errors */
+            }
+            await this.page.waitForTimeout(2000 + Math.random() * 2000);
 
             const currentUrl = this.page.url();
             let pageTitle = "";
@@ -224,20 +663,17 @@ class BrowserManager {
 
             // Check for various error conditions
             if (
-                currentUrl.includes("accounts.google.com")
-                || currentUrl.includes("ServiceLogin")
-                || pageTitle.includes("Sign in")
-                || pageTitle.includes("登录")
+                currentUrl.includes("accounts.google.com") ||
+                currentUrl.includes("ServiceLogin") ||
+                pageTitle.includes("Sign in") ||
+                pageTitle.includes("登录")
             ) {
                 throw new Error(
                     "🚨 Cookie expired/invalid! Browser was redirected to Google login page. Please re-extract storageState."
                 );
             }
 
-            if (
-                pageTitle.includes("Available regions")
-                || pageTitle.includes("not available")
-            ) {
+            if (pageTitle.includes("Available regions") || pageTitle.includes("not available")) {
                 throw new Error(
                     "🚨 Current IP does not support access to Google AI Studio (region restricted). Claw node may be identified as restricted region, try restarting container to get a new IP."
                 );
@@ -250,30 +686,25 @@ class BrowserManager {
             }
 
             if (currentUrl === "about:blank") {
-                throw new Error(
-                    "🚨 Page load failed (about:blank), possibly network timeout or browser crash."
-                );
+                throw new Error("🚨 Page load failed (about:blank), possibly network timeout or browser crash.");
             }
 
             // Handle various popups
             this.logger.info(`[Browser] Checking for Cookie consent banner...`);
             try {
                 const agreeButton = this.page.locator('button:text("Agree")');
-                await agreeButton.waitFor({ state: "visible", timeout: 10000 });
-                this.logger.info(
-                    `[Browser] ✅ Found Cookie consent banner, clicking "Agree"...`
-                );
-                await agreeButton.click({ force: true });
-                await this.page.waitForTimeout(1000);
+                if (await agreeButton.isVisible({ timeout: 5000 })) {
+                    await this.page.waitForTimeout(500 + Math.random() * 1000);
+                    this.logger.info(`[Browser] ✅ Found Cookie consent banner, clicking "Agree"...`);
+                    await agreeButton.click({ force: true });
+                }
             } catch (error) {
                 this.logger.info(`[Browser] No Cookie consent banner found, skipping.`);
             }
 
             this.logger.info(`[Browser] Checking for "Got it" popup...`);
             try {
-                const gotItButton = this.page.locator(
-                    'div.dialog button:text("Got it")'
-                );
+                const gotItButton = this.page.locator('div.dialog button:text("Got it")');
                 await gotItButton.waitFor({ state: "visible", timeout: 15000 });
                 this.logger.info(`[Browser] ✅ Found "Got it" popup, clicking...`);
                 await gotItButton.click({ force: true });
@@ -290,9 +721,7 @@ class BrowserManager {
                 await closeButton.click({ force: true });
                 await this.page.waitForTimeout(1000);
             } catch (error) {
-                this.logger.info(
-                    `[Browser] No "It's time to build" onboarding tutorial found, skipping.`
-                );
+                this.logger.info(`[Browser] No "It's time to build" onboarding tutorial found, skipping.`);
             }
 
             this.logger.info("[Browser] Preparing UI interaction, forcefully removing all possible overlay layers...");
@@ -300,9 +729,7 @@ class BrowserManager {
             await this.page.evaluate(() => {
                 const overlays = document.querySelectorAll("div.cdk-overlay-backdrop");
                 if (overlays.length > 0) {
-                    console.log(
-                        `[ProxyClient] (Internal JS) Found and removed ${overlays.length} overlay layers.`
-                    );
+                    console.log(`[ProxyClient] (Internal JS) Found and removed ${overlays.length} overlay layers.`);
                     overlays.forEach(el => el.remove());
                 }
             });
@@ -314,41 +741,32 @@ class BrowserManager {
                     this.logger.info(`  [Attempt ${i}/5] Cleaning overlay layers and clicking...`);
                     /* eslint-disable no-undef */
                     await this.page.evaluate(() => {
-                        document
-                            .querySelectorAll("div.cdk-overlay-backdrop")
-                            .forEach(el => el.remove());
+                        document.querySelectorAll("div.cdk-overlay-backdrop").forEach(el => el.remove());
                     });
                     /* eslint-enable no-undef */
                     await this.page.waitForTimeout(500);
 
-                    await this.page
-                        .locator('button:text("Code")')
-                        .click({ timeout: 10000 });
+                    // Use Smart Click instead of hardcoded locator
+                    await this._smartClickCode(this.page);
+
                     this.logger.info("  ✅ Click successful!");
                     break;
                 } catch (error) {
-                    this.logger.warn(
-                        `  [Attempt ${i}/5] Click failed: ${error.message.split("\n")[0]}`
-                    );
+                    this.logger.warn(`  [Attempt ${i}/5] Click failed: ${error.message.split("\n")[0]}`);
                     if (i === 5) {
                         try {
-                            const screenshotPath = path.join(
-                                process.cwd(),
-                                "debug_screenshot_final.png"
-                            );
+                            const screenshotPath = path.join(process.cwd(), "debug_screenshot_final.png");
                             await this.page.screenshot({
                                 fullPage: true,
                                 path: screenshotPath,
                             });
-                            this.logger.info(
-                                `[Debug] Final failure screenshot saved to: ${screenshotPath}`
-                            );
+                            this.logger.info(`[Debug] Final failure screenshot saved to: ${screenshotPath}`);
                         } catch (screenshotError) {
-                            this.logger.error(
-                                `[Debug] Failed to save screenshot: ${screenshotError.message}`
-                            );
+                            this.logger.error(`[Debug] Failed to save screenshot: ${screenshotError.message}`);
                         }
-                        throw new Error(`Unable to click "Code" button after multiple attempts, initialization failed.`);
+                        throw new Error(
+                            `Unable to click "Code" button after multiple attempts, initialization failed.`
+                        );
                     }
                 }
             }
@@ -356,9 +774,7 @@ class BrowserManager {
             this.logger.info(
                 '[Browser] (Step 2/5) "Code" button clicked successfully, waiting for editor to become visible...'
             );
-            const editorContainerLocator = this.page
-                .locator("div.monaco-editor")
-                .first();
+            const editorContainerLocator = this.page.locator("div.monaco-editor").first();
             await editorContainerLocator.waitFor({
                 state: "visible",
                 timeout: 60000,
@@ -384,42 +800,67 @@ class BrowserManager {
             await editorContainerLocator.click({ timeout: 30000 });
 
             /* eslint-disable no-undef */
-            await this.page.evaluate(
-                text => navigator.clipboard.writeText(text),
-                buildScriptContent
-            );
+            await this.page.evaluate(text => navigator.clipboard.writeText(text), buildScriptContent);
             /* eslint-enable no-undef */
             const isMac = os.platform() === "darwin";
             const pasteKey = isMac ? "Meta+V" : "Control+V";
             await this.page.keyboard.press(pasteKey);
             this.logger.info("[Browser] (Step 4/5) Script pasted.");
-            this.logger.info(
-                '[Browser] (Step 5/5) Clicking "Preview" button to activate script...'
-            );
+            this.logger.info('[Browser] (Step 5/5) Clicking "Preview" button to activate script...');
             await this.page.locator('button:text("Preview")').click();
             this.logger.info("[Browser] ✅ UI interaction complete, script is now running.");
+
+            // Active Trigger (Hack to wake up Google Backend)
+            this.logger.info("[Browser] ⚡ Sending active trigger request to Launch flow...");
+            try {
+                await this.page.evaluate(async () => {
+                    try {
+                        await fetch("https://generativelanguage.googleapis.com/v1beta/models?key=ActiveTrigger", {
+                            headers: { "Content-Type": "application/json" },
+                            method: "GET",
+                        });
+                    } catch (e) {
+                        console.log("[ProxyClient] Active trigger sent");
+                    }
+                });
+            } catch (e) {
+                /* empty */
+            }
+
+            this._startHealthMonitor();
+            this._startBackgroundWakeup();
             this.currentAuthIndex = authIndex;
             this.logger.info("==================================================");
             this.logger.info(`✅ [Browser] Account ${authIndex} context initialized successfully!`);
             this.logger.info("✅ [Browser] Browser client is ready.");
             this.logger.info("==================================================");
         } catch (error) {
-            this.logger.error(
-                `❌ [Browser] Account ${authIndex} context initialization failed: ${error.message}`
-            );
-            if (this.browser) {
-                await this.browser.close();
-                this.browser = null;
-            }
+            this.logger.error(`❌ [Browser] Account ${authIndex} context initialization failed: ${error.message}`);
+            await this.closeBrowser();
             this.currentAuthIndex = 0;
             throw error;
         }
     }
 
+    /**
+     * Unified cleanup method for the main browser instance.
+     * Handles intervals, timeouts, and resetting all references.
+     */
     async closeBrowser() {
+        if (this.healthMonitorInterval) {
+            clearInterval(this.healthMonitorInterval);
+            this.healthMonitorInterval = null;
+        }
         if (this.browser) {
             this.logger.info("[Browser] Closing main browser instance...");
-            await this.browser.close();
+            try {
+                // Give close() 5 seconds, otherwise force proceed
+                await Promise.race([this.browser.close(), new Promise(resolve => setTimeout(resolve, 5000))]);
+            } catch (e) {
+                this.logger.warn(`[Browser] Error during close (ignored): ${e.message}`);
+            }
+
+            // 3. Reset all references
             this.browser = null;
             this.context = null;
             this.page = null;
@@ -428,13 +869,9 @@ class BrowserManager {
     }
 
     async switchAccount(newAuthIndex) {
-        this.logger.info(
-            `🔄 [Browser] Starting account switch: from ${this.currentAuthIndex} to ${newAuthIndex}`
-        );
+        this.logger.info(`🔄 [Browser] Starting account switch: from ${this.currentAuthIndex} to ${newAuthIndex}`);
         await this.launchOrSwitchContext(newAuthIndex);
-        this.logger.info(
-            `✅ [Browser] Account switch completed, current account: ${this.currentAuthIndex}`
-        );
+        this.logger.info(`✅ [Browser] Account switch completed, current account: ${this.currentAuthIndex}`);
     }
 }
 

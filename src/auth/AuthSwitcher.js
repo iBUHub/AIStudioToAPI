@@ -18,7 +18,6 @@ class AuthSwitcher {
         this.browserManager = browserManager;
         this.failureCount = 0;
         this.usageCount = 0;
-        this.isAuthSwitching = false;
         this.isSystemBusy = false;
     }
 
@@ -50,13 +49,12 @@ class AuthSwitcher {
             throw new Error("No available authentication sources, cannot switch.");
         }
 
-        if (this.isAuthSwitching) {
+        if (this.isSystemBusy) {
             this.logger.info("🔄 [Auth] Account switching/restarting in progress, skipping duplicate operation");
             return { reason: "Switch already in progress.", success: false };
         }
 
         this.isSystemBusy = true;
-        this.isAuthSwitching = true;
 
         try {
             // Single account mode
@@ -103,9 +101,7 @@ class AuthSwitcher {
                 );
                 return { newIndex: this.currentAuthIndex, success: true };
             } catch (error) {
-                this.logger.error(
-                    `❌ [Auth] Switching to account #${nextAuthIndex} failed: ${error.message}`
-                );
+                this.logger.error(`❌ [Auth] Switching to account #${nextAuthIndex} failed: ${error.message}`);
                 this.logger.warn(
                     `🚨 [Auth] Switch failed, attempting to fall back to previous available account #${previousAuthIndex}...`
                 );
@@ -128,13 +124,12 @@ class AuthSwitcher {
                 }
             }
         } finally {
-            this.isAuthSwitching = false;
             this.isSystemBusy = false;
         }
     }
 
     async switchToSpecificAuth(targetIndex) {
-        if (this.isAuthSwitching) {
+        if (this.isSystemBusy) {
             this.logger.info("🔄 [Auth] Account switching in progress, skipping duplicate operation");
             return { reason: "Switch already in progress.", success: false };
         }
@@ -146,23 +141,17 @@ class AuthSwitcher {
         }
 
         this.isSystemBusy = true;
-        this.isAuthSwitching = true;
         try {
             this.logger.info(`🔄 [Auth] Starting switch to specified account #${targetIndex}...`);
             await this.browserManager.switchAccount(targetIndex);
             this.failureCount = 0;
             this.usageCount = 0;
-            this.logger.info(
-                `✅ [Auth] Successfully switched to account #${this.currentAuthIndex}, counters reset.`
-            );
+            this.logger.info(`✅ [Auth] Successfully switched to account #${this.currentAuthIndex}, counters reset.`);
             return { newIndex: this.currentAuthIndex, success: true };
         } catch (error) {
-            this.logger.error(
-                `❌ [Auth] Switch to specified account #${targetIndex} failed: ${error.message}`
-            );
+            this.logger.error(`❌ [Auth] Switch to specified account #${targetIndex} failed: ${error.message}`);
             throw error;
         } finally {
-            this.isAuthSwitching = false;
             this.isSystemBusy = false;
         }
     }
@@ -179,12 +168,9 @@ class AuthSwitcher {
             );
         }
 
-        const isImmediateSwitch = this.config.immediateSwitchStatusCodes.includes(
-            errorDetails.status
-        );
-        const isThresholdReached
-            = this.config.failureThreshold > 0
-            && this.failureCount >= this.config.failureThreshold;
+        const isImmediateSwitch = this.config.immediateSwitchStatusCodes.includes(errorDetails.status);
+        const isThresholdReached =
+            this.config.failureThreshold > 0 && this.failureCount >= this.config.failureThreshold;
 
         if (isImmediateSwitch || isThresholdReached) {
             if (isImmediateSwitch) {

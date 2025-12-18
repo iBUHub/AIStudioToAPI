@@ -14,14 +14,7 @@ const AuthSwitcher = require("../auth/AuthSwitcher");
 const FormatConverter = require("./FormatConverter");
 
 class RequestHandler {
-    constructor(
-        serverSystem,
-        connectionRegistry,
-        logger,
-        browserManager,
-        config,
-        authSource
-    ) {
+    constructor(serverSystem, connectionRegistry, logger, browserManager, config, authSource) {
         this.serverSystem = serverSystem;
         this.connectionRegistry = connectionRegistry;
         this.logger = logger;
@@ -68,18 +61,61 @@ class RequestHandler {
     async processRequest(req, res) {
         const requestId = this._generateRequestId();
 
+        // Check browser connection
+        if (!this.connectionRegistry.hasActiveConnections()) {
+            if (this.authSwitcher.isSystemBusy) {
+                this.logger.warn(
+                    "[System] Connection disconnection detected, but system is switching/recovering, rejecting new request."
+                );
+                return this._sendErrorResponse(
+                    res,
+                    503,
+                    "Server undergoing internal maintenance (account switching/recovery), please try again later."
+                );
+            }
+
+            this.logger.error(
+                "❌ [System] Browser WebSocket connection disconnected! Possible process crash. Attempting recovery..."
+            );
+            this.authSwitcher.isSystemBusy = true;
+            try {
+                await this.browserManager.launchOrSwitchContext(this.currentAuthIndex);
+                this.logger.info(`✅ [System] Browser successfully recovered!`);
+            } catch (error) {
+                this.logger.error(`❌ [System] Browser auto-recovery failed: ${error.message}`);
+                return this._sendErrorResponse(
+                    res,
+                    503,
+                    "Service temporarily unavailable: Backend browser instance crashed and cannot auto-recover, please contact administrator."
+                );
+            } finally {
+                this.authSwitcher.isSystemBusy = false;
+            }
+        }
+
+        if (this.authSwitcher.isSystemBusy) {
+            this.logger.warn(
+                "[System] Received new request, but system is switching/recovering, rejecting new request."
+            );
+            return this._sendErrorResponse(
+                res,
+                503,
+                "Server undergoing internal maintenance (account switching/recovery), please try again later."
+            );
+        }
+        if (this.browserManager) {
+            this.browserManager.notifyUserActivity();
+        }
         // Handle usage-based account switching
-        const isGenerativeRequest
-            = req.method === "POST"
-            && (req.path.includes("generateContent")
-                || req.path.includes("streamGenerateContent"));
+        const isGenerativeRequest =
+            req.method === "POST" &&
+            (req.path.includes("generateContent") || req.path.includes("streamGenerateContent"));
 
         if (isGenerativeRequest) {
             const usageCount = this.authSwitcher.incrementUsageCount();
             if (usageCount > 0) {
-                const rotationCountText = this.config.switchOnUses > 0
-                    ? `${usageCount}/${this.config.switchOnUses}`
-                    : `${usageCount}`;
+                const rotationCountText =
+                    this.config.switchOnUses > 0 ? `${usageCount}/${this.config.switchOnUses}` : `${usageCount}`;
                 this.logger.info(
                     `[Request] Generation request - account rotation count: ${rotationCountText} (Current account: ${this.currentAuthIndex})`
                 );
@@ -91,12 +127,52 @@ class RequestHandler {
 
         res.on("close", () => {
             if (!res.writableEnded) {
-                this.logger.warn(
-                    `[Request] Client closed request #${requestId} connection prematurely.`
-                );
+                this.logger.warn(`[Request] Client closed request #${requestId} connection prematurely.`);
                 this._cancelBrowserRequest(requestId);
             }
         });
+
+        const proxyRequest = this._buildProxyRequest(req, requestId);
+        proxyRequest.is_generative = isGenerativeRequest;
+        const messageQueue = this.connectionRegistry.createMessageQueue(requestId);
+
+        const wantsStreamByHeader = req.headers.accept && req.headers.accept.includes("text/event-stream");
+        const wantsStreamByPath = req.path.includes(":streamGenerateContent");
+        const wantsStream = wantsStreamByHeader || wantsStreamByPath;
+
+        try {
+            if (wantsStream) {
+                this.logger.info(
+                    `[Request] Client enabled streaming (${this.serverSystem.streamingMode}), entering streaming processing mode...`
+                );
+                if (this.serverSystem.streamingMode === "fake") {
+                    await this._handlePseudoStreamResponse(proxyRequest, messageQueue, req, res);
+                } else {
+                    await this._handleRealStreamResponse(proxyRequest, messageQueue, res);
+                }
+            } else {
+                proxyRequest.streaming_mode = "fake";
+                await this._handleNonStreamResponse(proxyRequest, messageQueue, res);
+            }
+        } catch (error) {
+            this._handleRequestError(error, res);
+        } finally {
+            this.connectionRegistry.removeMessageQueue(requestId);
+            if (this.needsSwitchingAfterRequest) {
+                this.logger.info(
+                    `[Auth] Rotation count reached switching threshold (${this.authSwitcher.usageCount}/${this.config.switchOnUses}), will automatically switch account in background...`
+                );
+                this.authSwitcher.switchToNextAuth().catch(err => {
+                    this.logger.error(`[Auth] Background account switching task failed: ${err.message}`);
+                });
+                this.needsSwitchingAfterRequest = false;
+            }
+        }
+    }
+
+    // Process OpenAI format requests
+    async processOpenAIRequest(req, res) {
+        const requestId = this._generateRequestId();
 
         // Check browser connection
         if (!this.connectionRegistry.hasActiveConnections()) {
@@ -140,55 +216,9 @@ class RequestHandler {
                 "Server undergoing internal maintenance (account switching/recovery), please try again later."
             );
         }
-
-        const proxyRequest = this._buildProxyRequest(req, requestId);
-        proxyRequest.is_generative = isGenerativeRequest;
-        const messageQueue = this.connectionRegistry.createMessageQueue(requestId);
-
-        const wantsStreamByHeader
-            = req.headers.accept && req.headers.accept.includes("text/event-stream");
-        const wantsStreamByPath = req.path.includes(":streamGenerateContent");
-        const wantsStream = wantsStreamByHeader || wantsStreamByPath;
-
-        try {
-            if (wantsStream) {
-                this.logger.info(
-                    `[Request] Client enabled streaming (${this.serverSystem.streamingMode}), entering streaming processing mode...`
-                );
-                if (this.serverSystem.streamingMode === "fake") {
-                    await this._handlePseudoStreamResponse(
-                        proxyRequest,
-                        messageQueue,
-                        req,
-                        res
-                    );
-                } else {
-                    await this._handleRealStreamResponse(proxyRequest, messageQueue, res);
-                }
-            } else {
-                proxyRequest.streaming_mode = "fake";
-                await this._handleNonStreamResponse(proxyRequest, messageQueue, res);
-            }
-        } catch (error) {
-            this._handleRequestError(error, res);
-        } finally {
-            this.connectionRegistry.removeMessageQueue(requestId);
-            if (this.needsSwitchingAfterRequest) {
-                this.logger.info(
-                    `[Auth] Rotation count reached switching threshold (${this.authSwitcher.usageCount}/${this.config.switchOnUses}), will automatically switch account in background...`
-                );
-                this.authSwitcher.switchToNextAuth()
-                    .catch(err => {
-                        this.logger.error(`[Auth] Background account switching task failed: ${err.message}`);
-                    });
-                this.needsSwitchingAfterRequest = false;
-            }
+        if (this.browserManager) {
+            this.browserManager.notifyUserActivity();
         }
-    }
-
-    // Process OpenAI format requests
-    async processOpenAIRequest(req, res) {
-        const requestId = this._generateRequestId();
         const isOpenAIStream = req.body.stream === true;
         const model = req.body.model || "gemini-2.5-flash-lite";
         const systemStreamMode = this.serverSystem.streamingMode;
@@ -197,9 +227,8 @@ class RequestHandler {
         // Handle usage counting
         const usageCount = this.authSwitcher.incrementUsageCount();
         if (usageCount > 0) {
-            const rotationCountText = this.config.switchOnUses > 0
-                ? `${usageCount}/${this.config.switchOnUses}`
-                : `${usageCount}`;
+            const rotationCountText =
+                this.config.switchOnUses > 0 ? `${usageCount}/${this.config.switchOnUses}` : `${usageCount}`;
             this.logger.info(
                 `[Request] OpenAI generation request - account rotation count: ${rotationCountText} (Current account: ${this.currentAuthIndex})`
             );
@@ -214,16 +243,10 @@ class RequestHandler {
             googleBody = await this.formatConverter.translateOpenAIToGoogle(req.body);
         } catch (error) {
             this.logger.error(`[Adapter] OpenAI request translation failed: ${error.message}`);
-            return this._sendErrorResponse(
-                res,
-                400,
-                "Invalid OpenAI request format."
-            );
+            return this._sendErrorResponse(res, 400, "Invalid OpenAI request format.");
         }
 
-        const googleEndpoint = useRealStream
-            ? "streamGenerateContent"
-            : "generateContent";
+        const googleEndpoint = useRealStream ? "streamGenerateContent" : "generateContent";
         const proxyRequest = {
             body: JSON.stringify(googleBody),
             headers: { "Content-Type": "application/json" },
@@ -248,11 +271,7 @@ class RequestHandler {
                     );
 
                     // Send standard HTTP error response
-                    this._sendErrorResponse(
-                        res,
-                        initialMessage.status || 500,
-                        initialMessage.message
-                    );
+                    this._sendErrorResponse(res, initialMessage.status || 500, initialMessage.message);
 
                     // Handle account switch without sending callback to client (response is closed)
                     await this.authSwitcher.handleRequestFailureAndSwitch(initialMessage, null);
@@ -266,12 +285,11 @@ class RequestHandler {
                     this.authSwitcher.failureCount = 0;
                 }
 
-                res.status(200)
-                    .set({
-                        "Cache-Control": "no-cache",
-                        Connection: "keep-alive",
-                        "Content-Type": "text/event-stream",
-                    });
+                res.status(200).set({
+                    "Cache-Control": "no-cache",
+                    Connection: "keep-alive",
+                    "Content-Type": "text/event-stream",
+                });
                 this.logger.info(`[Adapter] OpenAI streaming response (Real Mode) started...`);
                 await this._streamOpenAIResponse(messageQueue, res, model);
             } else {
@@ -280,11 +298,7 @@ class RequestHandler {
                 if (!result.success) {
                     // Send standard HTTP error response for both streaming and non-streaming
                     // if the error happens before the stream starts.
-                    this._sendErrorResponse(
-                        res,
-                        result.error.status || 500,
-                        result.error.message
-                    );
+                    this._sendErrorResponse(res, result.error.status || 500, result.error.message);
 
                     // Handle account switch without sending callback to client
                     await this.authSwitcher.handleRequestFailureAndSwitch(result.error, null);
@@ -292,19 +306,17 @@ class RequestHandler {
                 }
 
                 if (this.authSwitcher.failureCount > 0) {
-                    this.logger.info(
-                        `✅ [Auth] OpenAI interface request successful - failure count reset to 0`
-                    );
+                    this.logger.info(`✅ [Auth] OpenAI interface request successful - failure count reset to 0`);
                     this.authSwitcher.failureCount = 0;
                 }
 
-                if (isOpenAIStream) { // Fake stream
-                    res.status(200)
-                        .set({
-                            "Cache-Control": "no-cache",
-                            Connection: "keep-alive",
-                            "Content-Type": "text/event-stream",
-                        });
+                if (isOpenAIStream) {
+                    // Fake stream
+                    res.status(200).set({
+                        "Cache-Control": "no-cache",
+                        Connection: "keep-alive",
+                        "Content-Type": "text/event-stream",
+                    });
                     this.logger.info(`[Adapter] OpenAI streaming response (Fake Mode) started...`);
                     let fullBody = "";
                     let streaming = true;
@@ -316,14 +328,12 @@ class RequestHandler {
                         }
                         if (message.data) fullBody += message.data;
                     }
-                    const translatedChunk = this.formatConverter.translateGoogleToOpenAIStream(
-                        fullBody,
-                        model
-                    );
+                    const translatedChunk = this.formatConverter.translateGoogleToOpenAIStream(fullBody, model);
                     if (translatedChunk) res.write(translatedChunk);
                     res.write("data: [DONE]\n\n");
                     this.logger.info("[Adapter] Fake mode: Complete content sent at once.");
-                } else { // Non-stream
+                } else {
+                    // Non-stream
                     await this._sendOpenAINonStreamResponse(messageQueue, res, model);
                 }
             }
@@ -335,10 +345,9 @@ class RequestHandler {
                 this.logger.info(
                     `[Auth] Rotation count reached switching threshold, will automatically switch account in background...`
                 );
-                this.authSwitcher.switchToNextAuth()
-                    .catch(err => {
-                        this.logger.error(`[Auth] Background account switching task failed: ${err.message}`);
-                    });
+                this.authSwitcher.switchToNextAuth().catch(err => {
+                    this.logger.error(`[Auth] Background account switching task failed: ${err.message}`);
+                });
                 this.needsSwitchingAfterRequest = false;
             }
         }
@@ -352,10 +361,7 @@ class RequestHandler {
         this.logger.info("[Request] Entering pseudo-stream mode...");
 
         // Per user request, convert the backend call to non-streaming.
-        proxyRequest.path = proxyRequest.path.replace(
-            ":streamGenerateContent",
-            ":generateContent"
-        );
+        proxyRequest.path = proxyRequest.path.replace(":streamGenerateContent", ":generateContent");
         if (proxyRequest.query_params && proxyRequest.query_params.alt) {
             delete proxyRequest.query_params.alt;
         }
@@ -391,11 +397,7 @@ class RequestHandler {
                     );
 
                     // Send standard HTTP error response
-                    this._sendErrorResponse(
-                        res,
-                        result.error.status || 500,
-                        result.error.message
-                    );
+                    this._sendErrorResponse(res, result.error.status || 500, result.error.message);
 
                     // Handle account switch without sending callback to client
                     await this.authSwitcher.handleRequestFailureAndSwitch(result.error, null);
@@ -429,7 +431,9 @@ class RequestHandler {
                 const candidate = googleResponse.candidates?.[0];
 
                 if (candidate && candidate.content && Array.isArray(candidate.content.parts)) {
-                    this.logger.info("[Request] Splitting full Gemini response into 'thought' and 'content' chunks for pseudo-stream.");
+                    this.logger.info(
+                        "[Request] Splitting full Gemini response into 'thought' and 'content' chunks for pseudo-stream."
+                    );
 
                     const thinkingParts = candidate.content.parts.filter(p => p.thought === true);
                     const contentParts = candidate.content.parts.filter(p => p.thought !== true);
@@ -438,13 +442,15 @@ class RequestHandler {
                     // Send thinking part first
                     if (thinkingParts.length > 0) {
                         const thinkingResponse = {
-                            candidates: [{
-                                content: {
-                                    parts: thinkingParts,
-                                    role,
+                            candidates: [
+                                {
+                                    content: {
+                                        parts: thinkingParts,
+                                        role,
+                                    },
+                                    // We don't include finishReason here
                                 },
-                                // We don't include finishReason here
-                            }],
+                            ],
                             // We don't include usageMetadata here
                         };
                         res.write(`data: ${JSON.stringify(thinkingResponse)}\n\n`);
@@ -454,14 +460,16 @@ class RequestHandler {
                     // Then send content part
                     if (contentParts.length > 0) {
                         const contentResponse = {
-                            candidates: [{
-                                content: {
-                                    parts: contentParts,
-                                    role,
+                            candidates: [
+                                {
+                                    content: {
+                                        parts: contentParts,
+                                        role,
+                                    },
+                                    finishReason: candidate.finishReason,
+                                    // Other candidate fields can be preserved if needed
                                 },
-                                finishReason: candidate.finishReason,
-                                // Other candidate fields can be preserved if needed
-                            }],
+                            ],
                             usageMetadata: googleResponse.usageMetadata,
                         };
                         res.write(`data: ${JSON.stringify(contentResponse)}\n\n`);
@@ -469,21 +477,27 @@ class RequestHandler {
                     } else if (candidate.finishReason) {
                         // If there's no content but a finish reason, send an empty content message with it
                         const finalResponse = {
-                            candidates: [{
-                                content: { parts: [], role },
-                                finishReason: candidate.finishReason,
-                            }],
+                            candidates: [
+                                {
+                                    content: { parts: [], role },
+                                    finishReason: candidate.finishReason,
+                                },
+                            ],
                             usageMetadata: googleResponse.usageMetadata,
                         };
                         res.write(`data: ${JSON.stringify(finalResponse)}\n\n`);
                     }
                 } else if (fullData) {
                     // Fallback for responses without candidates or parts, or if parsing fails
-                    this.logger.warn("[Request] Response structure not recognized for splitting, sending as a single chunk.");
+                    this.logger.warn(
+                        "[Request] Response structure not recognized for splitting, sending as a single chunk."
+                    );
                     res.write(`data: ${fullData}\n\n`);
                 }
             } catch (e) {
-                this.logger.error(`[Request] Failed to parse and split Gemini response: ${e.message}. Sending raw data.`);
+                this.logger.error(
+                    `[Request] Failed to parse and split Gemini response: ${e.message}. Sending raw data.`
+                );
                 if (fullData) {
                     res.write(`data: ${fullData}\n\n`);
                 }
@@ -506,9 +520,7 @@ class RequestHandler {
             if (!res.writableEnded) {
                 res.end();
             }
-            this.logger.info(
-                `[Request] Response processing ended, request ID: ${proxyRequest.request_id}`
-            );
+            this.logger.info(`[Request] Response processing ended, request ID: ${proxyRequest.request_id}`);
         }
     }
 
@@ -518,21 +530,14 @@ class RequestHandler {
         const headerMessage = await messageQueue.dequeue();
 
         if (headerMessage.event_type === "error") {
-            if (
-                headerMessage.message
-                && headerMessage.message.includes("The user aborted a request")
-            ) {
+            if (headerMessage.message && headerMessage.message.includes("The user aborted a request")) {
                 this.logger.info(
                     `[Request] Request #${proxyRequest.request_id} was properly cancelled by user, not counted in failure statistics.`
                 );
             } else {
                 this.logger.error(`[Request] Request failed, will be counted in failure statistics.`);
                 await this.authSwitcher.handleRequestFailureAndSwitch(headerMessage, null);
-                return this._sendErrorResponse(
-                    res,
-                    headerMessage.status,
-                    headerMessage.message
-                );
+                return this._sendErrorResponse(res, headerMessage.status, headerMessage.message);
             }
             if (!res.writableEnded) res.end();
             return;
@@ -564,12 +569,10 @@ class RequestHandler {
             }
             try {
                 if (lastChunk.startsWith("data: ")) {
-                    const jsonString = lastChunk.substring(6)
-                        .trim();
+                    const jsonString = lastChunk.substring(6).trim();
                     if (jsonString) {
                         const lastResponse = JSON.parse(jsonString);
-                        const finishReason
-                            = lastResponse.candidates?.[0]?.finishReason || "UNKNOWN";
+                        const finishReason = lastResponse.candidates?.[0]?.finishReason || "UNKNOWN";
                         this.logger.info(
                             `✅ [Request] Response ended, reason: ${finishReason}, request ID: ${proxyRequest.request_id}`
                         );
@@ -598,20 +601,12 @@ class RequestHandler {
             if (!result.success) {
                 // If retries failed, handle the failure (e.g., switch account)
                 if (result.error.message?.includes("The user aborted a request")) {
-                    this.logger.info(
-                        `[Request] Request #${proxyRequest.request_id} was properly cancelled by user.`
-                    );
+                    this.logger.info(`[Request] Request #${proxyRequest.request_id} was properly cancelled by user.`);
                 } else {
-                    this.logger.error(
-                        `[Request] Browser returned error after retries: ${result.error.message}`
-                    );
+                    this.logger.error(`[Request] Browser returned error after retries: ${result.error.message}`);
                     await this.authSwitcher.handleRequestFailureAndSwitch(result.error, null);
                 }
-                return this._sendErrorResponse(
-                    res,
-                    result.error.status || 500,
-                    result.error.message
-                );
+                return this._sendErrorResponse(res, result.error.status || 500, result.error.message);
             }
 
             // On success, reset failure count if needed
@@ -639,8 +634,7 @@ class RequestHandler {
 
             try {
                 const fullResponse = JSON.parse(fullBody);
-                const finishReason
-                    = fullResponse.candidates?.[0]?.finishReason || "UNKNOWN";
+                const finishReason = fullResponse.candidates?.[0]?.finishReason || "UNKNOWN";
                 this.logger.info(
                     `✅ [Request] Response ended, reason: ${finishReason}, request ID: ${proxyRequest.request_id}`
                 );
@@ -648,8 +642,7 @@ class RequestHandler {
                 // Ignore JSON parsing errors for finish reason
             }
 
-            res
-                .status(headerMessage.status || 200)
+            res.status(headerMessage.status || 200)
                 .type("application/json")
                 .send(fullBody || "{}");
 
@@ -668,9 +661,7 @@ class RequestHandler {
 
             const candidate = parsedBody.candidates?.[0];
             if (candidate?.content?.parts) {
-                const imagePartIndex = candidate.content.parts.findIndex(
-                    p => p.inlineData
-                );
+                const imagePartIndex = candidate.content.parts.findIndex(p => p.inlineData);
 
                 if (imagePartIndex > -1) {
                     this.logger.info(
@@ -707,11 +698,13 @@ class RequestHandler {
                 const initialMessage = await messageQueue.dequeue();
 
                 if (initialMessage.event_type === "timeout") {
-                    throw new Error(JSON.stringify({
-                        event_type: "error",
-                        message: "Request timed out waiting for browser response.",
-                        status: 504,
-                    }));
+                    throw new Error(
+                        JSON.stringify({
+                            event_type: "error",
+                            message: "Request timed out waiting for browser response.",
+                            status: 504,
+                        })
+                    );
                 }
 
                 if (initialMessage.event_type === "error") {
@@ -797,12 +790,8 @@ class RequestHandler {
         // Parse and convert to OpenAI format
         try {
             const googleResponse = JSON.parse(fullBody);
-            const openAIResponse = this.formatConverter.convertGoogleToOpenAINonStream(
-                googleResponse,
-                model
-            );
-            res.type("application/json")
-                .send(JSON.stringify(openAIResponse));
+            const openAIResponse = this.formatConverter.convertGoogleToOpenAINonStream(googleResponse, model);
+            res.type("application/json").send(JSON.stringify(openAIResponse));
         } catch (e) {
             this.logger.error(`[Request] Failed to parse response: ${e.message}`);
             this._sendErrorResponse(res, 500, "Failed to parse backend response");
@@ -812,10 +801,9 @@ class RequestHandler {
     _setResponseHeaders(res, headerMessage) {
         res.status(headerMessage.status || 200);
         const headers = headerMessage.headers || {};
-        Object.entries(headers)
-            .forEach(([name, value]) => {
-                if (name.toLowerCase() !== "content-length") res.set(name, value);
-            });
+        Object.entries(headers).forEach(([name, value]) => {
+            if (name.toLowerCase() !== "content-length") res.set(name, value);
+        });
     }
 
     _handleRequestError(error, res) {
@@ -826,8 +814,7 @@ class RequestHandler {
             if (!res.writableEnded) res.end();
         } else {
             this.logger.error(`[Request] Request processing error: ${error.message}`);
-            const status = error.message.toLowerCase()
-                .includes("timeout") ? 504 : 500;
+            const status = error.message.toLowerCase().includes("timeout") ? 504 : 500;
             this._sendErrorResponse(res, status, `Proxy error: ${error.message}`);
         }
     }
@@ -841,8 +828,7 @@ class RequestHandler {
                     status: "SERVICE_UNAVAILABLE",
                 },
             };
-            res
-                .status(status || 500)
+            res.status(status || 500)
                 .type("application/json")
                 .send(JSON.stringify(errorPayload));
         }
@@ -870,9 +856,7 @@ class RequestHandler {
                 })
             );
         } else {
-            this.logger.warn(
-                `[Request] Unable to send cancel instruction: No available WebSocket connection.`
-            );
+            this.logger.warn(`[Request] Unable to send cancel instruction: No available WebSocket connection.`);
         }
     }
 
@@ -882,17 +866,15 @@ class RequestHandler {
         const bodyObj = req.body;
 
         // Force thinking for native Google requests
-        if (
-            this.serverSystem.forceThinking
-            && req.method === "POST"
-            && bodyObj
-            && bodyObj.contents
-        ) {
+        if (this.serverSystem.forceThinking && req.method === "POST" && bodyObj && bodyObj.contents) {
             if (!bodyObj.generationConfig) {
                 bodyObj.generationConfig = {};
             }
-            if (!bodyObj.generationConfig.thinkingConfig || !bodyObj.generationConfig.thinkingConfig.includeThoughts
-                || bodyObj.generationConfig.thinkingConfig.includeThoughts === false) {
+            if (
+                !bodyObj.generationConfig.thinkingConfig ||
+                !bodyObj.generationConfig.thinkingConfig.includeThoughts ||
+                bodyObj.generationConfig.thinkingConfig.includeThoughts === false
+            ) {
                 this.logger.info(
                     `[Proxy] ⚠️ Force thinking enabled and client did not provide config, injecting thinkingConfig. (Google Native)`
                 );
@@ -909,10 +891,10 @@ class RequestHandler {
 
         // Force web search and URL context for native Google requests
         if (
-            (this.serverSystem.forceWebSearch || this.serverSystem.forceUrlContext)
-            && req.method === "POST"
-            && bodyObj
-            && bodyObj.contents
+            (this.serverSystem.forceWebSearch || this.serverSystem.forceUrlContext) &&
+            req.method === "POST" &&
+            bodyObj &&
+            bodyObj.contents
         ) {
             if (!bodyObj.tools) {
                 bodyObj.tools = [];
@@ -948,9 +930,7 @@ class RequestHandler {
 
             if (toolsToAdd.length > 0) {
                 this.logger.info(
-                    `[Proxy] ⚠️ Forcing tools enabled, injecting: [${toolsToAdd.join(
-                        ", "
-                    )}] (Google Native)`
+                    `[Proxy] ⚠️ Forcing tools enabled, injecting: [${toolsToAdd.join(", ")}] (Google Native)`
                 );
             }
         }
@@ -981,9 +961,7 @@ class RequestHandler {
     }
 
     _generateRequestId() {
-        return `req_${Date.now()}_${Math.random()
-            .toString(36)
-            .substring(2, 11)}`;
+        return `req_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
     }
 }
 
