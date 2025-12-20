@@ -56,6 +56,10 @@ class ProxyServerSystem extends EventEmitter {
 
     async start(initialAuthIndex = null) {
         this.logger.info("[System] Starting flexible startup process...");
+        await this._startHttpServer();
+        await this._startWebSocketServer();
+        this.logger.info(`[System] Proxy server system startup complete.`);
+
         const allAvailableIndices = this.authSource.availableIndices;
 
         if (allAvailableIndices.length === 0) {
@@ -86,6 +90,7 @@ class ProxyServerSystem extends EventEmitter {
         for (const index of startupOrder) {
             try {
                 this.logger.info(`[System] Attempting to start service with account #${index}...`);
+                this.requestHandler.authSwitcher.isSystemBusy = true;
                 await this.browserManager.launchOrSwitchContext(index);
 
                 isStarted = true;
@@ -93,6 +98,8 @@ class ProxyServerSystem extends EventEmitter {
                 break;
             } catch (error) {
                 this.logger.error(`[System] ❌ Failed to start with account #${index}. Reason: ${error.message}`);
+            } finally {
+                this.requestHandler.authSwitcher.isSystemBusy = false;
             }
         }
 
@@ -103,9 +110,6 @@ class ProxyServerSystem extends EventEmitter {
             // Don't throw an error, just proceed to start servers
         }
 
-        await this._startHttpServer();
-        await this._startWebSocketServer();
-        this.logger.info(`[System] Proxy server system startup complete.`);
         this.emit("started");
     }
 
