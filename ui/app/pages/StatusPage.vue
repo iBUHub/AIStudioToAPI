@@ -127,8 +127,7 @@
 <span class="label">{{ t('usageCount') }}</span>: <span>{{ state.usageCount }}</span>
 <span class="label">{{ t('consecutiveFailures') }}</span>: <span>{{ state.failureCount }}</span>
 <span class="label">{{ t('totalScanned') }}</span>: <span>{{ totalScannedAccountsText }}</span><template v-for="account in state.accountDetails" :key="account.index">
-<span class="label account-label" style="padding-left: 20px;">{{ t('account') }} {{ account.index }}</span>: {{ account.name }}
-</template><template v-if="state.accountDetails.length === 0">
+<span class="label account-label" style="padding-left: 20px;">{{ t('account') }} {{ account.index }}</span>: {{ account.name }}</template><template v-if="state.accountDetails.length === 0">
 </template><span class="label">{{ t('formatErrors') }}</span>: <span>{{ formatErrorsText }}</span></template></pre>
             </div>
             <div id="actions-section" style="margin-top: 2em">

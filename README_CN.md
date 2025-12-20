@@ -201,4 +201,4 @@ sudo docker compose down
 ### ©️ 版权 / 署名
 
 - 原始作品 Copyright © [Ellinav](https://github.com/Ellinav)
-- 修改与新增部分 Copyright © 2024 [iBenzene](https://github.com/iBenzene) 及其他贡献者
+- 修改与新增部分 Copyright © 2024 [iBenzene](https://github.com/iBenzene)、[bbbugg](https://github.com/bbbugg) 及其他贡献者

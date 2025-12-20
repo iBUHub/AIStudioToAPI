@@ -201,4 +201,4 @@ This project is a fork of [**ais2api**](https://github.com/Ellinav/ais2api) by [
 ### ©️ Copyright / Attribution
 
 - Original work Copyright © [Ellinav](https://github.com/Ellinav)
-- Modifications and additions Copyright © 2024 [iBenzene](https://github.com/iBenzene) and contributors
+- Modifications and additions Copyright © 2024 [iBenzene](https://github.com/iBenzene)、[bbbugg](https://github.com/bbbugg) and contributors
