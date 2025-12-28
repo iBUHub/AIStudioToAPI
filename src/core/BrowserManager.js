@@ -353,16 +353,22 @@ class BrowserManager {
 
                 // 2. Intelligent Scan for "Launch" or "Rocket" button
                 const targetInfo = await currentPage.evaluate(() => {
-                    // Optimized precise check
+                    const MIN_Y = 400;
+                    const MAX_Y = 800;
+                    const isValidPosition = rect =>
+                        rect.width > 0 && rect.height > 0 && rect.top > MIN_Y && rect.top < MAX_Y;
+
+                    // Optimized precise check - ONLY match button elements, not <p> tags
                     try {
                         const preciseCandidates = Array.from(
                             // eslint-disable-next-line no-undef
-                            document.querySelectorAll(".interaction-modal p, .interaction-modal button")
+                            document.querySelectorAll(".interaction-modal button, .interaction-modal [role='button']")
                         );
                         for (const el of preciseCandidates) {
                             if (/Launch|rocket_launch/i.test((el.innerText || "").trim())) {
                                 const rect = el.getBoundingClientRect();
-                                if (rect.width > 0 && rect.height > 0) {
+                                // Also apply Y range check for precise detection
+                                if (isValidPosition(rect)) {
                                     return {
                                         found: true,
                                         tagName: el.tagName,
@@ -376,9 +382,6 @@ class BrowserManager {
                     } catch (e) {
                         /* empty */
                     }
-
-                    const MIN_Y = 400;
-                    const MAX_Y = 800;
 
                     const isValid = rect => rect.width > 0 && rect.height > 0 && rect.top > MIN_Y && rect.top < MAX_Y;
 
