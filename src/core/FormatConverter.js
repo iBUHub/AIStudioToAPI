@@ -17,7 +17,12 @@ class FormatConverter {
     constructor(logger, serverSystem) {
         this.logger = logger;
         this.serverSystem = serverSystem;
-        this.streamUsage = null; // Cache for usage data in streams
+        // Cache for storing thoughtSignature from Gemini responses
+        // This allows multi-turn tool calling without client-side support
+        // Key: tool_call_id, Value: thoughtSignature
+        this.thoughtSignatureCache = new Map();
+        // Max cache size to prevent memory leak
+        this.maxCacheSize = 1000;
     }
 
     /**
@@ -26,7 +31,6 @@ class FormatConverter {
     async translateOpenAIToGoogle(openaiBody) {
         // eslint-disable-line no-unused-vars
         this.logger.info("[Adapter] Starting translation of OpenAI request format to Google format...");
-        this.streamUsage = null; // Reset usage cache for new stream
 
         let systemInstruction = null;
         const googleContents = [];
@@ -43,7 +47,79 @@ class FormatConverter {
 
         // Convert conversation messages
         const conversationMessages = openaiBody.messages.filter(msg => msg.role !== "system");
+
+        // Build toolIdToInfoMap from assistant messages with tool_calls
+        // This maps tool_call_id to {name, thoughtSignature} for later use when processing tool responses
+        const toolIdToInfoMap = new Map();
         for (const message of conversationMessages) {
+            if (message.role === "assistant" && message.tool_calls && Array.isArray(message.tool_calls)) {
+                for (const toolCall of message.tool_calls) {
+                    if (toolCall.id && toolCall.function?.name) {
+                        // Extract thoughtSignature from tool_call_id if encoded (format: call_xxx::sig::base64)
+                        let signature = toolCall.thoughtSignature || null;
+                        let cleanId = toolCall.id;
+
+                        if (toolCall.id.includes("::sig::")) {
+                            const parts = toolCall.id.split("::sig::");
+                            cleanId = parts[0];
+                            try {
+                                signature = Buffer.from(parts[1], "base64").toString("utf-8");
+                                this.logger.info(`[Adapter] Extracted thoughtSignature from tool_call_id: ${cleanId}`);
+                            } catch (e) {
+                                this.logger.warn(`[Adapter] Failed to decode thoughtSignature from tool_call_id`);
+                            }
+                        }
+
+                        // Fallback: try server cache
+                        if (!signature) {
+                            const cachedSignature = this.thoughtSignatureCache.get(toolCall.id);
+                            if (cachedSignature) {
+                                signature = cachedSignature;
+                                this.logger.info(
+                                    `[Adapter] Retrieved thoughtSignature from server cache for: ${toolCall.id}`
+                                );
+                            }
+                        }
+
+                        toolIdToInfoMap.set(toolCall.id, {
+                            name: toolCall.function.name,
+                            thoughtSignature: signature,
+                        });
+                    }
+                }
+            }
+        }
+
+        // Buffer for accumulating consecutive tool message parts
+        // Gemini requires alternating roles, so consecutive tool messages must be merged
+        let pendingToolParts = [];
+
+        // Helper function to flush pending tool parts as a single user message
+        // For Gemini 3: thoughtSignature should only be on the FIRST functionResponse part
+        const flushToolParts = () => {
+            if (pendingToolParts.length > 0) {
+                // Ensure only the first part has thoughtSignature
+                let signatureAttached = false;
+                for (const part of pendingToolParts) {
+                    if (part.thoughtSignature) {
+                        if (signatureAttached) {
+                            // Remove signature from subsequent parts
+                            delete part.thoughtSignature;
+                        } else {
+                            signatureAttached = true;
+                        }
+                    }
+                }
+                googleContents.push({
+                    parts: pendingToolParts,
+                    role: "user", // Gemini expects function responses as "user" role
+                });
+                pendingToolParts = [];
+            }
+        };
+
+        for (let msgIndex = 0; msgIndex < conversationMessages.length; msgIndex++) {
+            const message = conversationMessages[msgIndex];
             const googleParts = [];
 
             // Handle tool role (function execution result)
@@ -58,23 +134,35 @@ class FormatConverter {
                     responseContent = { result: message.content };
                 }
 
-                googleParts.push({
+                // Resolve function name and thoughtSignature from toolIdToInfoMap
+                const toolInfo = message.tool_call_id && toolIdToInfoMap.get(message.tool_call_id);
+                const functionName = message.name || toolInfo?.name || "unknown_function";
+
+                // Add to buffer instead of pushing directly
+                // This allows merging consecutive tool messages into one user message
+                const functionResponsePart = {
                     functionResponse: {
-                        name: message.name || message.tool_call_id || "unknown_function",
+                        name: functionName,
                         response: responseContent,
                     },
-                });
-
-                googleContents.push({
-                    parts: googleParts,
-                    role: "user", // Gemini expects function responses as "user" role
-                });
+                };
+                // Pass back thoughtSignature from the corresponding tool_call for Gemini 3
+                if (toolInfo?.thoughtSignature) {
+                    functionResponsePart.thoughtSignature = toolInfo.thoughtSignature;
+                    this.logger.info(`[Adapter] Attached thoughtSignature to functionResponse: ${functionName}`);
+                }
+                pendingToolParts.push(functionResponsePart);
                 continue;
             }
+
+            // Before processing non-tool messages, flush any pending tool parts
+            flushToolParts();
 
             // Handle assistant messages with tool_calls
             if (message.role === "assistant" && message.tool_calls && Array.isArray(message.tool_calls)) {
                 // Convert OpenAI tool_calls to Gemini functionCall
+                // For Gemini 3: thoughtSignature should only be on the FIRST functionCall part
+                let signatureAttachedToCall = false;
                 for (const toolCall of message.tool_calls) {
                     if (toolCall.type === "function" && toolCall.function) {
                         let args;
@@ -87,31 +175,35 @@ class FormatConverter {
                             args = {};
                         }
 
-                        googleParts.push({
+                        const functionCallPart = {
                             functionCall: {
                                 args,
                                 name: toolCall.function.name,
                             },
-                        });
+                        };
+                        // Pass back thoughtSignature only on the FIRST functionCall
+                        if (toolCall.thoughtSignature && !signatureAttachedToCall) {
+                            functionCallPart.thoughtSignature = toolCall.thoughtSignature;
+                            signatureAttachedToCall = true;
+                            this.logger.info(
+                                `[Adapter] Attached thoughtSignature to first functionCall: ${toolCall.function.name}`
+                            );
+                        }
+                        googleParts.push(functionCallPart);
                     }
                 }
-
-                if (googleParts.length > 0) {
-                    googleContents.push({
-                        parts: googleParts,
-                        role: "model",
-                    });
-                }
-                continue;
+                // Do not continue here; allow falling through to handle potential text content (e.g. thoughts)
             }
 
             // Handle regular text content
-            if (typeof message.content === "string") {
-                googleParts.push({ text: message.content });
+            if (typeof message.content === "string" && message.content.length > 0) {
+                const textPart = { text: message.content };
+                googleParts.push(textPart);
             } else if (Array.isArray(message.content)) {
                 for (const part of message.content) {
                     if (part.type === "text") {
-                        googleParts.push({ text: part.text });
+                        const textPart = { text: part.text };
+                        googleParts.push(textPart);
                     } else if (part.type === "image_url" && part.image_url) {
                         const dataUrl = part.image_url.url;
                         const match = dataUrl.match(/^data:(image\/.*?);base64,(.*)$/);
@@ -162,7 +254,11 @@ class FormatConverter {
             }
         }
 
+        // Flush any remaining tool parts after the loop
+        flushToolParts();
+
         // Build Google request
+        this.logger.info(`[Adapter] Debug: googleContents length = ${googleContents.length}`);
         const googleRequest = {
             contents: googleContents,
             ...(systemInstruction && {
@@ -236,15 +332,47 @@ class FormatConverter {
             const functionDeclarations = [];
 
             // Helper function to convert OpenAI parameter types to Gemini format (uppercase)
+            // Also handles nullable types like ["string", "null"] -> type: "STRING", nullable: true
             const convertParameterTypes = obj => {
                 if (!obj || typeof obj !== "object") return obj;
 
                 const result = Array.isArray(obj) ? [] : {};
 
                 for (const key of Object.keys(obj)) {
-                    if (key === "type" && typeof obj[key] === "string") {
-                        // Convert lowercase type to uppercase for Gemini
-                        result[key] = obj[key].toUpperCase();
+                    if (key === "type") {
+                        if (Array.isArray(obj[key])) {
+                            // Handle nullable types like ["string", "null"]
+                            const types = obj[key];
+                            const nonNullTypes = types.filter(t => t !== "null");
+                            const hasNull = types.includes("null");
+
+                            if (hasNull) {
+                                result.nullable = true;
+                            }
+
+                            if (nonNullTypes.length === 1) {
+                                // Single non-null type: use it directly
+                                result[key] = nonNullTypes[0].toUpperCase();
+                            } else if (nonNullTypes.length > 1) {
+                                // Multiple non-null types: keep as array (uppercase)
+                                result[key] = nonNullTypes.map(t => t.toUpperCase());
+                            } else {
+                                // Only null type, default to STRING
+                                result[key] = "STRING";
+                            }
+                        } else if (typeof obj[key] === "string") {
+                            // Convert lowercase type to uppercase for Gemini
+                            result[key] = obj[key].toUpperCase();
+                        } else {
+                            result[key] = obj[key];
+                        }
+                    } else if (key === "additionalProperties") {
+                        // Handle additionalProperties: can be boolean or schema object
+                        if (typeof obj[key] === "object" && obj[key] !== null) {
+                            result[key] = convertParameterTypes(obj[key]);
+                        } else {
+                            result[key] = obj[key];
+                        }
                     } else if (typeof obj[key] === "object" && obj[key] !== null) {
                         result[key] = convertParameterTypes(obj[key]);
                     } else {
@@ -369,6 +497,11 @@ class FormatConverter {
      */
     translateGoogleToOpenAIStream(googleChunk, modelName = "gemini-2.5-flash-lite", streamState = null) {
         console.log(`[Adapter] Received Google chunk: ${googleChunk}`);
+
+        // Ensure streamState exists to properly track tool call indices
+        if (!streamState) {
+            streamState = {}; // Create default state to avoid index conflicts
+        }
         if (!googleChunk || googleChunk.trim() === "") {
             return null;
         }
@@ -398,8 +531,9 @@ class FormatConverter {
         const created = streamState ? streamState.created : Math.floor(Date.now() / 1000);
 
         // Cache usage data whenever it arrives.
-        if (googleResponse.usageMetadata) {
-            this.streamUsage = this._parseUsage(googleResponse);
+        // Store in streamState to prevent concurrency issues between requests
+        if (googleResponse.usageMetadata && streamState) {
+            streamState.usage = this._parseUsage(googleResponse);
         }
 
         const candidate = googleResponse.candidates?.[0];
@@ -448,7 +582,17 @@ class FormatConverter {
                 } else if (part.functionCall) {
                     // Convert Gemini functionCall to OpenAI tool_calls format
                     const funcCall = part.functionCall;
-                    const toolCallId = `call_${this._generateRequestId()}`;
+                    let toolCallId = `call_${this._generateRequestId()}`;
+
+                    // Encode thoughtSignature into tool_call_id for reliable pass-through
+                    // Format: call_xxx::sig::base64(signature)
+                    if (part.thoughtSignature) {
+                        const encodedSig = Buffer.from(part.thoughtSignature).toString("base64");
+                        toolCallId = `${toolCallId}::sig::${encodedSig}`;
+                        this.logger.info(`[Adapter] Encoded thoughtSignature into tool_call_id for: ${funcCall.name}`);
+                        // Also cache for backward compatibility
+                        this._cacheThoughtSignature(toolCallId, part.thoughtSignature);
+                    }
 
                     // Track tool call index for multiple function calls
                     const toolCallIndex = streamState?.toolCallIndex ?? 0;
@@ -456,17 +600,17 @@ class FormatConverter {
                         streamState.toolCallIndex = toolCallIndex + 1;
                     }
 
-                    delta.tool_calls = [
-                        {
-                            function: {
-                                arguments: JSON.stringify(funcCall.args || {}),
-                                name: funcCall.name,
-                            },
-                            id: toolCallId,
-                            index: toolCallIndex,
-                            type: "function",
+                    const toolCallObj = {
+                        function: {
+                            arguments: JSON.stringify(funcCall.args || {}),
+                            name: funcCall.name,
                         },
-                    ];
+                        id: toolCallId,
+                        index: toolCallIndex,
+                        type: "function",
+                    };
+
+                    delta.tool_calls = [toolCallObj];
 
                     // Mark that we have a function call for finish_reason
                     if (streamState) {
@@ -539,9 +683,8 @@ class FormatConverter {
             };
 
             // Attach cached usage data to the very last message
-            if (this.streamUsage) {
-                finalResponse.usage = this.streamUsage;
-                this.streamUsage = null;
+            if (streamState && streamState.usage) {
+                finalResponse.usage = streamState.usage;
             }
             chunksToSend.push(`data: ${JSON.stringify(finalResponse)}\n\n`);
         }
@@ -593,14 +736,28 @@ class FormatConverter {
                 } else if (part.functionCall) {
                     // Convert Gemini functionCall to OpenAI tool_calls format
                     const funcCall = part.functionCall;
-                    tool_calls.push({
+                    let toolCallId = `call_${this._generateRequestId()}`;
+
+                    // Encode thoughtSignature into tool_call_id for reliable pass-through
+                    // Format: call_xxx::sig::base64(signature)
+                    if (part.thoughtSignature) {
+                        const encodedSig = Buffer.from(part.thoughtSignature).toString("base64");
+                        toolCallId = `${toolCallId}::sig::${encodedSig}`;
+                        this.logger.info(`[Adapter] Encoded thoughtSignature into tool_call_id for: ${funcCall.name}`);
+                        // Also cache for backward compatibility
+                        this._cacheThoughtSignature(toolCallId, part.thoughtSignature);
+                    }
+
+                    const toolCallObj = {
                         function: {
                             arguments: JSON.stringify(funcCall.args || {}),
                             name: funcCall.name,
                         },
-                        id: `call_${this._generateRequestId()}`,
+                        id: toolCallId,
+                        index: tool_calls.length,
                         type: "function",
-                    });
+                    };
+                    tool_calls.push(toolCallObj);
                     this.logger.info(`[Adapter] Converted Gemini functionCall to OpenAI tool_calls: ${funcCall.name}`);
                 }
             }
@@ -645,6 +802,21 @@ class FormatConverter {
             object: "chat.completion",
             usage: this._parseUsage(googleResponse),
         };
+    }
+
+    /**
+     * Cache thoughtSignature for server-side storage
+     * This allows multi-turn tool calling without client-side support
+     */
+    _cacheThoughtSignature(toolCallId, signature) {
+        // Clean up old entries if cache is too large
+        if (this.thoughtSignatureCache.size >= this.maxCacheSize) {
+            // Remove oldest entries (first 100)
+            const keysToDelete = Array.from(this.thoughtSignatureCache.keys()).slice(0, 100);
+            keysToDelete.forEach(key => this.thoughtSignatureCache.delete(key));
+            this.logger.info(`[Adapter] Cleaned up ${keysToDelete.length} old entries from thoughtSignature cache`);
+        }
+        this.thoughtSignatureCache.set(toolCallId, signature);
     }
 
     _generateRequestId() {
