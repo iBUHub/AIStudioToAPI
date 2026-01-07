@@ -478,7 +478,7 @@ const deleteUser = async () => {
     }
 
     const targetAccount = state.accountDetails.find(acc => acc.index === targetIndex);
-    const accountSuffix = targetAccount ? ` (${targetAccount.name})` : "";
+    const accountSuffix = targetAccount ? ` (${getAccountDisplayName(targetAccount)})` : "";
 
     // Helper function to perform the actual deletion
     const performDelete = async (forceDelete = false) => {
@@ -648,7 +648,7 @@ const switchSpecificAccount = () => {
     }
 
     const targetAccount = state.accountDetails.find(acc => acc.index === targetIndex);
-    const accountSuffix = targetAccount ? ` (${targetAccount.name})` : "";
+    const accountSuffix = targetAccount ? ` (${getAccountDisplayName(targetAccount)})` : "";
 
     ElMessageBox.confirm(`${t("confirmSwitch")} #${targetIndex}${accountSuffix}?`, {
         cancelButtonText: t("cancel"),
