@@ -60,6 +60,65 @@ class FormatConverter {
     }
 
     /**
+     * Sanitize tools in native Gemini requests by removing unsupported JSON Schema fields
+     * like $schema and additionalProperties
+     * @param {object} geminiBody - Gemini format request body
+     * @returns {object} - Modified request body with sanitized tools
+     */
+    sanitizeGeminiTools(geminiBody) {
+        if (!geminiBody || !geminiBody.tools || !Array.isArray(geminiBody.tools)) {
+            return geminiBody;
+        }
+
+        // [DEBUG] Log original Gemini tools before sanitization
+        this.logger.info(`[Adapter] Debug: original Gemini tools = ${JSON.stringify(geminiBody.tools, null, 2)}`);
+
+        // Helper function to recursively sanitize schema:
+        // 1. Remove unsupported fields ($schema, additionalProperties)
+        // 2. Convert lowercase type to uppercase (object -> OBJECT, string -> STRING, etc.)
+        const sanitizeSchema = obj => {
+            if (!obj || typeof obj !== "object") return obj;
+
+            const result = Array.isArray(obj) ? [] : {};
+
+            for (const key of Object.keys(obj)) {
+                // Skip fields not supported by Gemini API
+                if (key === "$schema" || key === "additionalProperties") {
+                    continue;
+                }
+
+                if (key === "type" && typeof obj[key] === "string") {
+                    // Convert lowercase type to uppercase for Gemini
+                    result[key] = obj[key].toUpperCase();
+                } else if (typeof obj[key] === "object" && obj[key] !== null) {
+                    result[key] = sanitizeSchema(obj[key]);
+                } else {
+                    result[key] = obj[key];
+                }
+            }
+
+            return result;
+        };
+
+        // Process each tool
+        for (const tool of geminiBody.tools) {
+            if (tool.functionDeclarations && Array.isArray(tool.functionDeclarations)) {
+                for (const funcDecl of tool.functionDeclarations) {
+                    if (funcDecl.parameters) {
+                        funcDecl.parameters = sanitizeSchema(funcDecl.parameters);
+                    }
+                }
+            }
+        }
+
+        // [DEBUG] Log sanitized Gemini tools after processing
+        this.logger.info(`[Adapter] Debug: sanitized Gemini tools = ${JSON.stringify(geminiBody.tools, null, 2)}`);
+
+        this.logger.info("[Adapter] Sanitized Gemini tools (removed unsupported fields, converted type to uppercase)");
+        return geminiBody;
+    }
+
+    /**
      * Convert OpenAI request format to Google Gemini format
      */
     async translateOpenAIToGoogle(openaiBody) {
@@ -67,6 +126,10 @@ class FormatConverter {
         this.logger.info("[Adapter] Starting translation of OpenAI request format to Google format...");
         // [DEBUG] Log incoming messages for troubleshooting
         this.logger.info(`[Adapter] Debug: incoming messages = ${JSON.stringify(openaiBody.messages, null, 2)}`);
+        // [DEBUG] Log original OpenAI tools
+        if (openaiBody.tools && openaiBody.tools.length > 0) {
+            this.logger.info(`[Adapter] Debug: original OpenAI tools = ${JSON.stringify(openaiBody.tools, null, 2)}`);
+        }
 
         let systemInstruction = null;
         const googleContents = [];
@@ -322,6 +385,12 @@ class FormatConverter {
                 const result = Array.isArray(obj) ? [] : {};
 
                 for (const key of Object.keys(obj)) {
+                    // Skip fields not supported by Gemini API
+                    // Gemini only supports: type, description, enum, items, properties, required, nullable
+                    if (key === "$schema" || key === "additionalProperties") {
+                        continue;
+                    }
+
                     if (key === "type") {
                         if (Array.isArray(obj[key])) {
                             // Handle nullable types like ["string", "null"]
@@ -346,13 +415,6 @@ class FormatConverter {
                         } else if (typeof obj[key] === "string") {
                             // Convert lowercase type to uppercase for Gemini
                             result[key] = obj[key].toUpperCase();
-                        } else {
-                            result[key] = obj[key];
-                        }
-                    } else if (key === "additionalProperties") {
-                        // Handle additionalProperties: can be boolean or schema object
-                        if (typeof obj[key] === "object" && obj[key] !== null) {
-                            result[key] = convertParameterTypes(obj[key]);
                         } else {
                             result[key] = obj[key];
                         }
@@ -467,6 +529,13 @@ class FormatConverter {
             { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
             { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
         ];
+
+        // [DEBUG] Log full request body for troubleshooting 400 errors
+        if (googleRequest.tools && googleRequest.tools.length > 0) {
+            this.logger.info(
+                `[Adapter] Debug: Sanitized Openai tools = ${JSON.stringify(googleRequest.tools, null, 2)}`
+            );
+        }
 
         this.logger.info("[Adapter] Translation complete.");
         return googleRequest;
