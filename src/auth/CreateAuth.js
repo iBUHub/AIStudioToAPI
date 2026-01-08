@@ -92,9 +92,9 @@ class CreateAuth {
             const xvfb = spawn("Xvfb", [display, "-screen", "0", screenResolution, "+extension", "RANDR"]);
             xvfb.on("error", err => {
                 if (err.code === "ENOENT") {
-                    this.logger.error("[VNC] Xvfb is not installed. VNC functionality requires Xvfb to be available.");
+                    this.logger.error("[VNC:Xvfb] Not installed. VNC functionality requires Xvfb to be available.");
                 } else {
-                    this.logger.error(`[VNC] Xvfb spawn error: ${err.message}`);
+                    this.logger.error(`[VNC:Xvfb] Spawn error: ${err.message}`);
                 }
             });
             xvfb.stderr.on("data", data => {
@@ -103,10 +103,10 @@ class CreateAuth {
                 if (msg.includes("_XSERVTransmkdir: ERROR: euid != 0")) {
                     return;
                 }
-                this.logger.info(`[Xvfb] ${msg}`);
+                this.logger.info(`[VNC:Xvfb] ${msg}`);
             });
             xvfb.once("close", code => {
-                this.logger.warn(`[Xvfb] Process exited with code ${code}. Triggering cleanup.`);
+                this.logger.warn(`[VNC:Xvfb] Process exited with code ${code}. Triggering cleanup.`);
                 cleanup("xvfb_closed");
             });
             sessionResources.xvfb = xvfb;
@@ -128,11 +128,9 @@ class CreateAuth {
             ]);
             x11vnc.on("error", err => {
                 if (err.code === "ENOENT") {
-                    this.logger.error(
-                        "[VNC] x11vnc is not installed. VNC functionality requires x11vnc to be available."
-                    );
+                    this.logger.error("[VNC:x11vnc] Not installed. VNC functionality requires x11vnc to be available.");
                 } else {
-                    this.logger.error(`[VNC] x11vnc spawn error: ${err.message}`);
+                    this.logger.error(`[VNC:x11vnc] Spawn error: ${err.message}`);
                 }
             });
             x11vnc.stderr.on("data", data => {
@@ -146,10 +144,10 @@ class CreateAuth {
                 ) {
                     return; // Ignore these messages
                 }
-                this.logger.error(`[x11vnc Error] ${msg}`);
+                this.logger.error(`[VNC:x11vnc] ${msg}`);
             });
             x11vnc.once("close", code => {
-                this.logger.warn(`[x11vnc] Process exited with code ${code}. Triggering cleanup.`);
+                this.logger.warn(`[VNC:x11vnc] Process exited with code ${code}. Triggering cleanup.`);
                 cleanup("x11vnc_closed");
             });
             sessionResources.x11vnc = x11vnc;
@@ -162,25 +160,25 @@ class CreateAuth {
             websockify.on("error", err => {
                 if (err.code === "ENOENT") {
                     this.logger.error(
-                        "[VNC] websockify is not installed. VNC functionality requires websockify to be available."
+                        "[VNC:Proxy] websockify not installed. VNC functionality requires websockify to be available."
                     );
                 } else {
-                    this.logger.error(`[VNC] websockify spawn error: ${err.message}`);
+                    this.logger.error(`[VNC:Proxy] websockify spawn error: ${err.message}`);
                 }
             });
-            websockify.stdout.on("data", data => this.logger.info(`[websockify] ${data.toString()}`));
+            websockify.stdout.on("data", data => this.logger.info(`[VNC:Proxy] ${data.toString()}`));
             websockify.stderr.on("data", data => {
                 const msg = data.toString();
 
                 // Downgrade ECONNRESET to INFO as it's expected during cleanup
                 if (msg.includes("read ECONNRESET")) {
-                    this.logger.info(`[VNC Proxy] Connection reset, likely during cleanup: ${msg.trim()}`);
+                    this.logger.info(`[VNC:Proxy] Connection reset, likely during cleanup: ${msg.trim()}`);
                     return;
                 }
 
                 // Log normal connection info as INFO
                 if (msg.includes("Plain non-SSL (ws://) WebSocket connection") || msg.includes("Path: '/vnc'")) {
-                    this.logger.info(`[websockify] ${msg.trim()}`);
+                    this.logger.info(`[VNC:Proxy] ${msg.trim()}`);
                     return;
                 }
 
@@ -195,10 +193,10 @@ class CreateAuth {
                 ) {
                     return;
                 }
-                this.logger.error(`[websockify Error] ${msg}`);
+                this.logger.error(`[VNC:Proxy] ${msg}`);
             });
             websockify.once("close", code => {
-                this.logger.warn(`[websockify] Process exited with code ${code}. Triggering cleanup.`);
+                this.logger.warn(`[VNC:Proxy] Process exited with code ${code}. Triggering cleanup.`);
                 cleanup("websockify_closed");
             });
             sessionResources.websockify = websockify;
@@ -252,7 +250,7 @@ class CreateAuth {
 
             sessionResources.timeoutHandle = setTimeout(
                 () => {
-                    this.logger.warn("[VNC-Timeout] Session has been idle for 10 minutes. Automatically cleaning up.");
+                    this.logger.warn("[VNC] Session has been idle for 10 minutes. Automatically cleaning up.");
                     cleanup("idle_timeout");
                 },
                 10 * 60 * 1000
