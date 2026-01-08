@@ -418,7 +418,12 @@ class RequestHandler {
                         }
                         if (message.data) fullBody += message.data;
                     }
-                    const translatedChunk = this.formatConverter.translateGoogleToOpenAIStream(fullBody, model);
+                    const streamState = {};
+                    const translatedChunk = this.formatConverter.translateGoogleToOpenAIStream(
+                        fullBody,
+                        model,
+                        streamState
+                    );
                     if (translatedChunk) res.write(translatedChunk);
                     res.write("data: [DONE]\n\n");
                     this.logger.info("[Adapter] Fake mode: Complete content sent at once.");
@@ -838,7 +843,7 @@ class RequestHandler {
     }
 
     async _streamOpenAIResponse(messageQueue, res, model) {
-        const streamState = { inThought: false };
+        const streamState = {};
         let streaming = true;
 
         while (streaming) {

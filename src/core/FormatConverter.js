@@ -642,10 +642,9 @@ class FormatConverter {
                 id: streamId,
                 model: modelName,
                 object: "chat.completion.chunk",
-                usage: null,
             };
 
-            // Attach cached usage data to the very last message
+            // Attach cached usage data to the very last message (if available)
             if (streamState.usage) {
                 finalResponse.usage = streamState.usage;
             }
