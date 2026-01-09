@@ -1,6 +1,6 @@
 /**
  * File: src/utils/ConfigLoader.js
- * Description: Configuration loader that reads and validates system settings from config.json and environment variables
+ * Description: Configuration loader that reads and validates system settings from environment variables
  *
  * Maintainers: iBenzene, bbbugg
  * Original Author: Ellinav
@@ -11,7 +11,7 @@ const path = require("path");
 
 /**
  * Configuration Loader Module
- * Responsible for loading system configuration from config.json and environment variables
+ * Responsible for loading system configuration from environment variables
  */
 class ConfigLoader {
     constructor(logger) {
@@ -19,7 +19,7 @@ class ConfigLoader {
     }
 
     loadConfiguration() {
-        let config = {
+        const config = {
             apiKeys: [],
             apiKeySource: "Not set",
             browserExecutablePath: null,
@@ -36,17 +36,6 @@ class ConfigLoader {
             switchOnUses: 40,
             wsPort: 9998,
         };
-
-        const configPath = path.join(process.cwd(), "config.json");
-        try {
-            if (fs.existsSync(configPath)) {
-                const fileConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-                config = { ...config, ...fileConfig };
-                this.logger.info("[System] Configuration loaded from config.json.");
-            }
-        } catch (error) {
-            this.logger.warn(`[System] Unable to read or parse config.json: ${error.message}`);
-        }
 
         // Environment variable overrides
         if (process.env.PORT) config.httpPort = parseInt(process.env.PORT, 10) || config.httpPort;
@@ -76,7 +65,7 @@ class ConfigLoader {
 
         if (!rawCodes && config.immediateSwitchStatusCodes && Array.isArray(config.immediateSwitchStatusCodes)) {
             rawCodes = config.immediateSwitchStatusCodes.join(",");
-            codesSource = "config.json file or default value";
+            codesSource = "default value";
         }
 
         if (rawCodes && typeof rawCodes === "string") {
@@ -140,6 +129,9 @@ class ConfigLoader {
         this.logger.info(`  HTTP Server Port: ${config.httpPort}`);
         this.logger.info(`  Listening Address: ${config.host}`);
         this.logger.info(`  Streaming Mode: ${config.streamingMode}`);
+        this.logger.info(`  Force Thinking: ${config.forceThinking}`);
+        this.logger.info(`  Force Web Search: ${config.forceWebSearch}`);
+        this.logger.info(`  Force URL Context: ${config.forceUrlContext}`);
         this.logger.info(
             `  Usage-based Switch Threshold: ${
                 config.switchOnUses > 0 ? `Switch after every ${config.switchOnUses} requests` : "Disabled"
