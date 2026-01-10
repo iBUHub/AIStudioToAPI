@@ -1,0 +1,63 @@
+name: General Issue/Request
+description: Report an issue, make a suggestion, or ask for help (English)
+title: "[Feedback]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for your feedback! Whether you're reporting an issue, making a suggestion, or asking for help, please fill in the following information so we can better understand and assist you.
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Deployment Platform
+      description: Your deployment environment
+      options:
+        - Local - Windows
+        - Local - macOS
+        - Local - Linux
+        - Docker
+        - Claw
+        - Zeabur
+        - Other
+    validations:
+      required: false
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The version you are currently using
+      placeholder: "e.g., v0.2.11"
+    validations:
+      required: false
+
+  - type: input
+    id: client_tool
+    attributes:
+      label: Client/Tool
+      description: The client or tool you are using (if applicable)
+      placeholder: "e.g., NextChat / LobeChat / OpenCode / CLI (cURL) / Other"
+    validations:
+      required: false
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Issue/Request Description
+      description: Please describe in detail the issue you encountered, your suggestion, or the help you need
+      placeholder: Please describe in detail here...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs (Optional)
+      description: |
+        If reporting an issue, it's recommended to enable Debug Mode and provide relevant logs to help us diagnose the problem.
+        > ⚠️ **Note**: Please remove sensitive information (such as API Keys) from the logs. You can replace them with `******`.
+      render: text
+      placeholder: Paste relevant logs here (if any)...
+    validations:
+      required: false

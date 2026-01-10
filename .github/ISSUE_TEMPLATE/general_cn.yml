@@ -1,0 +1,63 @@
+name: 通用问题/请求
+description: 报告问题、提出建议或寻求帮助 (中文)
+title: "[反馈]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢您的反馈！无论是报告问题、提出建议还是寻求帮助，都请填写以下信息以便我们更好地理解和处理。
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: 部署平台
+      description: 您的部署环境
+      options:
+        - 本地 - Windows
+        - 本地 - macOS
+        - 本地 - Linux
+        - Docker
+        - Claw
+        - Zeabur
+        - 其他
+    validations:
+      required: false
+
+  - type: input
+    id: version
+    attributes:
+      label: 版本号
+      description: 您当前使用的版本
+      placeholder: "例如: v0.2.11"
+    validations:
+      required: false
+
+  - type: input
+    id: client_tool
+    attributes:
+      label: 客户端/工具
+      description: 您使用的客户端或工具（如适用）
+      placeholder: "例如: NextChat / LobeChat / OpenCode / 命令行 (cURL) / 其他"
+    validations:
+      required: false
+
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题/请求描述
+      description: 请详细描述您遇到的问题、提出的建议或需要的帮助
+      placeholder: 请在这里详细描述...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志信息（可选）
+      description: |
+        如果是报告问题，建议开启调试模式 (Debug Mode) 并提供相关日志，这有助于我们定位问题。
+        > ⚠️ **注意**: 请去除日志中的敏感信息（如 API Key），可以用 `******` 替代。
+      render: text
+      placeholder: 在这里粘贴相关日志（如有）...
+    validations:
+      required: false
