@@ -1,0 +1,124 @@
+name: Create Release
+run-name: Release ${{ github.ref_name }}
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+jobs:
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ===== Custom Release Body: Version and Released on are adjacent, blank line between Released on and Commits =====
+      - name: Build custom release body
+        if: startsWith(github.ref, 'refs/tags/')
+        id: notes
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const tag = context.ref.replace('refs/tags/', ''); // e.g. v0.1.1
+            const displayTag = tag.replace(/^v/, '');          // e.g. 0.1.1
+
+            // Simple semver parsing / comparison (x.y.z only)
+            function parseSemver(name) {
+              const m = name.match(/^v?(\d+)\.(\d+)\.(\d+)$/);
+              if (!m) return null;
+              return { major: +m[1], minor: +m[2], patch: +m[3] };
+            }
+            function cmp(a, b) {
+              if (a.major !== b.major) return a.major - b.major;
+              if (a.minor !== b.minor) return a.minor - b.minor;
+              return a.patch - b.patch;
+            }
+
+            const cur = parseSemver(tag);
+            if (!cur) {
+              core.warning(`Current tag ${tag} is not plain semver, fallback to release page link.`);
+            }
+
+            // Find the previous tag (the largest one that is less than current)
+            let previous = null;
+            if (cur) {
+              try {
+                const tags = await github.paginate(github.rest.repos.listTags, {
+                  owner, repo, per_page: 100,
+                });
+                const candidates = [];
+                for (const t of tags) {
+                  const name = t.name;
+                  if (name === tag) continue;
+                  const v = parseSemver(name);
+                  if (!v) continue;
+                  if (cmp(v, cur) < 0) candidates.push({ name, v });
+                }
+                if (candidates.length) {
+                  candidates.sort((a, b) => cmp(a.v, b.v));
+                  previous = candidates[candidates.length - 1].name;
+                }
+              } catch (e) {
+                core.warning(`listTags failed: ${e.message}`);
+              }
+            }
+
+            // Compare link (fallback to current release page if no previous version)
+            const compareUrl = previous
+              ? `https://github.com/${owner}/${repo}/compare/${previous}...${tag}`
+              : `https://github.com/${owner}/${repo}/releases/tag/${tag}`;
+
+            // Commit list (filter out merge commits)
+            let lines = [];
+            if (previous) {
+              try {
+                const cmpRes = await github.rest.repos.compareCommitsWithBasehead({
+                  owner, repo, basehead: `${previous}...${tag}`,
+                });
+                const commits = cmpRes.data.commits || [];
+                const filtered = commits.filter(c => {
+                  const isMergeByParents = (c.parents?.length || 1) > 1;
+                  const isMergeByMsg = /^Merge( |:)/.test(c.commit.message || '');
+                  return !isMergeByParents && !isMergeByMsg;
+                });
+                for (const c of filtered) {
+                  const sha = (c.sha || '').slice(0, 7);
+                  const msg = (c.commit?.message || '').split('\n')[0];
+                  if (msg && sha) lines.push(`- ${sha} ${msg}`);
+                }
+              } catch (e) {
+                core.warning(`compareCommits failed: ${e.message}`);
+              }
+            }
+
+            // Date (YYYY-MM-DD), bold, using small font; adjacent to title
+            const dateStr = new Date().toISOString().slice(0, 10);
+            const dateLine = `<sub>Released on <strong>${dateStr}</strong></sub>`;
+
+            // Title is a bold clickable link; adjacent to date (no blank line); blank line between date and Commits
+            let body = `[**Version ${displayTag} Changelog**](${compareUrl})\n${dateLine}\n\n`;
+            // Use <details> to make commit list collapsible by default
+            const commitContent = lines.length ? lines.join('\n') : '- Initial release';
+            body += `<details>\n<summary>Commits</summary>\n\n${commitContent}\n</details>\n`;
+
+            core.setOutput('body', body);
+
+      - name: Write notes to file
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          printf "%s" "${{ steps.notes.outputs.body }}" > RELEASE_BODY.md
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          name: ${{ github.ref_name }}
+          body_path: RELEASE_BODY.md
