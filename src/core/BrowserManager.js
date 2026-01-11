@@ -963,15 +963,14 @@ class BrowserManager {
 
         // This browser instance is temporary and specific to the VNC session.
         // It does NOT affect the main `this.browser` used for the API proxy.
+        // NOTE: Using minimal config (same as saveAuth.js) to avoid triggering
+        // "unsafe browser" warnings from Google. Only env is kept for DISPLAY.
         const vncBrowser = await firefox.launch({
-            args: this.launchArgs,
-            // Must be false for VNC to be visible.
             env: {
                 ...process.env,
                 ...extraArgs.env,
             },
             executablePath: this.browserExecutablePath,
-            firefoxUserPrefs: this.firefoxUserPrefs,
             headless: false,
         });
 
