@@ -224,6 +224,10 @@ class CreateAuth {
                 width: screenWidth,
             });
 
+            // NOTE: Removed privacyScript injection to match saveAuth.js behavior.
+            // This helps avoid triggering "unsafe browser" warnings from Google.
+
+            // Inject CSS to ensure full viewport usage
             await page.addInitScript(`
                 (function() {
                     const style = document.createElement("style");
