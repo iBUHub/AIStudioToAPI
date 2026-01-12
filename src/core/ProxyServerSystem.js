@@ -61,6 +61,7 @@ class ProxyServerSystem extends EventEmitter {
         this.logger.info(`[System] Proxy server system startup complete.`);
 
         const allAvailableIndices = this.authSource.availableIndices;
+        const allRotationIndices = this.authSource.getRotationIndices();
 
         if (allAvailableIndices.length === 0) {
             this.logger.warn("[System] No available authentication source. Starting in account binding mode.");
@@ -68,16 +69,27 @@ class ProxyServerSystem extends EventEmitter {
             return; // Exit early
         }
 
-        let startupOrder = [...allAvailableIndices];
-        if (initialAuthIndex && allAvailableIndices.includes(initialAuthIndex)) {
-            this.logger.info(`[System] Detected specified startup index #${initialAuthIndex}, will try it first.`);
-            startupOrder = [initialAuthIndex, ...allAvailableIndices.filter(i => i !== initialAuthIndex)];
-        } else {
-            if (initialAuthIndex) {
+        let startupOrder = allRotationIndices.length > 0 ? [...allRotationIndices] : [...allAvailableIndices];
+        const hasInitialAuthIndex = Number.isInteger(initialAuthIndex);
+        if (hasInitialAuthIndex) {
+            const canonicalInitialIndex = this.authSource.getCanonicalIndex(initialAuthIndex);
+            if (canonicalInitialIndex !== null && startupOrder.includes(canonicalInitialIndex)) {
+                if (canonicalInitialIndex !== initialAuthIndex) {
+                    this.logger.warn(
+                        `[System] Specified startup index #${initialAuthIndex} is a duplicate for the same email, using latest auth index #${canonicalInitialIndex} instead.`
+                    );
+                } else {
+                    this.logger.info(
+                        `[System] Detected specified startup index #${initialAuthIndex}, will try it first.`
+                    );
+                }
+                startupOrder = [canonicalInitialIndex, ...startupOrder.filter(i => i !== canonicalInitialIndex)];
+            } else {
                 this.logger.warn(
                     `[System] Specified startup index #${initialAuthIndex} is invalid or unavailable, will start in default order.`
                 );
             }
+        } else {
             this.logger.info(
                 `[System] No valid startup index specified, will try in default order [${startupOrder.join(", ")}].`
             );
@@ -121,6 +133,7 @@ class ProxyServerSystem extends EventEmitter {
                 "/health",
                 "/api/status",
                 "/api/accounts/current",
+                "/api/accounts/deduplicate",
                 "/api/settings/streaming-mode",
                 "/api/settings/force-thinking",
                 "/api/settings/force-web-search",

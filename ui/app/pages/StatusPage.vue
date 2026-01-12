@@ -111,7 +111,9 @@
 <span class="label">{{ t('currentAccount') }}</span>: #<span>{{ state.currentAuthIndex }}</span> (<span :class="currentAccountNameClass">{{ currentAccountName }}</span>)
 <span class="label">{{ t('usageCount') }}</span>: <span>{{ state.usageCount }}</span>
 <span class="label">{{ t('consecutiveFailures') }}</span>: <span>{{ state.failureCount }}</span>
-<span class="label">{{ t('totalScanned') }}</span>: <span>{{ totalScannedAccountsText }}</span><template v-for="account in state.accountDetails" :key="account.index">
+<span class="label">{{ t('totalScanned') }}</span>: <span>{{ totalScannedAccountsText }}</span>
+<span class="label">{{ t('dedupedAvailable') }}</span>: <span>{{ rotationAccountsText }}</span>
+<span class="label">{{ t('duplicateAuth') }}</span>: <span>{{ duplicateAuthText }}</span><template v-for="account in state.accountDetails" :key="account.index">
 <span class="label account-label" style="padding-left: 20px;">{{ t('account') }} {{ account.index }}</span>: {{ getAccountDisplayName(account) }}</template>
 <span class="label">{{ t('formatErrors') }}</span>: <span>{{ formatErrorsText }}</span></template></pre>
             </div>
@@ -190,6 +192,26 @@
                                 d="M818.93731 882.886003a64.030784 64.030784 0 0 1-63.948694 63.948693H294.295334a64.030784 64.030784 0 0 1-63.948693-63.948693V204.159692h588.590669v678.726311zM358.572391 89.396825a12.888248 12.888248 0 0 1 13.134519-13.134519h307.019401a12.888248 12.888248 0 0 1 13.13452 13.134519v38.500562h-333.28844z m652.539361 38.500562h-242.988616v-38.500562A89.643098 89.643098 0 0 0 678.726311 0H371.378547a89.643098 89.643098 0 0 0-89.396825 89.396825v38.500562H38.41847a38.582652 38.582652 0 1 0 0 77.083213h114.927049v677.987494a141.031906 141.031906 0 0 0 141.031906 141.031906h460.611191a141.031906 141.031906 0 0 0 141.031907-141.031906V204.159692h114.927048a38.500561 38.500561 0 0 0 38.500561-38.582652 37.761744 37.761744 0 0 0-38.500561-37.679653z m-486.469777 703.353535a38.500561 38.500561 0 0 0 38.582652-38.500561V382.871252a38.582652 38.582652 0 1 0-77.083213 0v409.879109a38.41847 38.41847 0 0 0 38.500561 38.500561z m-179.450376 0a38.500561 38.500561 0 0 0 38.500561-38.500561V382.871252a38.582652 38.582652 0 1 0-77.083213 0v409.879109a39.567741 39.567741 0 0 0 38.500561 38.500561z m359.064935 0a38.500561 38.500561 0 0 0 38.500561-38.500561V382.871252a38.582652 38.582652 0 1 0-77.083213 0v409.879109a38.500561 38.500561 0 0 0 38.500561 38.500561z"
                                 fill="currentColor"
                             />
+                        </svg>
+                    </button>
+                    <button
+                        class="btn-warning"
+                        :disabled="isBusy"
+                        :title="t('btnDeduplicateAuth')"
+                        @click="deduplicateAuth"
+                    >
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            width="24"
+                            height="24"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                        >
+                            <path d="M22 3H2l8 9v7l4 2v-9l8-9z" />
                         </svg>
                     </button>
                     <input
@@ -369,6 +391,7 @@ const state = reactive({
     browserConnected: false,
     currentAuthIndex: -1,
     debugModeEnabled: false,
+    duplicateIndicesRaw: [],
     failureCount: 0,
     forceThinkingEnabled: false,
     forceUrlContextEnabled: false,
@@ -384,6 +407,7 @@ const state = reactive({
     logCount: 0,
     logs: t("loading"),
     releaseUrl: null,
+    rotationIndicesRaw: [],
     selectedAccount: null,
     serviceConnected: false,
     streamingModeReal: false,
@@ -444,11 +468,21 @@ const formatErrorsText = computed(() => {
     return `[${indices.join(", ")}] (${t("total")}: ${indices.length})`;
 });
 
+const duplicateAuthText = computed(() => {
+    const indices = state.duplicateIndicesRaw || [];
+    return `[${indices.join(", ")}] (${t("total")}: ${indices.length})`;
+});
+
 const serviceConnectedClass = computed(() => (state.serviceConnected ? "status-ok" : "status-error"));
 
 const serviceConnectedText = computed(() => (state.serviceConnected ? t("running") : t("disconnected")));
 
 const streamingModeText = computed(() => (state.streamingModeReal ? t("real") : t("fake")));
+
+const rotationAccountsText = computed(() => {
+    const indices = state.rotationIndicesRaw || [];
+    return `[${indices.join(", ")}] (${t("total")}: ${indices.length})`;
+});
 
 const totalScannedAccountsText = computed(() => {
     const indices = state.initialIndicesRaw || [];
@@ -475,7 +509,11 @@ const getAccountDisplayName = account => {
     if (account.isInvalid) {
         return t("jsonFormatError");
     }
-    return account.name || t("unnamedAccount");
+    const name = account.name || t("unnamedAccount");
+    if (account.isDuplicate && account.canonicalIndex !== null && account.canonicalIndex !== undefined) {
+        return `${name} (${t("duplicateAuthHint", { index: account.canonicalIndex })})`;
+    }
+    return name;
 };
 
 const addUser = () => {
@@ -547,6 +585,56 @@ const deleteUser = async () => {
         type: "warning",
     })
         .then(() => performDelete(false))
+        .catch(e => {
+            if (e !== "cancel") {
+                console.error(e);
+            }
+        });
+};
+
+const deduplicateAuth = () => {
+    ElMessageBox.confirm(t("accountDedupConfirm"), t("warningTitle"), {
+        cancelButtonText: t("cancel"),
+        confirmButtonText: t("ok"),
+        lockScroll: false,
+        type: "warning",
+    })
+        .then(async () => {
+            const notification = ElNotification({
+                duration: 0,
+                message: t("operationInProgress"),
+                title: t("warningTitle"),
+                type: "warning",
+            });
+            state.isSwitchingAccount = true;
+            try {
+                const res = await fetch("/api/accounts/deduplicate", { method: "POST" });
+                const data = await res.json();
+
+                const removedIndicesText = Array.isArray(data.removedIndices)
+                    ? `[${data.removedIndices.join(", ")}]`
+                    : "[]";
+                const failedText = Array.isArray(data.failed) ? JSON.stringify(data.failed) : "";
+
+                const message = t(data.message, {
+                    ...data,
+                    failed: failedText,
+                    removedIndices: removedIndicesText,
+                });
+
+                if (res.ok) {
+                    ElMessage.success(message);
+                } else {
+                    ElMessage.error(message);
+                }
+            } catch (err) {
+                ElMessage.error(t("accountDedupFailed", { error: err.message || err }));
+            } finally {
+                state.isSwitchingAccount = false;
+                notification.close();
+                updateContent();
+            }
+        })
         .catch(e => {
             if (e !== "cancel") {
                 console.error(e);
@@ -734,7 +822,9 @@ const updateStatus = data => {
     state.logCount = data.logCount || 0;
     state.logs = data.logs || "";
     state.initialIndicesRaw = data.status.initialIndicesRaw;
+    state.rotationIndicesRaw = data.status.rotationIndicesRaw || [];
     state.invalidIndicesRaw = data.status.invalidIndicesRaw;
+    state.duplicateIndicesRaw = data.status.duplicateIndicesRaw || [];
     state.isSystemBusy = data.status.isSystemBusy;
 
     const isSelectedAccountValid = state.accountDetails.some(acc => acc.index === state.selectedAccount);
@@ -1030,6 +1120,10 @@ pre {
         // Danger button uses error color on hover
         &.btn-danger:hover:not(:disabled) {
             color: @error-color;
+        }
+
+        &.btn-warning:hover:not(:disabled) {
+            color: @warning-color;
         }
 
         // Primary button uses primary color on hover (already default)

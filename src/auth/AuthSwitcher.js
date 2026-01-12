@@ -30,10 +30,14 @@ class AuthSwitcher {
     }
 
     getNextAuthIndex() {
-        const available = this.authSource.availableIndices;
+        const available = this.authSource.getRotationIndices();
         if (available.length === 0) return null;
 
-        const currentIndexInArray = available.indexOf(this.currentAuthIndex);
+        const currentCanonicalIndex =
+            this.currentAuthIndex >= 0
+                ? this.authSource.getCanonicalIndex(this.currentAuthIndex)
+                : this.currentAuthIndex;
+        const currentIndexInArray = available.indexOf(currentCanonicalIndex);
 
         if (currentIndexInArray === -1) {
             this.logger.warn(
@@ -47,7 +51,7 @@ class AuthSwitcher {
     }
 
     async switchToNextAuth() {
-        const available = this.authSource.availableIndices;
+        const available = this.authSource.getRotationIndices();
 
         if (available.length === 0) {
             throw new Error("No available authentication sources, cannot switch.");
@@ -86,7 +90,11 @@ class AuthSwitcher {
             }
 
             // Multi-account mode
-            const currentIndexInArray = available.indexOf(this.currentAuthIndex);
+            const currentCanonicalIndex =
+                this.currentAuthIndex >= 0
+                    ? this.authSource.getCanonicalIndex(this.currentAuthIndex)
+                    : this.currentAuthIndex;
+            const currentIndexInArray = available.indexOf(currentCanonicalIndex);
             const hasCurrentAccount = currentIndexInArray !== -1;
             const startIndex = hasCurrentAccount ? currentIndexInArray : 0;
             const originalStartAccount = hasCurrentAccount ? available[startIndex] : null;
@@ -94,7 +102,9 @@ class AuthSwitcher {
             this.logger.info("==================================================");
             this.logger.info(`🔄 [Auth] Multi-account mode: Starting intelligent account switching`);
             this.logger.info(`   • Current account: #${this.currentAuthIndex}`);
-            this.logger.info(`   • Available accounts: [${available.join(", ")}]`);
+            this.logger.info(
+                `   • Available accounts (dedup by email, keeping latest index): [${available.join(", ")}]`
+            );
             if (hasCurrentAccount) {
                 this.logger.info(`   • Starting from: #${originalStartAccount}`);
             } else {
@@ -191,12 +201,21 @@ class AuthSwitcher {
             this.logger.info("🔄 [Auth] Account switching in progress, skipping duplicate operation");
             return { reason: "Switch already in progress.", success: false };
         }
-        if (!this.authSource.availableIndices.includes(targetIndex)) {
+
+        const canonicalIndex = this.authSource.getCanonicalIndex(targetIndex);
+        if (canonicalIndex === null) {
             return {
                 reason: `Switch failed: Account #${targetIndex} invalid or does not exist.`,
                 success: false,
             };
         }
+
+        if (canonicalIndex !== targetIndex) {
+            this.logger.warn(
+                `[Auth] Requested account #${targetIndex} is a duplicate for the same email. Redirecting to latest auth index #${canonicalIndex}.`
+            );
+        }
+        targetIndex = canonicalIndex;
 
         this.isSystemBusy = true;
         try {

@@ -153,7 +153,7 @@ class RequestHandler {
         } catch (error) {
             this.logger.error(`❌ [System] Recovery failed: ${error.message}`);
 
-            if (wasDirectRecovery && this.authSource.availableIndices.length > 1) {
+            if (wasDirectRecovery && this.authSource.getRotationIndices().length > 1) {
                 this.logger.warn("⚠️ [System] Attempting to switch to alternative account...");
                 try {
                     const result = await this.authSwitcher.switchToNextAuth();

@@ -18,8 +18,16 @@ class AuthSource {
         this.logger = logger;
         this.authMode = "file";
         this.availableIndices = [];
+        // Indices used for rotation/switching (deduplicated by email, keeping the latest index per account)
+        this.rotationIndices = [];
+        // Duplicate auth indices detected (valid JSON but skipped from rotation due to same email)
+        this.duplicateIndices = [];
         this.initialIndices = [];
         this.accountNameMap = new Map();
+        // Map any valid index -> canonical (latest) index for the same account email
+        this.canonicalIndexMap = new Map();
+        // Duplicate groups (email -> kept + duplicates)
+        this.duplicateGroups = [];
         this.lastScannedIndices = "[]"; // Cache to track changes
 
         this.logger.info('[Auth] Using files in "configs/auth/" directory for authentication.');
@@ -96,13 +104,19 @@ class AuthSource {
     _preValidateAndFilter() {
         if (this.initialIndices.length === 0) {
             this.availableIndices = [];
+            this.rotationIndices = [];
+            this.duplicateIndices = [];
             this.accountNameMap.clear();
+            this.canonicalIndexMap.clear();
+            this.duplicateGroups = [];
             return;
         }
 
         const validIndices = [];
         const invalidSourceDescriptions = [];
         this.accountNameMap.clear(); // Clear old names before re-validating
+        this.canonicalIndexMap.clear();
+        this.duplicateGroups = [];
 
         for (const index of this.initialIndices) {
             // Iterate over initial to check all, not just previously available
@@ -131,6 +145,73 @@ class AuthSource {
         }
 
         this.availableIndices = validIndices.sort((a, b) => a - b);
+        this._buildRotationIndices();
+    }
+
+    _normalizeEmailKey(accountName) {
+        if (typeof accountName !== "string") return null;
+        const trimmed = accountName.trim();
+        if (!trimmed) return null;
+        // Conservative: only deduplicate when the name looks like an email address.
+        const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailPattern.test(trimmed)) return null;
+        return trimmed.toLowerCase();
+    }
+
+    _buildRotationIndices() {
+        this.rotationIndices = [];
+        this.duplicateIndices = [];
+        this.duplicateGroups = [];
+
+        const emailKeyToIndices = new Map();
+
+        for (const index of this.availableIndices) {
+            const accountName = this.accountNameMap.get(index);
+            const emailKey = this._normalizeEmailKey(accountName);
+
+            if (!emailKey) {
+                this.rotationIndices.push(index);
+                this.canonicalIndexMap.set(index, index);
+                continue;
+            }
+
+            const list = emailKeyToIndices.get(emailKey) || [];
+            list.push(index);
+            emailKeyToIndices.set(emailKey, list);
+        }
+
+        for (const [emailKey, indices] of emailKeyToIndices.entries()) {
+            indices.sort((a, b) => a - b);
+            const keptIndex = indices[indices.length - 1];
+            this.rotationIndices.push(keptIndex);
+
+            const duplicateIndices = [];
+            for (const index of indices) {
+                this.canonicalIndexMap.set(index, keptIndex);
+                if (index !== keptIndex) {
+                    duplicateIndices.push(index);
+                }
+            }
+
+            if (duplicateIndices.length > 0) {
+                this.duplicateIndices.push(...duplicateIndices);
+                this.duplicateGroups.push({
+                    email: emailKey,
+                    keptIndex,
+                    removedIndices: duplicateIndices,
+                });
+            }
+        }
+
+        this.rotationIndices = [...new Set(this.rotationIndices)].sort((a, b) => a - b);
+        this.duplicateIndices = [...new Set(this.duplicateIndices)].sort((a, b) => a - b);
+
+        if (this.duplicateIndices.length > 0) {
+            this.logger.warn(
+                `[Auth] Detected ${this.duplicateIndices.length} duplicate auth files (same email). ` +
+                    `Rotation will only use latest index per account: [${this.rotationIndices.join(", ")}].`
+            );
+        }
     }
 
     _getAuthContent(index) {
@@ -161,6 +242,20 @@ class AuthSource {
             this.logger.error(`[Auth] Failed to parse JSON content from authentication source #${index}: ${e.message}`);
             return null;
         }
+    }
+
+    getRotationIndices() {
+        return this.rotationIndices;
+    }
+
+    getCanonicalIndex(index) {
+        if (!Number.isInteger(index)) return null;
+        if (!this.availableIndices.includes(index)) return null;
+        return this.canonicalIndexMap.get(index) ?? index;
+    }
+
+    getDuplicateGroups() {
+        return this.duplicateGroups;
     }
 }
 

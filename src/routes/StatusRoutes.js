@@ -150,7 +150,7 @@ class StatusRoutes {
                     }
                 } else {
                     this.logger.info("[WebUI] Received manual request to switch to next account...");
-                    if (this.serverSystem.authSource.availableIndices.length <= 1) {
+                    if (this.serverSystem.authSource.getRotationIndices().length <= 1) {
                         return res.status(400).json({ message: "accountSwitchCancelledSingle" });
                     }
                     const result = await this.serverSystem.requestHandler._switchToNextAuth();
@@ -164,6 +164,90 @@ class StatusRoutes {
                 }
             } catch (error) {
                 res.status(500).json({ error: error.message, message: "accountSwitchFatal" });
+            }
+        });
+
+        app.post("/api/accounts/deduplicate", isAuthenticated, async (req, res) => {
+            try {
+                const { authSource, requestHandler } = this.serverSystem;
+
+                // Force refresh to ensure dedup metadata is up-to-date even if file list didn't change.
+                authSource.reloadAuthSources(true);
+
+                const duplicateGroups = authSource.getDuplicateGroups() || [];
+                if (duplicateGroups.length === 0) {
+                    return res.status(200).json({
+                        message: "accountDedupNoop",
+                        removedIndices: [],
+                        rotationIndices: authSource.getRotationIndices(),
+                    });
+                }
+
+                this.logger.warn(
+                    "[Auth] Dedup cleanup will keep the auth file with the highest index per email and delete the other duplicates. " +
+                        "Assumption: for the same account, auth indices are created in chronological order (higher index = newer)."
+                );
+
+                const currentAuthIndex = requestHandler.currentAuthIndex;
+                if (Number.isInteger(currentAuthIndex) && currentAuthIndex >= 0) {
+                    const canonicalCurrent = authSource.getCanonicalIndex(currentAuthIndex);
+                    if (canonicalCurrent !== null && canonicalCurrent !== currentAuthIndex) {
+                        this.logger.warn(
+                            `[Auth] Current active auth #${currentAuthIndex} is a duplicate. Switching to the latest auth #${canonicalCurrent} before cleanup.`
+                        );
+                        const switchResult = await requestHandler._switchToSpecificAuth(canonicalCurrent);
+                        if (!switchResult.success) {
+                            return res.status(409).json({
+                                message: "accountDedupSwitchFailed",
+                                reason: switchResult.reason,
+                            });
+                        }
+                    }
+                }
+
+                const removedIndices = [];
+                const failed = [];
+
+                for (const group of duplicateGroups) {
+                    const removed = Array.isArray(group.removedIndices) ? group.removedIndices : [];
+                    if (removed.length === 0) continue;
+
+                    this.logger.info(
+                        `[Auth] Dedup: email ${group.email} -> keep auth-${group.keptIndex}.json, delete [${removed
+                            .map(i => `auth-${i}.json`)
+                            .join(", ")}]`
+                    );
+
+                    for (const index of removed) {
+                        try {
+                            authSource.removeAuth(index);
+                            removedIndices.push(index);
+                        } catch (error) {
+                            failed.push({ error: error.message, index });
+                            this.logger.error(`[Auth] Dedup delete failed for auth-${index}.json: ${error.message}`);
+                        }
+                    }
+                }
+
+                authSource.reloadAuthSources(true);
+
+                if (failed.length > 0) {
+                    return res.status(500).json({
+                        failed,
+                        message: "accountDedupPartialFailed",
+                        removedIndices,
+                        rotationIndices: authSource.getRotationIndices(),
+                    });
+                }
+
+                return res.status(200).json({
+                    message: "accountDedupSuccess",
+                    removedIndices,
+                    rotationIndices: authSource.getRotationIndices(),
+                });
+            } catch (error) {
+                this.logger.error(`[Auth] Dedup cleanup failed: ${error.message}`);
+                return res.status(500).json({ error: error.message, message: "accountDedupFailed" });
             }
         });
 
@@ -340,12 +424,19 @@ class StatusRoutes {
         const { config, requestHandler, authSource, browserManager } = this.serverSystem;
         const initialIndices = authSource.initialIndices || [];
         const invalidIndices = initialIndices.filter(i => !authSource.availableIndices.includes(i));
+        const rotationIndices = authSource.getRotationIndices();
+        const duplicateIndices = authSource.duplicateIndices || [];
         const logs = this.logger.logBuffer || [];
         const accountNameMap = authSource.accountNameMap;
         const accountDetails = initialIndices.map(index => {
             const isInvalid = invalidIndices.includes(index);
             const name = isInvalid ? null : accountNameMap.get(index) || null;
-            return { index, isInvalid, name };
+
+            const canonicalIndex = isInvalid ? null : authSource.getCanonicalIndex(index);
+            const isDuplicate = canonicalIndex !== null && canonicalIndex !== index;
+            const isRotation = rotationIndices.includes(index);
+
+            return { canonicalIndex, index, isDuplicate, isInvalid, isRotation, name };
         });
 
         const currentAuthIndex = requestHandler.currentAuthIndex;
@@ -371,6 +462,7 @@ class StatusRoutes {
                 currentAccountName,
                 currentAuthIndex,
                 debugMode: LoggingService.isDebugEnabled(),
+                duplicateIndicesRaw: duplicateIndices,
                 failureCount,
                 forceThinking: this.serverSystem.forceThinking,
                 forceUrlContext: this.serverSystem.forceUrlContext,
@@ -382,6 +474,7 @@ class StatusRoutes {
                 initialIndicesRaw: initialIndices,
                 invalidIndicesRaw: invalidIndices,
                 isSystemBusy: requestHandler.isSystemBusy,
+                rotationIndicesRaw: rotationIndices,
                 streamingMode: this.serverSystem.streamingMode,
                 usageCount,
             },
