@@ -182,7 +182,14 @@ class FormatConverter {
                         const processedItems = responseContent.map(item => {
                             if (item.type === "text" && typeof item.text === "string") {
                                 try {
-                                    return JSON.parse(item.text);
+                                    const parsed = JSON.parse(item.text);
+                                    // Robustness Check: Only unwrap if it's a bare object (not null, not array, not primitive)
+                                    // This prevents "123" or "true" or "[]" from becoming inconsistent types in the list
+                                    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+                                        return parsed;
+                                    }
+                                    // If it's a primitive or array, keep it wrapped as text to avoid structure confusion
+                                    return { content: item.text, type: "text" };
                                 } catch {
                                     return { content: item.text, type: "text" }; // Wrap raw text
                                 }
@@ -201,17 +208,20 @@ class FormatConverter {
                                 // Single object: use it directly as the root response (Best for standard MCP)
                                 responseContent = processedItems[0];
                             } else {
-                                // Multiple/Mixed items: Gemini currently rejects mixed/multiple content in Structs.
-                                // Strategy (User Suggested): Stringify the entire array and wrap it in an object.
-                                // This preserves all data (including images) without breaking the Struct format.
+                                // Multiple/Mixed items configuration
                                 responseContent = { result: JSON.stringify(processedItems) };
                                 this.logger.info(
                                     `[Adapter] Multiple tool response items found (${processedItems.length}). Wrapping in JSON string to preserve all data.`
                                 );
                             }
                         } else {
-                            // Empty array or unforeseen structure, wrap original
-                            responseContent = { result: responseContent };
+                            // Empty array or unforeseen structure
+                            // To keep behavior consistent with the multiple-items case, stringify the array
+                            // (e.g. returns { result: "[]" })
+                            responseContent = { result: JSON.stringify(responseContent) };
+                            this.logger.info(
+                                `[Adapter] Empty/Unforeseen tool response structure. Wrapping in JSON string: ${JSON.stringify(responseContent)}`
+                            );
                         }
                     }
                 } catch (e) {
