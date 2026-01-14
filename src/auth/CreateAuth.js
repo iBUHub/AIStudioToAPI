@@ -152,7 +152,7 @@ class CreateAuth {
             });
             sessionResources.x11vnc = x11vnc;
 
-            await this._waitForPort(vncPort);
+            await this._waitForPort(vncPort, 30000);
             this.logger.info("[VNC] VNC server is ready.");
 
             this.logger.info(`[VNC] Starting websockify on port ${websockifyPort}...`);
@@ -201,7 +201,7 @@ class CreateAuth {
             });
             sessionResources.websockify = websockify;
 
-            await this._waitForPort(websockifyPort);
+            await this._waitForPort(websockifyPort, 30000);
             this.logger.info("[VNC] Websockify is ready.");
 
             this.logger.info("[VNC] Launching browser for VNC session...");
