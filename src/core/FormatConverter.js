@@ -501,15 +501,23 @@ class FormatConverter {
         // Helper function to convert OpenAI parameter types to Gemini format (uppercase)
         // Also handles nullable types like ["string", "null"] -> type: "STRING", nullable: true
         // This function is used for both tools and response_format schema conversion
-        const convertParameterTypes = obj => {
+        // param {boolean} isResponseSchema - If true, applies stricter rules (e.g. anyOf for unions) for Structured Outputs
+        const convertParameterTypes = (obj, isResponseSchema = false) => {
             if (!obj || typeof obj !== "object") return obj;
 
             const result = Array.isArray(obj) ? [] : {};
 
             for (const key of Object.keys(obj)) {
-                // Skip fields not supported by Gemini API
-                // Gemini only supports: type, description, enum, items, properties, required, nullable
-                if (key === "$schema" || key === "additionalProperties" || key === "strict") {
+                // 1. Filter out unsupported fields using a blacklist approach
+                // This allows potentially valid fields to pass through while blocking known problematic ones
+                const unsupportedKeys = ["$schema", "additionalProperties"];
+
+                if (isResponseSchema) {
+                    // For Structured Outputs: stricter filtering of metadata that causes 400 errors
+                    unsupportedKeys.push("title", "default", "examples", "$defs", "id", "patternProperties");
+                }
+
+                if (unsupportedKeys.includes(key)) {
                     continue;
                 }
 
@@ -528,8 +536,15 @@ class FormatConverter {
                             // Single non-null type: use it directly
                             result[key] = nonNullTypes[0].toUpperCase();
                         } else if (nonNullTypes.length > 1) {
-                            // Multiple non-null types: keep as array (uppercase)
-                            result[key] = nonNullTypes.map(t => t.toUpperCase());
+                            // Multiple non-null types: e.g. ["string", "integer"]
+                            if (isResponseSchema) {
+                                // For Response Schema: Gemini doesn't support array types, use anyOf
+                                result.anyOf = nonNullTypes.map(t => ({
+                                    type: t.toUpperCase(),
+                                }));
+                            } else {
+                                result[key] = nonNullTypes.map(t => t.toUpperCase());
+                            }
                         } else {
                             // Only null type, default to STRING
                             result[key] = "STRING";
@@ -538,12 +553,23 @@ class FormatConverter {
                         // Convert lowercase type to uppercase for Gemini
                         result[key] = obj[key].toUpperCase();
                     } else if (typeof obj[key] === "object" && obj[key] !== null) {
-                        result[key] = convertParameterTypes(obj[key]);
+                        result[key] = convertParameterTypes(obj[key], isResponseSchema);
                     } else {
                         result[key] = obj[key];
                     }
+                } else if (key === "enum") {
+                    // 2. Ensure all enum values are strings (Only for Response Schema)
+                    if (isResponseSchema) {
+                        if (Array.isArray(obj[key])) {
+                            result[key] = obj[key].map(String);
+                        }
+                        result["type"] = "STRING";
+                    } else {
+                        // For Tools: Allow original enum values
+                        result[key] = obj[key];
+                    }
                 } else if (typeof obj[key] === "object" && obj[key] !== null) {
-                    result[key] = convertParameterTypes(obj[key]);
+                    result[key] = convertParameterTypes(obj[key], isResponseSchema);
                 } else {
                     result[key] = obj[key];
                 }
@@ -573,7 +599,8 @@ class FormatConverter {
 
                     if (funcDef.parameters) {
                         // Convert parameter types from lowercase to uppercase
-                        declaration.parameters = convertParameterTypes(funcDef.parameters);
+                        // isResponseSchema = false for Tools
+                        declaration.parameters = convertParameterTypes(funcDef.parameters, false);
                     }
 
                     functionDeclarations.push(declaration);
@@ -631,8 +658,15 @@ class FormatConverter {
 
                 if (schema) {
                     try {
+                        this.logger.debug(`[Adapter] Debug: Converting OpenAI JSON Schema: ${JSON.stringify(schema)}`);
+
                         // Convert schema to Gemini format (reuse convertParameterTypes helper defined above)
-                        const convertedSchema = convertParameterTypes(schema);
+                        // isResponseSchema = true for Structured Output
+                        const convertedSchema = convertParameterTypes(schema, true);
+
+                        this.logger.debug(
+                            `[Adapter] Debug: Converted Gemini JSON Schema: ${JSON.stringify(convertedSchema)}`
+                        );
 
                         // Set Gemini config for structured output
                         generationConfig.responseMimeType = "application/json";
