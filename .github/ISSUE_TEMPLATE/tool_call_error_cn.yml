@@ -1,21 +1,21 @@
-name: 工具调用错误报告
-description: 报告工具调用相关的错误 (中文)
-title: "[工具错误]: "
+name: 工具调用/结构化输出报告
+description: 报告工具调用或结构化输出相关的错误 (中文)
+title: "[特性错误]: "
 labels: ["🐛 Bug"]
 body:
   - type: markdown
     attributes:
       value: |
-        如果您遇到了工具调用（Tool Calls）相关的错误，请务必按照以下格式提交一个新的 Issue，以便我们能够快速定位和解决问题。
+        如果您遇到了**工具调用（Tool Calls）**或**结构化输出（Structured Output/JSON Schema）**相关的错误，请务必按照以下格式提交一个新的 Issue，以便我们能够快速定位和解决问题。
 
-        **请注意：** 为了排查工具调用问题，我们需要您提供详细的上下文日志。请在复现问题时开启调试模式，并提供完整的请求和响应日志。
+        **请注意：** 为了排查此类问题，我们需要您提供详细的上下文日志。请在复现问题时开启调试模式，并提供完整的请求和响应日志。
 
   - type: input
     id: version
     attributes:
       label: 版本号
       description: 您当前使用的版本
-      placeholder: "例如: v0.2.11"
+      placeholder: "例如: v0.3.0"
     validations:
       required: true
 
@@ -49,7 +49,7 @@ body:
     id: problem_description
     attributes:
       label: 问题描述
-      description: "请简要描述您遇到的错误现象，例如：请求成功但参数解析错误、返回 400 错误等"
+      description: "请简要描述您遇到的错误现象，例如：请求成功但参数解析错误、Schema 校验失败、返回 400 错误等"
       placeholder: 描述错误的具体表现...
     validations:
       required: true

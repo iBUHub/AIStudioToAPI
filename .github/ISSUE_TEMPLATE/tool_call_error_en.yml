@@ -1,21 +1,21 @@
-name: Tool Call Error Report
-description: Report an error related to tool calls (English)
-title: "[Tool Error]: "
+name: Tool Call / Structured Output Report
+description: Report errors related to tool calls or structured outputs (English)
+title: "[Feature Error]: "
 labels: ["🐛 Bug"]
 body:
   - type: markdown
     attributes:
       value: |
-        If you encounter errors related to Tool Calls, please submit a new issue using the format below so that we can quickly identify and resolve the problem.
+        If you encounter errors related to **Tool Calls** or **Structured Output (JSON Schema)**, please submit a new issue using the format below so that we can quickly identify and resolve the problem.
 
-        **Note:** To troubleshoot tool call issues, we need detailed context logs. Please enable debug mode when reproducing the issue and provide full request and response logs.
+        **Note:** To troubleshoot such issues, we need detailed context logs. Please enable debug mode when reproducing the issue and provide full request and response logs.
 
   - type: input
     id: version
     attributes:
       label: Version
       description: The version you are currently using
-      placeholder: "e.g., v0.2.11"
+      placeholder: "e.g., v0.3.0"
     validations:
       required: true
 
@@ -49,7 +49,7 @@ body:
     id: problem_description
     attributes:
       label: Problem Description
-      description: "Briefly describe the error you encountered (e.g., request succeeded but parameter parsing failed, returned 400 error, etc.)"
+      description: "Briefly describe the error you encountered (e.g., request succeeded but parameter parsing failed, Schema validation error, returned 400 error, etc.)"
       placeholder: Describe the error details...
     validations:
       required: true
