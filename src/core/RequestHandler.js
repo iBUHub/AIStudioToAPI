@@ -343,6 +343,121 @@ class RequestHandler {
         }
     }
 
+    /**
+     * 专门处理 Files API 请求(上传)
+     * 不调用 _buildProxyRequest，极简透传
+     */
+    async processFilesApiRequest(req, res) {
+        const requestId = this._generateRequestId();
+
+        // 连接检查
+        if (!this.connectionRegistry.hasActiveConnections()) {
+            const recovered = await this._handleBrowserRecovery(res);
+            if (!recovered) return;
+        }
+        if (this.authSwitcher.isSystemBusy) {
+            const ready = await this._waitForSystemReady();
+            if (!ready) {
+                return this._sendErrorResponse(res, 503, "System busy, please try again later.");
+            }
+        }
+        if (this.browserManager) this.browserManager.notifyUserActivity();
+
+        // 极简构建请求对象
+        const cleanPath = req.path.replace(/^\/proxy/, "");
+        const proxyRequest = {
+            headers: { ...req.headers },
+            is_generative: false,
+            method: req.method,
+            path: cleanPath,
+            query_params: req.query || {},
+            request_id: requestId,
+            streaming_mode: "fake",
+        };
+
+        // 处理绝对URL代理(断点续传)
+        if (req.query.url) {
+            proxyRequest.absoluteUrl = req.query.url;
+        }
+
+        // 处理 Body
+        if (Buffer.isBuffer(req.body)) {
+            proxyRequest.body = req.body.toString("base64");
+            proxyRequest.isBase64 = true;
+        } else if (req.body) {
+            proxyRequest.body = typeof req.body === "string" ? req.body : JSON.stringify(req.body);
+        }
+
+        // 注入内存中的 API Key
+        if (this.browserManager.capturedApiKey) {
+            proxyRequest.headers["x-goog-api-key"] = this.browserManager.capturedApiKey;
+            this.logger.info(
+                `[FilesAPI] 🔑 Injecting API Key: ${this.browserManager.capturedApiKey.substring(0, 8)}...`
+            );
+        } else {
+            this.logger.warn(`[FilesAPI] ⚠️ No API Key in memory, upload may fail.`);
+        }
+
+        // 发送请求并等待响应
+        const messageQueue = this.connectionRegistry.createMessageQueue(requestId);
+        try {
+            this._forwardRequest(proxyRequest);
+
+            // 等待响应头
+            const headerMessage = await messageQueue.dequeue(this.config.timeout || 120000);
+            if (headerMessage.event_type === "error") {
+                return this._sendErrorResponse(res, headerMessage.status || 500, headerMessage.message);
+            }
+
+            // 收集响应体
+            let fullBody = "";
+            let receiving = true;
+            while (receiving) {
+                const message = await messageQueue.dequeue(300000);
+                if (message.type === "STREAM_END") {
+                    receiving = false;
+                    break;
+                }
+                if (message.event_type === "chunk" && message.data) {
+                    fullBody += message.data;
+                }
+            }
+
+            // 设置响应头
+            res.status(headerMessage.status || 200);
+            const headers = headerMessage.headers || {};
+            for (const [key, value] of Object.entries(headers)) {
+                const lowerKey = key.toLowerCase();
+                if (lowerKey === "content-length" || lowerKey === "content-encoding") continue;
+
+                // URL 重写（断点续传）
+                if (lowerKey === "x-goog-upload-url") {
+                    let myHost = this.serverSystem.config.host || "127.0.0.1";
+                    if (myHost === "0.0.0.0") myHost = "127.0.0.1";
+                    const myPort = this.serverSystem.config.httpPort;
+                    const newUrl = `http://${myHost}:${myPort}/proxy_absolute?url=${encodeURIComponent(value)}`;
+                    this.logger.info(`[FilesAPI] Rewriting upload URL: ${newUrl}`);
+                    res.set(key, newUrl);
+                    continue;
+                }
+
+                res.set(key, value);
+            }
+
+            // 发送响应体（如果有的话）
+            if (fullBody) {
+                res.send(fullBody);
+            } else {
+                res.end(); // 空响应体，只返回头
+            }
+            this.logger.info(`[FilesAPI] ✅ Response sent for request #${requestId}`);
+        } catch (error) {
+            this._handleRequestError(error, res);
+        } finally {
+            this.connectionRegistry.removeMessageQueue(requestId);
+        }
+    }
+
     // Process OpenAI format requests
     async processOpenAIRequest(req, res) {
         const requestId = this._generateRequestId();

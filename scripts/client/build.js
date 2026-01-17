@@ -158,6 +158,11 @@ class RequestProcessor {
     }
 
     _constructUrl(requestSpec) {
+        if (requestSpec.absoluteUrl) {
+            Logger.output(`Using absolute URL for proxy: ${requestSpec.absoluteUrl}`);
+            return requestSpec.absoluteUrl;
+        }
+
         let pathSegment = requestSpec.path.startsWith("/") ? requestSpec.path.substring(1) : requestSpec.path;
         const queryParams = new URLSearchParams(requestSpec.query_params);
         if (requestSpec.streaming_mode === "fake") {
@@ -184,20 +189,43 @@ class RequestProcessor {
 
     _buildRequestConfig(requestSpec, signal) {
         const config = {
+            credentials: "include",
             headers: this._sanitizeHeaders(requestSpec.headers),
-            method: requestSpec.method,
+            method: requestSpec.method, // Critical for cross-origin cookie transmission
             signal,
         };
 
         if (["POST", "PUT", "PATCH"].includes(requestSpec.method) && requestSpec.body) {
             try {
+                // Handle Binary/Base64 Body
+                if (requestSpec.isBase64) {
+                    // Convert Base64 string to Uint8Array for fetch
+                    const binaryString = atob(requestSpec.body);
+                    const bytes = new Uint8Array(binaryString.length);
+                    for (let i = 0; i < binaryString.length; i++) {
+                        bytes[i] = binaryString.charCodeAt(i);
+                    }
+                    config.body = bytes;
+                    Logger.output("Converted Base64 body to binary Uint8Array.");
+                    return config; // Skip all JSON logic
+                }
+
+                // If it looks like an upload path but not marked as base64 (maybe text file), pass it through
+                const isUpload = requestSpec.path && requestSpec.path.includes("/upload/");
+                if (isUpload) {
+                    config.body = requestSpec.body;
+                    Logger.output("Upload path detected, passing body as-is (skipping JSON parsing).");
+                    return config;
+                }
+
                 const bodyObj = JSON.parse(requestSpec.body);
 
                 // --- Module 1: Image/Embedding/TTS Model Filtering ---
                 // These models do NOT support: tools, thinkingConfig, systemInstruction, response_mime_type
-                const isImageModel = requestSpec.path.includes("-image") || requestSpec.path.includes("imagen");
-                const isEmbeddingModel = requestSpec.path.includes("embedding");
-                const isTtsModel = requestSpec.path.includes("tts");
+                const isImageModel =
+                    requestSpec.path && (requestSpec.path.includes("-image") || requestSpec.path.includes("imagen"));
+                const isEmbeddingModel = requestSpec.path && requestSpec.path.includes("embedding");
+                const isTtsModel = requestSpec.path && requestSpec.path.includes("tts");
                 if (isImageModel || isEmbeddingModel || isTtsModel) {
                     // Remove tools
                     const incompatibleKeys = ["toolConfig", "tool_config", "toolChoice", "tools"];
@@ -300,6 +328,8 @@ class RequestProcessor {
     }
 
     _sanitizeHeaders(headers) {
+        // Debug logging
+        Logger.output("Sanitizing headers:", JSON.stringify(Object.keys(headers)));
         const sanitized = { ...headers };
         [
             "host",
@@ -312,6 +342,10 @@ class RequestProcessor {
             "sec-fetch-site",
             "sec-fetch-dest",
         ].forEach(h => delete sanitized[h]);
+
+        // Whitelist x-goog-upload headers
+        // These are often case-sensitive or critical for the resumable upload flow
+        // The default behavior preserves them if they are in the input, but we ensure we don't accidentally delete them.
         return sanitized;
     }
 

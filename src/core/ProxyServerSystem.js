@@ -289,7 +289,16 @@ class ProxyServerSystem extends EventEmitter {
                 "Content-Type, Authorization, x-requested-with, x-api-key, x-goog-api-key, x-goog-api-client, x-user-agent," +
                     " origin, accept, baggage, sentry-trace, openai-organization, openai-project, openai-beta, x-stainless-lang, " +
                     "x-stainless-package-version, x-stainless-os, x-stainless-arch, x-stainless-runtime, x-stainless-runtime-version, " +
-                    "x-stainless-retry-count, x-stainless-timeout, sec-ch-ua, sec-ch-ua-mobile, sec-ch-ua-platform"
+                    "x-stainless-retry-count, x-stainless-timeout, sec-ch-ua, sec-ch-ua-mobile, sec-ch-ua-platform, " +
+                    "x-goog-upload-command, x-goog-upload-protocol, x-goog-upload-header-content-length, x-goog-upload-header-content-type, " +
+                    "x-goog-upload-offset, x-goog-upload-file-name"
+            );
+            // 暴露响应头给前端（Files API 断点续传需要）
+            res.header(
+                "Access-Control-Expose-Headers",
+                "Content-Length, X-Goog-Upload-URL, X-Goog-Upload-Status, X-Goog-Upload-Chunk-Granularity, " +
+                    "X-Goog-Upload-Control-URL, X-GUploader-UploadID, X-Goog-Upload-Header-Content-Type, " +
+                    "X-Goog-Upload-Header-Access-Control-Allow-Origin, X-Goog-Upload-Header-Access-Control-Expose-Headers"
             );
             if (req.method === "OPTIONS") {
                 return res.sendStatus(204);
@@ -364,6 +373,11 @@ class ProxyServerSystem extends EventEmitter {
                 "Error: WebSocket connection failed. " +
                     "If you are using a proxy (like Nginx), ensure it is configured to forward 'Upgrade' and 'Connection' headers."
             );
+        });
+
+        // Files API 专用路由(上传)
+        app.all(["/upload/*", "/proxy_absolute"], (req, res) => {
+            this.requestHandler.processFilesApiRequest(req, res);
         });
 
         app.all(/(.*)/, (req, res) => {

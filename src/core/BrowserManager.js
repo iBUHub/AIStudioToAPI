@@ -27,6 +27,7 @@ class BrowserManager {
         // -1 means no account is currently active (invalid/error state)
         this._currentAuthIndex = -1;
         this.scriptFileName = "build.js";
+        this.capturedApiKey = null; // Store captured API Key
 
         // Added for background wakeup logic from new core
         this.noButtonCount = 0;
@@ -128,6 +129,12 @@ class BrowserManager {
             // Merge new credentials into existing data
             authData.cookies = storageState.cookies;
             authData.origins = storageState.origins;
+
+            // Feature: Auto-save captured API Key - REMOVED per user request (In-Memory only)
+            // if (this.capturedApiKey) {
+            //     authData.apiKey = this.capturedApiKey;
+            //     this.logger.info(`[Auth Update] 🔑 Persisting captured API Key for account #${authIndex}`);
+            // }
 
             // Note: We do NOT force-set accountName. If it was there, it stays; if not, it remains missing.
             // This preserves the "missing state" as requested.
@@ -718,7 +725,11 @@ class BrowserManager {
             const randomHeight = 1080 + Math.floor(Math.random() * 50);
 
             this.context = await this.browser.newContext({
+                bypassCSP: true,
                 deviceScaleFactor: 1,
+                // Enable CSP bypass to potentially see more headers
+                ignoreHTTPSErrors: true,
+
                 storageState: storageStateObject,
                 viewport: { height: randomHeight, width: randomWidth },
             });
@@ -753,6 +764,29 @@ class BrowserManager {
             });
 
             this.logger.info(`[Browser] Navigating to target page...`);
+
+            // Feature: Capture API Key from network traffic
+            this.page.on("request", request => {
+                try {
+                    const url = request.url();
+                    if (url.includes("generativelanguage.googleapis.com") || url.includes("alkalimakersuite")) {
+                        const headers = request.headers();
+                        // Look for standard API Key headers
+                        const key = headers["x-goog-api-key"] || headers["x-api-key"];
+                        // Filter out default/placeholder keys if any
+                        if (key && key !== "123456" && key !== this.capturedApiKey) {
+                            this.capturedApiKey = key;
+                            this.logger.info(
+                                `[Browser] 🔑 Captured new API Key from traffic: ${key.substring(0, 8)}...`
+                            );
+                            // Optional: Trigger immediate save? Maybe wait for periodic update to avoid IO spam
+                        }
+                    }
+                } catch (e) {
+                    // Ignore
+                }
+            });
+
             const targetUrl =
                 "https://aistudio.google.com/u/0/apps/bundled/blank?showPreview=true&showCode=true&showAssistant=true";
             await this.page.goto(targetUrl, {
