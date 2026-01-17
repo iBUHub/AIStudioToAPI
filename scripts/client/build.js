@@ -194,18 +194,44 @@ class RequestProcessor {
                 const bodyObj = JSON.parse(requestSpec.body);
 
                 // --- Module 1: Image/Embedding/TTS Model Filtering ---
-                // Remove tools, thinkingConfig, responseModalities
+                // These models do NOT support: tools, thinkingConfig, systemInstruction, response_mime_type
                 const isImageModel = requestSpec.path.includes("-image") || requestSpec.path.includes("imagen");
-                const isEmbeddingOrTtsModel =
-                    requestSpec.path.includes("embedding") || requestSpec.path.includes("tts");
-                if (isImageModel || isEmbeddingOrTtsModel) {
+                const isEmbeddingModel = requestSpec.path.includes("embedding");
+                const isTtsModel = requestSpec.path.includes("tts");
+                if (isImageModel || isEmbeddingModel || isTtsModel) {
+                    // Remove tools
                     const incompatibleKeys = ["tool_config", "toolChoice", "tools"];
                     incompatibleKeys.forEach(key => {
                         if (Object.prototype.hasOwnProperty.call(bodyObj, key)) delete bodyObj[key];
                     });
+                    // Remove thinkingConfig
                     if (bodyObj.generationConfig?.thinkingConfig) {
                         delete bodyObj.generationConfig.thinkingConfig;
                     }
+                    // Remove systemInstruction
+                    if (bodyObj.systemInstruction) {
+                        delete bodyObj.systemInstruction;
+                    }
+                    // Remove response_mime_type
+                    if (bodyObj.generationConfig?.response_mime_type) {
+                        delete bodyObj.generationConfig.response_mime_type;
+                    }
+                    if (bodyObj.generationConfig?.responseMimeType) {
+                        delete bodyObj.generationConfig.responseMimeType;
+                    }
+                }
+
+                // --- Module 1.5: responseModalities Handling ---
+                // Image: keep as-is (needed for image generation)
+                // Embedding: remove
+                // TTS: force to ["AUDIO"]
+                if (isTtsModel) {
+                    if (!bodyObj.generationConfig) {
+                        bodyObj.generationConfig = {};
+                    }
+                    bodyObj.generationConfig.responseModalities = ["AUDIO"];
+                    Logger.output("TTS model detected, setting responseModalities to AUDIO");
+                } else if (isEmbeddingModel) {
                     if (bodyObj.generationConfig?.responseModalities) {
                         delete bodyObj.generationConfig.responseModalities;
                     }
