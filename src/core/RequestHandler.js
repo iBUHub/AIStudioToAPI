@@ -248,6 +248,37 @@ class RequestHandler {
     async processRequest(req, res) {
         const requestId = this._generateRequestId();
 
+        // [Debug] Log request details
+        this.logger.info(`[Debug] Processing request: ${req.method} ${req.path}`);
+        this.logger.info(`[Debug] Content-Type: ${req.headers["content-type"]}`);
+        this.logger.info(`[Debug] req.body keys: ${Object.keys(req.body || {}).length}`);
+
+        // [Files API Support] Handle binary body reading if not parsed by express.json
+        let rawBody = null;
+        if (
+            (req.method === "POST" || req.method === "PUT" || req.method === "PATCH") &&
+            Object.keys(req.body || {}).length === 0
+        ) {
+            this.logger.info("[Debug] req.body is empty, attempting to read raw stream...");
+            try {
+                // Read stream
+                const chunks = [];
+                for await (const chunk of req) {
+                    chunks.push(chunk);
+                }
+                if (chunks.length > 0) {
+                    rawBody = Buffer.concat(chunks);
+                    this.logger.info(`[Debug] Read raw body: ${rawBody.length} bytes`);
+                } else {
+                    this.logger.info("[Debug] Raw stream was empty");
+                }
+            } catch (err) {
+                this.logger.error(`[Request] Failed to read raw body: ${err.message}`);
+            }
+        } else {
+            this.logger.info("[Debug] req.body present, skipping raw stream reading");
+        }
+
         // Check browser connection
         if (!this.connectionRegistry.hasActiveConnections()) {
             const recovered = await this._handleBrowserRecovery(res);
@@ -305,7 +336,7 @@ class RequestHandler {
             }
         });
 
-        const proxyRequest = this._buildProxyRequest(req, requestId);
+        const proxyRequest = this._buildProxyRequest(req, requestId, rawBody);
         proxyRequest.is_generative = isGenerativeRequest;
         const messageQueue = this.connectionRegistry.createMessageQueue(requestId);
 
@@ -1025,10 +1056,16 @@ class RequestHandler {
         }
     }
 
-    _buildProxyRequest(req, requestId) {
+    _buildProxyRequest(req, requestId, rawBody = null) {
         const fullPath = req.path;
         let cleanPath = fullPath.replace(/^\/proxy/, "");
         const bodyObj = req.body;
+
+        // [Files API Support] Handle Base64 encoding for binary bodies
+        let body_b64 = undefined;
+        if (rawBody) {
+            body_b64 = rawBody.toString("base64");
+        }
 
         // Parse thinkingLevel suffix from model name in native Gemini generation requests
         // Only handle generation requests: /v1beta/models/{modelName}:generateContent or :streamGenerateContent
@@ -1152,7 +1189,9 @@ class RequestHandler {
         }
 
         return {
-            body: req.method !== "GET" ? JSON.stringify(bodyObj) : undefined,
+            // Priority: body_b64 (Binary) > bodyObj (JSON)
+            body: !body_b64 && req.method !== "GET" ? JSON.stringify(bodyObj) : undefined,
+            body_b64: body_b64,
             headers: req.headers,
             method: req.method,
             path: cleanPath,
