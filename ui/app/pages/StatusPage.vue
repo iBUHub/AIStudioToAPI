@@ -151,7 +151,7 @@
                                         stroke-width="2"
                                         stroke-linecap="round"
                                         stroke-linejoin="round"
-                                        style="margin-right: 6px; vertical-align: middle"
+                                        style="margin-right: 6px"
                                     >
                                         <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
                                         <polyline points="13 2 13 9 20 9"></polyline>
@@ -172,7 +172,7 @@
                                         stroke-width="2"
                                         stroke-linecap="round"
                                         stroke-linejoin="round"
-                                        style="margin-right: 6px; vertical-align: middle"
+                                        style="margin-right: 6px"
                                     >
                                         <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path>
                                     </svg>
@@ -199,7 +199,7 @@
                                         stroke-width="2"
                                         stroke-linecap="round"
                                         stroke-linejoin="round"
-                                        style="margin-right: 6px; vertical-align: middle"
+                                        style="margin-right: 6px"
                                     >
                                         <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
                                         <circle cx="12" cy="7" r="4"></circle>
@@ -225,7 +225,7 @@
                                         stroke-width="2"
                                         stroke-linecap="round"
                                         stroke-linejoin="round"
-                                        style="margin-right: 6px; vertical-align: middle"
+                                        style="margin-right: 6px"
                                     >
                                         <line x1="18" y1="20" x2="18" y2="10"></line>
                                         <line x1="12" y1="20" x2="12" y2="4"></line>
@@ -247,7 +247,7 @@
                                         stroke-width="2"
                                         stroke-linecap="round"
                                         stroke-linejoin="round"
-                                        style="margin-right: 6px; vertical-align: middle"
+                                        style="margin-right: 6px"
                                     >
                                         <path
                                             d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"
@@ -1617,12 +1617,11 @@ watchEffect(() => {
 .label {
     color: @text-secondary;
     display: inline-flex;
-    align-items: baseline;
+    align-items: center;
 
     svg {
         flex-shrink: 0;
-        align-self: center;
-        margin-top: -1px;
+        transform: translateY(1px);
     }
 }
 
@@ -1644,6 +1643,7 @@ watchEffect(() => {
     text-overflow: ellipsis;
     white-space: nowrap;
     max-width: 450px;
+    margin-left: 0.5em;
 }
 
 @media (min-width: 600px) {
