@@ -841,39 +841,80 @@ class BrowserManager {
                 throw new Error("🚨 Page load failed (about:blank), possibly network timeout or browser crash.");
             }
 
-            // Handle various popups
-            this.logger.info(`[Browser] Checking for Cookie consent banner...`);
-            try {
-                const agreeButton = this.page.locator('button:text("Agree")');
-                if (await agreeButton.isVisible({ timeout: 5000 })) {
-                    await this.page.waitForTimeout(500 + Math.random() * 1000);
-                    this.logger.info(`[Browser] ✅ Found Cookie consent banner, clicking "Agree"...`);
-                    await agreeButton.click({ force: true });
+            // Handle various popups with intelligent detection
+            // Use short polling instead of long hard-coded timeouts
+            this.logger.info(`[Browser] 🔍 Starting intelligent popup detection (max 5s)...`);
+
+            const popupConfigs = [
+                {
+                    logFound: `[Browser] ✅ Found Cookie consent banner, clicking "Agree"...`,
+                    name: "Cookie consent",
+                    selector: 'button:text("Agree")',
+                },
+                {
+                    logFound: `[Browser] ✅ Found "Got it" popup, clicking...`,
+                    name: "Got it dialog",
+                    selector: 'div.dialog button:text("Got it")',
+                },
+                {
+                    logFound: `[Browser] ✅ Found onboarding tutorial popup, clicking close button...`,
+                    name: "Onboarding tutorial",
+                    selector: 'button[aria-label="Close"]',
+                },
+            ];
+
+            // Polling-based detection with smart exit conditions
+            // - Initial wait: give popups time to render after page load
+            // - Consecutive idle tracking: exit after N consecutive iterations with no new popups
+            const maxIterations = 12; // Max polling iterations
+            const pollInterval = 500; // Interval between polls (ms)
+            const minIterations = 4; // Min iterations (2s), ensure slow popups have time to load
+            const idleThreshold = 2; // Exit after N consecutive iterations with no new popups
+            const handledPopups = new Set();
+            let consecutiveIdleCount = 0; // Counter for consecutive idle iterations
+
+            for (let i = 0; i < maxIterations; i++) {
+                let foundAny = false;
+
+                for (const popup of popupConfigs) {
+                    if (handledPopups.has(popup.name)) continue;
+
+                    try {
+                        const element = this.page.locator(popup.selector).first();
+                        // Quick visibility check with very short timeout
+                        if (await element.isVisible({ timeout: 100 })) {
+                            this.logger.info(popup.logFound);
+                            await element.click({ force: true });
+                            handledPopups.add(popup.name);
+                            foundAny = true;
+                            // Short pause after clicking to let next popup appear
+                            await this.page.waitForTimeout(300);
+                        }
+                    } catch {
+                        // Element not visible or doesn't exist, continue
+                    }
                 }
-            } catch (error) {
-                this.logger.info(`[Browser] No Cookie consent banner found, skipping.`);
-            }
 
-            this.logger.info(`[Browser] Checking for "Got it" popup...`);
-            try {
-                const gotItButton = this.page.locator('div.dialog button:text("Got it")');
-                await gotItButton.waitFor({ state: "visible", timeout: 15000 });
-                this.logger.info(`[Browser] ✅ Found "Got it" popup, clicking...`);
-                await gotItButton.click({ force: true });
-                await this.page.waitForTimeout(1000);
-            } catch (error) {
-                this.logger.info(`[Browser] No "Got it" popup found, skipping.`);
-            }
+                // Update consecutive idle counter
+                if (foundAny) {
+                    consecutiveIdleCount = 0; // Found popup, reset counter
+                } else {
+                    consecutiveIdleCount++;
+                }
 
-            this.logger.info(`[Browser] Checking for onboarding tutorial...`);
-            try {
-                const closeButton = this.page.locator('button[aria-label="Close"]');
-                await closeButton.waitFor({ state: "visible", timeout: 15000 });
-                this.logger.info(`[Browser] ✅ Found onboarding tutorial popup, clicking close button...`);
-                await closeButton.click({ force: true });
-                await this.page.waitForTimeout(1000);
-            } catch (error) {
-                this.logger.info(`[Browser] No "It's time to build" onboarding tutorial found, skipping.`);
+                // Exit conditions:
+                // 1. Must have completed minimum iterations (ensure slow popups have time to load)
+                // 2. Consecutive idle count exceeds threshold (no new popups appearing)
+                if (i >= minIterations - 1 && consecutiveIdleCount >= idleThreshold) {
+                    this.logger.info(
+                        `[Browser] ✅ Popup detection complete (${i + 1} iterations, ${handledPopups.size} popups handled)`
+                    );
+                    break;
+                }
+
+                if (i < maxIterations - 1) {
+                    await this.page.waitForTimeout(pollInterval);
+                }
             }
 
             this.logger.info("[Browser] Preparing UI interaction, forcefully removing all possible overlay layers...");
