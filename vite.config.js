@@ -2,8 +2,7 @@
  * File: vite.config.js
  * Description: Vite build configuration for the Vue frontend application
  *
- * Maintainers: iBenzene, bbbugg
- * Original Author: Ellinav
+ * Author: Ellinav, iBenzene, bbbugg
  */
 
 const { defineConfig } = require("vite");

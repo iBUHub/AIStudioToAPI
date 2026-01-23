@@ -2,8 +2,7 @@
  * File: scripts/auth/saveAuth.js
  * Description: Automated script to launch browser, extract authentication state from Google AI Studio, and save to config files
  *
- * Maintainers: iBenzene, bbbugg
- * Original Author: Ellinav
+ * Author: Ellinav, iBenzene, bbbugg
  */
 
 const { firefox } = require("playwright");

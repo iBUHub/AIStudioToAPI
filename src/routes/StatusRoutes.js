@@ -2,8 +2,7 @@
  * File: src/routes/StatusRoutes.js
  * Description: Status and system management routes
  *
- * Maintainers: iBenzene, bbbugg
- * Original Author: Ellinav
+ * Author: Ellinav, iBenzene, bbbugg
  */
 
 const fs = require("fs");

@@ -248,7 +248,23 @@ Edit `configs/models.json` to customize available models and their settings.
 
 This project is a fork of [**ais2api**](https://github.com/Ellinav/ais2api) by [**Ellinav**](https://github.com/Ellinav), and fully adopts the CC BY-NC 4.0 license used by the upstream project. All usage, distribution, and modification activities must comply with all terms of the original license. See the full license text in [LICENSE](LICENSE).
 
-### ©️ Copyright / Attribution
+## 🤝 Contributors
 
-- Original work Copyright © [Ellinav](https://github.com/Ellinav)
-- Modifications and additions Copyright © 2024 [iBenzene](https://github.com/iBenzene)、[bbbugg](https://github.com/bbbugg)、[挈挈](https://github.com/ljh156705) and contributors
+<a href="https://github.com/Ellinav">
+  <img src="https://github.com/Ellinav.png?size=50" width="50" height="50" style="border-radius: 50%; margin-right: 10px;" alt="Ellinav" title="Ellinav (Original Author)" />
+</a>
+<a href="https://github.com/iBenzene">
+  <img src="https://github.com/iBenzene.png?size=50" width="50" height="50" style="border-radius: 50%; margin-right: 10px;" alt="iBenzene" title="iBenzene (Maintainer)" />
+</a>
+<a href="https://github.com/bbbugg">
+  <img src="https://github.com/bbbugg.png?size=50" width="50" height="50" style="border-radius: 50%; margin-right: 10px;" alt="bbbugg" title="bbbugg (Maintainer)" />
+</a>
+<a href="https://github.com/ljh156705">
+  <img src="https://github.com/ljh156705.png?size=50" width="50" height="50" style="border-radius: 50%; margin-right: 10px;" alt="ljh156705" title="挈挈 (Maintainer)" />
+</a>
+<a href="https://github.com/MasakiMu319">
+  <img src="https://github.com/MasakiMu319.png?size=50" width="50" height="50" style="border-radius: 50%; margin-right: 10px;" alt="MasakiMu319" title="MasakiMu319 (Contributor)" />
+</a>
+<a href="https://github.com/Make-magic">
+  <img src="https://github.com/Make-magic.png?size=50" width="50" height="50" style="border-radius: 50%; margin-right: 10px;" alt="Make-magic" title="Make-magic (Contributor)" />
+</a>

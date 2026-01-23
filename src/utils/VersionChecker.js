@@ -2,7 +2,7 @@
  * File: src/utils/VersionChecker.js
  * Description: Checks for new versions by querying GitHub Tags API
  *
- * Maintainers: iBenzene, bbbugg
+ * Author: Ellinav, iBenzene, bbbugg
  */
 
 const axios = require("axios");

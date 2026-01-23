@@ -2,8 +2,7 @@
  * File: src/utils/ConfigLoader.js
  * Description: Configuration loader that reads and validates system settings from environment variables
  *
- * Maintainers: iBenzene, bbbugg
- * Original Author: Ellinav
+ * Author: Ellinav, iBenzene, bbbugg
  */
 
 const fs = require("fs");

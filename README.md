@@ -248,7 +248,23 @@ sudo docker compose down
 
 本项目基于 [**ais2api**](https://github.com/Ellinav/ais2api)（作者：[**Ellinav**](https://github.com/Ellinav)）分支开发，并完全沿用上游项目所采用的 CC BY-NC 4.0 许可证，其使用、分发与修改行为均需遵守原有许可证的全部条款，完整许可的内容请参见 [LICENSE](LICENSE) 文件。
 
-### ©️ 版权 / 署名
+## 🤝 贡献者
 
-- 原始作品 Copyright © [Ellinav](https://github.com/Ellinav)
-- 修改与新增部分 Copyright © 2024 [iBenzene](https://github.com/iBenzene)、[bbbugg](https://github.com/bbbugg)、[挈挈](https://github.com/ljh156705)及其他贡献者
+<a href="https://github.com/Ellinav">
+  <img src="https://github.com/Ellinav.png?size=50" width="50" height="50" style="border-radius: 50%; margin-right: 10px;" alt="Ellinav" title="Ellinav (Original Author)" />
+</a>
+<a href="https://github.com/iBenzene">
+  <img src="https://github.com/iBenzene.png?size=50" width="50" height="50" style="border-radius: 50%; margin-right: 10px;" alt="iBenzene" title="iBenzene (Maintainer)" />
+</a>
+<a href="https://github.com/bbbugg">
+  <img src="https://github.com/bbbugg.png?size=50" width="50" height="50" style="border-radius: 50%; margin-right: 10px;" alt="bbbugg" title="bbbugg (Maintainer)" />
+</a>
+<a href="https://github.com/ljh156705">
+  <img src="https://github.com/ljh156705.png?size=50" width="50" height="50" style="border-radius: 50%; margin-right: 10px;" alt="ljh156705" title="挈挈 (Maintainer)" />
+</a>
+<a href="https://github.com/MasakiMu319">
+  <img src="https://github.com/MasakiMu319.png?size=50" width="50" height="50" style="border-radius: 50%; margin-right: 10px;" alt="MasakiMu319" title="MasakiMu319 (Contributor)" />
+</a>
+<a href="https://github.com/Make-magic">
+  <img src="https://github.com/Make-magic.png?size=50" width="50" height="50" style="border-radius: 50%; margin-right: 10px;" alt="Make-magic" title="Make-magic (Contributor)" />
+</a>

@@ -2,8 +2,7 @@
  * File: main.js
  * Description: Main entry file that initializes and starts the AIStudio To API proxy server system
  *
- * Maintainers: iBenzene, bbbugg
- * Original Author: Ellinav
+ * Author: Ellinav, iBenzene, bbbugg
  */
 
 // Load environment variables based on NODE_ENV

@@ -2,8 +2,7 @@
  * File: src/routes/AuthRoutes.js
  * Description: Authentication routes for login and logout functionality
  *
- * Maintainers: iBenzene, bbbugg
- * Original Author: Ellinav
+ * Author: Ellinav, iBenzene, bbbugg
  */
 
 const CreateAuth = require("../auth/CreateAuth");

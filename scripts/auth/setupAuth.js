@@ -2,8 +2,7 @@
  * File: scripts/auth/setupAuth.js
  * Description: Cross-platform auth setup helper. Installs dependencies, downloads Camoufox, and runs saveAuth.js.
  *
- * Maintainers: iBenzene, bbbugg, MasakiMu319
- * Original Author: Ellinav
+ * Author: Ellinav, iBenzene, bbbugg, MasakiMu319
  */
 
 const { spawnSync } = require("child_process");

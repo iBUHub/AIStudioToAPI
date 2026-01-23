@@ -2,8 +2,7 @@
  * File: src/auth/CreateAuth.js
  * Description: Authentication creation handler for VNC-based auth generation
  *
- * Maintainers: iBenzene, bbbugg
- * Original Author: Ellinav
+ * Author: Ellinav, iBenzene, bbbugg
  */
 
 const fs = require("fs");

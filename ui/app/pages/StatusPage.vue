@@ -1,21 +1,14 @@
-<!--
- * File: ui/app/pages/StatusPage.vue
- * Description: Status page component for monitoring and controlling the proxy service in real-time
- *
- * Maintainers: iBenzene, bbbugg
- * Original Author: Ellinav
--->
-
 <template>
-    <div class="status-page">
-        <el-affix
-            :offset="20"
-            position="bottom"
-            class="mobile-only"
-            style="position: fixed; right: 20px; bottom: 20px; z-index: 999"
-        >
-            <div class="floating-actions">
-                <button class="floating-btn lang-switcher" :title="t('switchLanguage')" @click="toggleLanguage">
+    <div class="main-layout">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="sidebar-menu">
+                <button
+                    class="menu-item"
+                    :class="{ active: activeTab === 'home' }"
+                    :title="t('statusHeading')"
+                    @click="activeTab = 'home'"
+                >
                     <svg
                         xmlns="http://www.w3.org/2000/svg"
                         width="24"
@@ -27,12 +20,672 @@
                         stroke-linecap="round"
                         stroke-linejoin="round"
                     >
-                        <path d="m5 8 6 6" />
-                        <path d="m4 14 6-6 2-3" />
-                        <path d="M2 5h12" />
-                        <path d="M7 2h1" />
-                        <path d="m22 22-5-10-5 10" />
-                        <path d="M14 18h6" />
+                        <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+                        <polyline points="9 22 9 12 15 12 15 22"></polyline>
+                    </svg>
+                </button>
+                <button
+                    class="menu-item"
+                    :class="{ active: activeTab === 'settings' }"
+                    :title="t('actionsPanel')"
+                    @click="activeTab = 'settings'"
+                >
+                    <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="24"
+                        height="24"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    >
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path
+                            d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"
+                        ></path>
+                    </svg>
+                </button>
+                <button
+                    class="menu-item"
+                    :class="{ active: activeTab === 'logs' }"
+                    :title="t('realtimeLogs')"
+                    @click="activeTab = 'logs'"
+                >
+                    <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="24"
+                        height="24"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    >
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                        <polyline points="14 2 14 8 20 8"></polyline>
+                        <line x1="16" y1="13" x2="8" y2="13"></line>
+                        <line x1="16" y1="17" x2="8" y2="17"></line>
+                        <polyline points="10 9 9 9 8 9"></polyline>
+                    </svg>
+                </button>
+            </div>
+
+            <div class="sidebar-footer">
+                <button
+                    class="menu-item"
+                    :title="t('switchLanguage')"
+                    @click="handleLanguageChange(state.currentLang === 'en' ? 'zh' : 'en')"
+                >
+                    <svg
+                        data-v-3ee666f0=""
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="24"
+                        height="24"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    >
+                        <path data-v-3ee666f0="" d="m5 8 6 6"></path>
+                        <path data-v-3ee666f0="" d="m4 14 6-6 2-3"></path>
+                        <path data-v-3ee666f0="" d="M2 5h12"></path>
+                        <path data-v-3ee666f0="" d="M7 2h1"></path>
+                        <path data-v-3ee666f0="" d="m22 22-5-10-5 10"></path>
+                        <path data-v-3ee666f0="" d="M14 18h6"></path>
+                    </svg>
+                </button>
+                <button class="menu-item logout-button" :title="t('logout')" @click="handleLogout">
+                    <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="24"
+                        height="24"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    >
+                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                        <polyline points="16 17 21 12 16 7"></polyline>
+                        <line x1="21" y1="12" x2="9" y2="12"></line>
+                    </svg>
+                </button>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="content-area">
+            <!-- HOME VIEW -->
+            <div v-if="activeTab === 'home'" class="view-container">
+                <header class="page-header">
+                    <h1>{{ t("statusHeading") }}</h1>
+                </header>
+
+                <div class="dashboard-grid">
+                    <!-- Service Status Card -->
+                    <div class="status-card">
+                        <h3 class="card-title">
+                            {{ t("serviceStatus") }}
+                            <span
+                                class="dot"
+                                :class="state.serviceConnected ? 'status-running' : 'status-error'"
+                                style="display: inline-block; vertical-align: middle; margin-left: 8px"
+                            ></span>
+                        </h3>
+                        <div class="status-list">
+                            <div class="status-item">
+                                <span class="label">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="14"
+                                        height="14"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        style="margin-right: 6px; vertical-align: middle"
+                                    >
+                                        <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
+                                        <polyline points="13 2 13 9 20 9"></polyline>
+                                    </svg>
+                                    {{ t("serviceStatus") }}
+                                </span>
+                                <span class="value" :class="serviceConnectedClass">{{ serviceConnectedText }}</span>
+                            </div>
+                            <div v-if="state.serviceConnected" class="status-item">
+                                <span class="label">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="14"
+                                        height="14"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        style="margin-right: 6px; vertical-align: middle"
+                                    >
+                                        <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path>
+                                    </svg>
+                                    {{ t("browserConnection") }}
+                                </span>
+                                <span class="value" :class="browserConnectedClass">{{ browserConnectedText }}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Account Status Card -->
+                    <div v-if="state.serviceConnected" class="status-card">
+                        <h3 class="card-title">{{ t("accountStatus") }}</h3>
+                        <div class="status-list">
+                            <div class="status-item">
+                                <span class="label">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="14"
+                                        height="14"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        style="margin-right: 6px; vertical-align: middle"
+                                    >
+                                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                                        <circle cx="12" cy="7" r="4"></circle>
+                                    </svg>
+                                    {{ t("currentAccount") }}
+                                </span>
+                                <span class="value">
+                                    #{{ state.currentAuthIndex }}
+                                    <span :class="currentAccountNameClass">({{ currentAccountName }})</span>
+                                </span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="14"
+                                        height="14"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        style="margin-right: 6px; vertical-align: middle"
+                                    >
+                                        <line x1="18" y1="20" x2="18" y2="10"></line>
+                                        <line x1="12" y1="20" x2="12" y2="4"></line>
+                                        <line x1="6" y1="20" x2="6" y2="14"></line>
+                                    </svg>
+                                    {{ t("usageCount") }}
+                                </span>
+                                <span class="value">{{ state.usageCount }}</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="14"
+                                        height="14"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        style="margin-right: 6px; vertical-align: middle"
+                                    >
+                                        <path
+                                            d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"
+                                        ></path>
+                                        <line x1="12" y1="9" x2="12" y2="13"></line>
+                                        <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                                    </svg>
+                                    {{ t("consecutiveFailures") }}
+                                </span>
+                                <span class="value">{{ state.failureCount }}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SETTINGS VIEW -->
+            <div v-if="activeTab === 'settings'" class="view-container">
+                <header class="page-header">
+                    <h1>{{ t("settings") }}</h1>
+                </header>
+
+                <div class="dashboard-grid settings-grid">
+                    <!-- Version Information Card -->
+                    <div class="status-card">
+                        <h3 class="card-title">
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="18"
+                                height="18"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                style="margin-right: 8px; vertical-align: text-bottom"
+                            >
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <line x1="12" y1="16" x2="12" y2="12"></line>
+                                <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                            </svg>
+                            {{ t("versionInfo") }}
+                        </h3>
+                        <div class="status-list">
+                            <div class="status-item">
+                                <span class="label">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="14"
+                                        height="14"
+                                        viewBox="0 0 24 24"
+                                        fill="currentColor"
+                                        style="margin-right: 6px; vertical-align: middle"
+                                    >
+                                        <path
+                                            d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385c.6.105.825-.255.825-.57c0-.285-.015-1.23-.015-2.235c-3.015.555-3.795-.735-4.035-1.41c-.135-.345-.72-1.41-1.23-1.695c-.42-.225-1.02-.78-.015-.795c.945-.015 1.62.87 1.845 1.23c1.08 1.815 2.805 1.305 3.495.99c.105-.78.42-1.305.765-1.605c-2.67-.3-5.46-1.335-5.46-5.925c0-1.305.465-2.385 1.23-3.225c-.12-.3-.54-1.53.12-3.18c0 0 1.005-.315 3.3 1.23c.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23c.66 1.65.24 2.88.12 3.18c.765.84 1.23 1.905 1.23 3.225c0 4.605-2.805 5.625-5.475 5.925c.435.375.81 1.095.81 2.22c0 1.605-.015 2.895-.015 3.3c0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"
+                                        />
+                                    </svg>
+                                    GitHub {{ t("repo") }}
+                                </span>
+                                <a href="https://github.com/iBUHub/AIStudioToAPI" target="_blank" class="repo-link">
+                                    iBUHub/AIStudioToAPI
+                                </a>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="14"
+                                        height="14"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        style="margin-right: 6px; vertical-align: middle"
+                                    >
+                                        <path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"></path>
+                                    </svg>
+                                    {{ t("currentVersion") }}
+                                </span>
+                                <span class="value">{{ appVersion }}</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="14"
+                                        height="14"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        style="margin-right: 6px; vertical-align: middle"
+                                    >
+                                        <circle cx="12" cy="13" r="8"></circle>
+                                        <path d="M12 9v4l2 2"></path>
+                                        <path d="m5 3 2 2"></path>
+                                        <path d="m19 3-2 2"></path>
+                                    </svg>
+                                    {{ t("latestVersion") }}
+                                </span>
+                                <span class="value">{{ latestVersionFormatted }}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Log Settings Card -->
+                    <div class="status-card">
+                        <h3 class="card-title">
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="18"
+                                height="18"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                style="margin-right: 8px; vertical-align: text-bottom"
+                            >
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                <polyline points="14 2 14 8 20 8"></polyline>
+                                <line x1="16" y1="13" x2="8" y2="13"></line>
+                                <line x1="16" y1="17" x2="8" y2="17"></line>
+                                <polyline points="10 9 9 9 8 9"></polyline>
+                            </svg>
+                            {{ t("logLevel") }}
+                        </h3>
+                        <div class="status-list">
+                            <div class="status-item">
+                                <span class="label">{{ t("logLevel") }}</span>
+                                <el-select
+                                    v-model="state.debugModeEnabled"
+                                    style="width: 120px"
+                                    @change="handleStatsDebugChange"
+                                >
+                                    <el-option :label="t('normal')" :value="false" />
+                                    <el-option :label="t('debug')" :value="true" />
+                                </el-select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Appearance Card -->
+                    <div class="status-card">
+                        <h3 class="card-title">
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="18"
+                                height="18"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                style="margin-right: 8px; vertical-align: text-bottom"
+                            >
+                                <circle cx="12" cy="12" r="5"></circle>
+                                <line x1="12" y1="1" x2="12" y2="3"></line>
+                                <line x1="12" y1="21" x2="12" y2="23"></line>
+                                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                                <line x1="1" y1="12" x2="3" y2="12"></line>
+                                <line x1="21" y1="12" x2="23" y2="12"></line>
+                                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                            </svg>
+                            {{ t("appearance") }}
+                        </h3>
+                        <div class="status-list">
+                            <div class="status-item">
+                                <span class="label">{{ t("theme") }}</span>
+                                <el-select v-model="state.theme" style="width: 150px">
+                                    <el-option :label="t('followSystem')" value="auto" />
+                                    <el-option :label="t('light')" value="light" />
+                                    <el-option :label="t('dark')" value="dark" />
+                                </el-select>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">{{ t("language") }}</span>
+                                <el-select
+                                    v-model="state.currentLang"
+                                    style="width: 150px"
+                                    @change="handleLanguageChange"
+                                >
+                                    <el-option label="中文" value="zh" />
+                                    <el-option label="English" value="en" />
+                                </el-select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Actions & Controls Card -->
+                    <div class="status-card">
+                        <h3 class="card-title">
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="18"
+                                height="18"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                style="margin-right: 8px; vertical-align: text-bottom"
+                            >
+                                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                                <circle cx="12" cy="7" r="4"></circle>
+                            </svg>
+                            {{ t("accountManagement") }}
+                        </h3>
+                        <div class="action-group">
+                            <el-select
+                                v-model="state.selectedAccount"
+                                :placeholder="t('noActiveAccount')"
+                                :disabled="isBusy"
+                                style="width: 240px"
+                            >
+                                <el-option
+                                    v-for="item in state.accountDetails"
+                                    :key="item.index"
+                                    :label="`${t('account')} #${item.index} (${getAccountDisplayName(item)})`"
+                                    :value="item.index"
+                                />
+                            </el-select>
+                            <div class="icon-buttons">
+                                <button
+                                    :disabled="isBusy || state.selectedAccount === null"
+                                    :title="t('btnSwitchAccount')"
+                                    @click="switchSpecificAccount"
+                                >
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="20"
+                                        height="20"
+                                        viewBox="0 0 1024 1024"
+                                        fill="currentColor"
+                                    >
+                                        <path
+                                            d="M886.2 604.8H137.8c-22.1 0-40 17.9-40 40 0 8.4 2.6 16.2 7 22.6 1.9 4.5 4.8 8.7 8.4 12.4L289.5 856c7.8 7.8 18 11.7 28.3 11.7s20.5-3.9 28.3-11.7c15.6-15.6 15.6-40.9 0-56.6L231.3 684.8h654.8c22.1 0 40-17.9 40-40s-17.8-40-39.9-40zM137.8 419.2h748.4c22.1 0 40-17.9 40-40 0-8.4-2.6-16.2-7-22.6-1.4-3.3-3.4-6.5-5.8-9.5L769.2 170.9c-14-17.1-39.2-19.6-56.3-5.6-17.1 14-19.6 39.2-5.6 56.3l96.3 117.6H137.8c-22.1 0-40 17.9-40 40s17.9 40 40 40z"
+                                        ></path>
+                                    </svg>
+                                </button>
+                                <button :disabled="isBusy" :title="t('btnAddUser')" @click="addUser">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="20"
+                                        height="20"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                    >
+                                        <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                                        <circle cx="8.5" cy="7" r="4"></circle>
+                                        <line x1="20" y1="8" x2="20" y2="14"></line>
+                                        <line x1="23" y1="11" x2="17" y2="11"></line>
+                                    </svg>
+                                </button>
+                                <button
+                                    class="btn-danger"
+                                    :disabled="isBusy || state.selectedAccount === null"
+                                    :title="t('btnDeleteUser')"
+                                    @click="deleteUser"
+                                >
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="20"
+                                        height="20"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                    >
+                                        <polyline points="3 6 5 6 21 6"></polyline>
+                                        <path
+                                            d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
+                                        ></path>
+                                        <line x1="10" y1="11" x2="10" y2="17"></line>
+                                        <line x1="14" y1="11" x2="14" y2="17"></line>
+                                    </svg>
+                                </button>
+
+                                <button
+                                    class="btn-warning"
+                                    :disabled="isBusy"
+                                    :title="t('btnDeduplicateAuth')"
+                                    @click="deduplicateAuth"
+                                >
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="20"
+                                        height="20"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                    >
+                                        <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+                                    </svg>
+                                </button>
+                                <input
+                                    ref="fileInput"
+                                    type="file"
+                                    style="display: none"
+                                    accept=".json"
+                                    @change="handleFileUpload"
+                                />
+                                <button :disabled="isBusy" :title="t('uploadFile')" @click="triggerFileUpload">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="20"
+                                        height="20"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                    >
+                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                        <polyline points="17 8 12 3 7 8"></polyline>
+                                        <line x1="12" y1="3" x2="12" y2="15"></line>
+                                    </svg>
+                                </button>
+                                <button
+                                    :disabled="state.selectedAccount === null"
+                                    :title="t('download')"
+                                    @click="downloadSelectedAccount"
+                                >
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="20"
+                                        height="20"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                    >
+                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                        <polyline points="7 10 12 15 17 10"></polyline>
+                                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="settings-switches" style="margin-top: 20px">
+                            <div class="switch-container">
+                                <span class="switch-label">{{ t("streamingMode") }}</span>
+                                <el-switch
+                                    v-model="state.streamingModeReal"
+                                    :before-change="handleStreamingModeBeforeChange"
+                                />
+                            </div>
+                            <div class="switch-container">
+                                <span class="switch-label">{{ t("forceThinking") }}</span>
+                                <el-switch
+                                    v-model="state.forceThinkingEnabled"
+                                    :before-change="handleForceThinkingBeforeChange"
+                                />
+                            </div>
+                            <div class="switch-container">
+                                <span class="switch-label">{{ t("forceWebSearch") }}</span>
+                                <el-switch
+                                    v-model="state.forceWebSearchEnabled"
+                                    :before-change="handleForceWebSearchBeforeChange"
+                                />
+                            </div>
+                            <div class="switch-container">
+                                <span class="switch-label">{{ t("forceUrlContext") }}</span>
+                                <el-switch
+                                    v-model="state.forceUrlContextEnabled"
+                                    :before-change="handleForceUrlContextBeforeChange"
+                                />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- LOGS VIEW -->
+            <div v-if="activeTab === 'logs'" class="view-container">
+                <header class="page-header">
+                    <h1>{{ t("realtimeLogs") }} ({{ state.logCount }})</h1>
+                </header>
+                <div class="status-card logs-card">
+                    <pre id="log-container">{{ state.logs }}</pre>
+                </div>
+            </div>
+        </main>
+
+        <!-- Mobile Floating Action Buttons -->
+        <el-affix
+            :offset="90"
+            position="bottom"
+            class="mobile-only"
+            style="position: fixed; right: 20px; bottom: 90px; z-index: 999"
+        >
+            <div class="floating-actions">
+                <button
+                    class="floating-btn lang-switcher"
+                    :title="t('switchLanguage')"
+                    @click="handleLanguageChange(state.currentLang === 'en' ? 'zh' : 'en')"
+                >
+                    <svg
+                        data-v-3ee666f0=""
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="24"
+                        height="24"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        data-v-f62b98b8=""
+                    >
+                        <path data-v-3ee666f0="" d="m5 8 6 6" data-v-f62b98b8=""></path>
+                        <path data-v-3ee666f0="" d="m4 14 6-6 2-3" data-v-f62b98b8=""></path>
+                        <path data-v-3ee666f0="" d="M2 5h12" data-v-f62b98b8=""></path>
+                        <path data-v-3ee666f0="" d="M7 2h1" data-v-f62b98b8=""></path>
+                        <path data-v-3ee666f0="" d="m22 22-5-10-5 10" data-v-f62b98b8=""></path>
+                        <path data-v-3ee666f0="" d="M14 18h6" data-v-f62b98b8=""></path>
                     </svg>
                 </button>
                 <button class="floating-btn logout-button" :title="t('logout')" @click="handleLogout">
@@ -47,323 +700,13 @@
                         stroke-linecap="round"
                         stroke-linejoin="round"
                     >
-                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                        <polyline points="16 17 21 12 16 7" />
-                        <line x1="21" x2="9" y1="12" y2="12" />
+                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                        <polyline points="16 17 21 12 16 7"></polyline>
+                        <line x1="21" y1="12" x2="9" y2="12"></line>
                     </svg>
                 </button>
             </div>
         </el-affix>
-
-        <div class="status-container">
-            <button class="desktop-btn lang-switcher" :title="t('switchLanguage')" @click="toggleLanguage">
-                <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="24"
-                    height="24"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                >
-                    <path d="m5 8 6 6" />
-                    <path d="m4 14 6-6 2-3" />
-                    <path d="M2 5h12" />
-                    <path d="M7 2h1" />
-                    <path d="m22 22-5-10-5 10" />
-                    <path d="M14 18h6" />
-                </svg>
-            </button>
-            <button class="desktop-btn logout-button" :title="t('logout')" @click="handleLogout">
-                <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="24"
-                    height="24"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                >
-                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                    <polyline points="16 17 21 12 16 7" />
-                    <line x1="21" x2="9" y1="12" y2="12" />
-                </svg>
-            </button>
-            <h1>
-                <span>{{ t("statusHeading") }}</span>
-                <span class="dot" />
-            </h1>
-            <div id="status-section">
-                <pre>
-<span class="label">{{ t('serviceStatus') }}</span>: <span :class="serviceConnectedClass">{{ serviceConnectedText }}</span><template v-if="state.serviceConnected">
-<span class="label">{{ t('browserConnection') }}</span>: <span :class="browserConnectedClass">{{ browserConnectedText }}</span>
---- {{ t('serviceConfig') }} ---
-<span class="label">{{ t('streamingMode') }}</span>: <span>{{ streamingModeText }}</span> <span class="comment">({{ t('onlyAppliesWhenStreamingEnabled') }})</span>
-<span class="label">{{ t('forceThinking') }}</span>: <span>{{ forceThinkingIcon }}</span> <span>{{ forceThinkingText }}</span>
-<span class="label">{{ t('forceWebSearch') }}</span>: <span>{{ forceWebSearchIcon }}</span> <span>{{ forceWebSearchText }}</span>
-<span class="label">{{ t('forceUrlContext') }}</span>: <span>{{ forceUrlContextIcon }}</span> <span>{{ forceUrlContextText }}</span>
-<span class="label">{{ t('apiKey') }}</span>: <span>{{ apiKeySourceText }}</span>
---- {{ t('accountStatus') }} ---
-<span class="label">{{ t('currentAccount') }}</span>: #<span>{{ state.currentAuthIndex }}</span> (<span :class="currentAccountNameClass">{{ currentAccountName }}</span>)
-<span class="label">{{ t('usageCount') }}</span>: <span>{{ state.usageCount }}</span>
-<span class="label">{{ t('consecutiveFailures') }}</span>: <span>{{ state.failureCount }}</span>
-<span class="label">{{ t('totalScanned') }}</span>: <span>{{ totalScannedAccountsText }}</span><template v-for="account in state.accountDetails" :key="account.index">
-<span class="label account-label" style="padding-left: 20px;">{{ t('account') }} {{ account.index }}</span>: {{ getAccountDisplayName(account) }}</template>
-<span class="label">{{ t('dedupedAvailable') }}</span>: <span>{{ rotationAccountsText }}</span>
-<span class="label">{{ t('duplicateAuth') }}</span>: <span>{{ duplicateAuthText }}</span>
-<span class="label">{{ t('formatErrors') }}</span>: <span>{{ formatErrorsText }}</span></template></pre>
-            </div>
-            <div id="actions-section" style="margin-top: 2em">
-                <h2>{{ t("actionsPanel") }}</h2>
-                <div class="action-group">
-                    <el-select
-                        v-model="state.selectedAccount"
-                        :placeholder="t('noActiveAccount')"
-                        :disabled="isBusy"
-                        style="width: 240px"
-                    >
-                        <el-option
-                            v-for="item in state.accountDetails"
-                            :key="item.index"
-                            :label="`${t('account')} #${item.index} (${getAccountDisplayName(item)})`"
-                            :value="item.index"
-                        />
-                    </el-select>
-                    <button
-                        id="switch-account-btn"
-                        :disabled="isBusy || state.selectedAccount === null"
-                        :title="t('btnSwitchAccount')"
-                        @click="switchSpecificAccount"
-                    >
-                        <svg
-                            t="1765911521856"
-                            class="icon"
-                            viewBox="0 0 1024 1024"
-                            version="1.1"
-                            xmlns="http://www.w3.org/2000/svg"
-                            xmlns:xlink="http://www.w3.org/1999/xlink"
-                            width="24"
-                            height="24"
-                        >
-                            <path
-                                d="M886.2 604.8H137.8c-22.1 0-40 17.9-40 40 0 8.4 2.6 16.2 7 22.6 1.9 4.5 4.8 8.7 8.4 12.4L289.5 856c7.8 7.8 18 11.7 28.3 11.7s20.5-3.9 28.3-11.7c15.6-15.6 15.6-40.9 0-56.6L231.3 684.8h654.8c22.1 0 40-17.9 40-40s-17.8-40-39.9-40zM137.8 419.2h748.4c22.1 0 40-17.9 40-40 0-8.4-2.6-16.2-7-22.6-1.4-3.3-3.4-6.5-5.8-9.5L769.2 170.9c-14-17.1-39.2-19.6-56.3-5.6-17.1 14-19.6 39.2-5.6 56.3l96.3 117.6H137.8c-22.1 0-40 17.9-40 40s17.9 40 40 40z"
-                                fill="currentColor"
-                            />
-                        </svg>
-                    </button>
-                    <button :disabled="isBusy" :title="t('btnAddUser')" @click="addUser">
-                        <svg
-                            t="1765912197860"
-                            class="icon"
-                            viewBox="0 0 1024 1024"
-                            version="1.1"
-                            xmlns="http://www.w3.org/2000/svg"
-                            xmlns:xlink="http://www.w3.org/1999/xlink"
-                            width="24"
-                            height="24"
-                        >
-                            <path
-                                d="M711.8 590.4c12.4-20 6.3-46.3-13.7-58.8-24.4-15.2-50.6-26.8-77.5-36.6 66.6-39.7 111.9-111.8 111.9-194.9 0-125.5-102.1-227.6-227.6-227.6S277.3 174.6 277.3 300.1c0 74.1 36.1 139.4 91.1 181C193.5 524.5 64 674.1 64 851.9c0 23.6 19.1 42.7 42.7 42.7s42.7-19.1 42.7-42.7c0-164.7 145.1-298.7 323.4-298.7 64.7 0 127 17.6 180.3 50.8 19.9 12.6 46.2 6.4 58.7-13.6zM504.9 157.8c78.4 0 142.2 63.8 142.2 142.2s-63.8 142.2-142.2 142.2c-78.4 0-142.2-63.8-142.2-142.2s63.8-142.2 142.2-142.2zM917.4 738.2H832v-85.3c0-23.6-19.1-42.7-42.7-42.7s-42.7 19.1-42.7 42.7v85.3h-85.3c-23.6 0-42.7 19.1-42.7 42.7s19.1 42.7 42.7 42.7h85.3v85.3c0 23.6 19.1 42.7 42.7 42.7s42.7-19.1 42.7-42.7v-85.3h85.3c23.6 0 42.7-19.1 42.7-42.7s-19.1-42.7-42.6-42.7z"
-                                fill="currentColor"
-                            />
-                        </svg>
-                    </button>
-                    <button
-                        class="btn-danger"
-                        :disabled="isBusy || state.selectedAccount === null"
-                        :title="t('btnDeleteUser')"
-                        @click="deleteUser"
-                    >
-                        <svg
-                            t="1765908584009"
-                            class="icon"
-                            viewBox="0 0 1049 1024"
-                            version="1.1"
-                            xmlns="http://www.w3.org/2000/svg"
-                            xmlns:xlink="http://www.w3.org/1999/xlink"
-                            width="24"
-                            height="24"
-                        >
-                            <path
-                                d="M818.93731 882.886003a64.030784 64.030784 0 0 1-63.948694 63.948693H294.295334a64.030784 64.030784 0 0 1-63.948693-63.948693V204.159692h588.590669v678.726311zM358.572391 89.396825a12.888248 12.888248 0 0 1 13.134519-13.134519h307.019401a12.888248 12.888248 0 0 1 13.13452 13.134519v38.500562h-333.28844z m652.539361 38.500562h-242.988616v-38.500562A89.643098 89.643098 0 0 0 678.726311 0H371.378547a89.643098 89.643098 0 0 0-89.396825 89.396825v38.500562H38.41847a38.582652 38.582652 0 1 0 0 77.083213h114.927049v677.987494a141.031906 141.031906 0 0 0 141.031906 141.031906h460.611191a141.031906 141.031906 0 0 0 141.031907-141.031906V204.159692h114.927048a38.500561 38.500561 0 0 0 38.500561-38.582652 37.761744 37.761744 0 0 0-38.500561-37.679653z m-486.469777 703.353535a38.500561 38.500561 0 0 0 38.582652-38.500561V382.871252a38.582652 38.582652 0 1 0-77.083213 0v409.879109a38.41847 38.41847 0 0 0 38.500561 38.500561z m-179.450376 0a38.500561 38.500561 0 0 0 38.500561-38.500561V382.871252a38.582652 38.582652 0 1 0-77.083213 0v409.879109a39.567741 39.567741 0 0 0 38.500561 38.500561z m359.064935 0a38.500561 38.500561 0 0 0 38.500561-38.500561V382.871252a38.582652 38.582652 0 1 0-77.083213 0v409.879109a38.500561 38.500561 0 0 0 38.500561 38.500561z"
-                                fill="currentColor"
-                            />
-                        </svg>
-                    </button>
-                    <button
-                        class="btn-warning"
-                        :disabled="isBusy"
-                        :title="t('btnDeduplicateAuth')"
-                        @click="deduplicateAuth"
-                    >
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            width="24"
-                            height="24"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                        >
-                            <path d="M22 3H2l8 9v7l4 2v-9l8-9z" />
-                        </svg>
-                    </button>
-                    <input
-                        ref="fileInput"
-                        type="file"
-                        style="display: none"
-                        accept=".json"
-                        @change="handleFileUpload"
-                    />
-                    <button :disabled="isBusy" :title="t('uploadFile')" @click="triggerFileUpload">
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            width="24"
-                            height="24"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                        >
-                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                            <polyline points="17 8 12 3 7 8" />
-                            <line x1="12" x2="12" y1="3" y2="15" />
-                        </svg>
-                    </button>
-                    <button
-                        :disabled="state.selectedAccount === null"
-                        :title="t('download')"
-                        @click="downloadSelectedAccount"
-                    >
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            width="24"
-                            height="24"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                        >
-                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                            <polyline points="7 10 12 15 17 10" />
-                            <line x1="12" x2="12" y1="15" y2="3" />
-                        </svg>
-                    </button>
-                </div>
-                <div class="switch-container">
-                    <span class="switch-label">{{ t("streamingMode") }}</span>
-                    <el-switch
-                        v-model="state.streamingModeReal"
-                        :before-change="handleStreamingModeBeforeChange"
-                        style="--el-switch-on-color: #007bff; --el-switch-off-color: #dcdfe6"
-                    />
-                    <span class="switch-status">{{ streamingModeText }}</span>
-                </div>
-                <div class="switch-container">
-                    <span class="switch-label">{{ t("forceThinking") }}</span>
-                    <el-switch
-                        v-model="state.forceThinkingEnabled"
-                        :before-change="handleForceThinkingBeforeChange"
-                        style="--el-switch-on-color: #007bff; --el-switch-off-color: #dcdfe6"
-                    />
-                    <span class="switch-status">{{ forceThinkingText }}</span>
-                </div>
-                <div class="switch-container">
-                    <span class="switch-label">{{ t("forceWebSearch") }}</span>
-                    <el-switch
-                        v-model="state.forceWebSearchEnabled"
-                        :before-change="handleForceWebSearchBeforeChange"
-                        style="--el-switch-on-color: #007bff; --el-switch-off-color: #dcdfe6"
-                    />
-                    <span class="switch-status">{{ forceWebSearchText }}</span>
-                </div>
-                <div class="switch-container">
-                    <span class="switch-label">{{ t("forceUrlContext") }}</span>
-                    <el-switch
-                        v-model="state.forceUrlContextEnabled"
-                        :before-change="handleForceUrlContextBeforeChange"
-                        style="--el-switch-on-color: #007bff; --el-switch-off-color: #dcdfe6"
-                    />
-                    <span class="switch-status">{{ forceUrlContextText }}</span>
-                </div>
-            </div>
-            <div id="log-section" style="margin-top: 2em">
-                <h2>
-                    <span>{{ t("realtimeLogs") }}</span>
-                    (<span>{{ t("latestEntries") }}</span>
-                    {{ state.logCount }}
-                    <span>{{ t("entries") }}</span
-                    >)
-                </h2>
-                <div class="switch-container" style="margin-bottom: 1em">
-                    <span class="switch-label">{{ t("logLevel") }}</span>
-                    <el-switch
-                        v-model="state.debugModeEnabled"
-                        :before-change="handleDebugModeBeforeChange"
-                        style="--el-switch-on-color: #007bff; --el-switch-off-color: #dcdfe6"
-                    />
-                    <span class="switch-status">{{ logLevelText }}</span>
-                </div>
-                <pre id="log-container">{{ state.logs }}</pre>
-            </div>
-            <div class="version-footer">
-                <a
-                    href="https://github.com/iBUHub/AIStudioToAPI"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="github-link"
-                >
-                    <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        width="16"
-                        height="16"
-                        viewBox="0 0 98 96"
-                        fill="currentColor"
-                    >
-                        <path
-                            fill-rule="evenodd"
-                            clip-rule="evenodd"
-                            d="M48.854 0C21.839 0 0 22 0 49.217c0 21.756 13.993 40.172 33.405 46.69 2.427.49 3.316-1.059 3.316-2.362 0-1.141-.08-5.052-.08-9.127-13.59 2.934-16.42-5.867-16.42-5.867-2.184-5.704-5.42-7.17-5.42-7.17-4.448-3.015.324-3.015.324-3.015 4.934.326 7.523 5.052 7.523 5.052 4.367 7.496 11.404 5.378 14.235 4.074.404-3.178 1.699-5.378 3.074-6.6-10.839-1.141-22.243-5.378-22.243-24.283 0-5.378 1.94-9.778 5.014-13.2-.485-1.222-2.184-6.275.486-13.038 0 0 4.125-1.304 13.426 5.052a46.97 46.97 0 0 1 12.214-1.63c4.125 0 8.33.571 12.213 1.63 9.302-6.356 13.427-5.052 13.427-5.052 2.67 6.763.97 11.816.485 13.038 3.155 3.422 5.015 7.822 5.015 13.2 0 18.905-11.404 23.06-22.324 24.283 1.78 1.548 3.316 4.481 3.316 9.126 0 6.6-.08 11.897-.08 13.526 0 1.304.89 2.853 3.316 2.364 19.412-6.52 33.405-24.935 33.405-46.691C97.707 22 75.788 0 48.854 0z"
-                        />
-                    </svg>
-                    <span>GitHub</span>
-                </a>
-                <span class="version-tag">{{ appVersion }}</span>
-                <a
-                    v-if="state.hasUpdate"
-                    :href="state.releaseUrl || 'https://github.com/iBUHub/AIStudioToAPI/releases'"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="update-tag"
-                    :title="`${t('newVersionAvailable')}: ${state.latestVersion}`"
-                >
-                    <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        width="12"
-                        height="12"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                    >
-                        <path d="m18 15-6-6-6 6" />
-                    </svg>
-                    <span>{{ t("newVersionAvailable") }}</span>
-                </a>
-            </div>
-        </div>
     </div>
 </template>
 
@@ -375,6 +718,7 @@ import I18n from "../utils/i18n";
 
 const router = useRouter();
 const fileInput = ref(null);
+const activeTab = ref("home");
 
 // Create reactive version counter
 const langVersion = ref(0);
@@ -390,6 +734,7 @@ const state = reactive({
     apiKeySource: "",
     browserConnected: false,
     currentAuthIndex: -1,
+    currentLang: I18n.getLang(),
     debugModeEnabled: false,
     duplicateIndicesRaw: [],
     failureCount: 0,
@@ -411,13 +756,8 @@ const state = reactive({
     selectedAccount: null,
     serviceConnected: false,
     streamingModeReal: false,
+    theme: localStorage.getItem("theme") || "auto",
     usageCount: 0,
-});
-
-const apiKeySourceText = computed(() => {
-    const key = state.apiKeySource ? state.apiKeySource.toLowerCase() : "";
-    const translated = key ? t(key) : "";
-    return translated === key ? state.apiKeySource : translated || state.apiKeySource;
 });
 
 const browserConnectedClass = computed(() => {
@@ -450,44 +790,9 @@ const currentAccountNameClass = computed(() => {
     return account ? "" : "status-error";
 });
 
-const forceThinkingIcon = computed(() => (state.forceThinkingEnabled ? "✅" : "❌"));
-const forceThinkingText = computed(() => (state.forceThinkingEnabled ? t("enabled") : t("disabled")));
-
-const forceUrlContextIcon = computed(() => (state.forceUrlContextEnabled ? "✅" : "❌"));
-const forceUrlContextText = computed(() => (state.forceUrlContextEnabled ? t("enabled") : t("disabled")));
-
-const forceWebSearchIcon = computed(() => (state.forceWebSearchEnabled ? "✅" : "❌"));
-const forceWebSearchText = computed(() => (state.forceWebSearchEnabled ? t("enabled") : t("disabled")));
-
-const logLevelText = computed(() => (state.debugModeEnabled ? t("debug") : t("normal")));
-
-const isBusy = computed(() => state.isSwitchingAccount || state.isSystemBusy);
-
-const formatErrorsText = computed(() => {
-    const indices = state.invalidIndicesRaw || [];
-    return `[${indices.join(", ")}] (${t("total")}: ${indices.length})`;
-});
-
-const duplicateAuthText = computed(() => {
-    const indices = state.duplicateIndicesRaw || [];
-    return `[${indices.join(", ")}] (${t("total")}: ${indices.length})`;
-});
-
 const serviceConnectedClass = computed(() => (state.serviceConnected ? "status-ok" : "status-error"));
 
 const serviceConnectedText = computed(() => (state.serviceConnected ? t("running") : t("disconnected")));
-
-const streamingModeText = computed(() => (state.streamingModeReal ? t("real") : t("fake")));
-
-const rotationAccountsText = computed(() => {
-    const indices = state.rotationIndicesRaw || [];
-    return `[${indices.join(", ")}] (${t("total")}: ${indices.length})`;
-});
-
-const totalScannedAccountsText = computed(() => {
-    const indices = state.initialIndicesRaw || [];
-    return `[${indices.join(", ")}] (${t("total")}: ${indices.length})`;
-});
 
 // App version from build-time injection
 const appVersion = computed(() => {
@@ -502,6 +807,14 @@ const appVersion = computed(() => {
     }
     // Keep raw string for others (e.g. main, dev)
     return version;
+});
+
+const latestVersionFormatted = computed(() => {
+    const v = state.latestVersion || (typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "dev");
+    if (/^\d/.test(v)) {
+        return `v${v}`;
+    }
+    return v;
 });
 
 // Get display name for account with i18n support
@@ -649,7 +962,22 @@ const handleForceUrlContextBeforeChange = () =>
 
 const handleForceWebSearchBeforeChange = () => handleSettingChange("/api/settings/force-web-search", "forceWebSearch");
 
-const handleDebugModeBeforeChange = () => handleSettingChange("/api/settings/debug-mode", "logLevel");
+// Handle change specifically for Select component which might trigger logic differently
+const handleStatsDebugChange = val => {
+    handleSettingChange("/api/settings/debug-mode", "logLevel").then(success => {
+        if (!success) {
+            // Revert if failed
+            state.debugModeEnabled = !val;
+        }
+    });
+};
+
+const handleLanguageChange = lang => {
+    I18n.setLang(lang);
+    state.currentLang = lang;
+    langVersion.value++;
+    localStorage.setItem("language", lang);
+};
 
 const handleLogout = () => {
     ElMessageBox.confirm(t("logoutConfirm"), {
@@ -858,15 +1186,14 @@ const updateContent = async () => {
             throw new Error(`HTTP error! status: ${res.status}`);
         }
         const data = await res.json();
+
         if (dot) {
-            dot.className = "dot status-running";
+            if (state.serviceConnected) dot.classList.add("status-running");
+            else dot.classList.remove("status-running");
         }
         updateStatus(data);
     } catch (err) {
         console.error("Error fetching status:", err.message || err);
-        if (dot) {
-            dot.className = "dot status-error";
-        }
         state.serviceConnected = false;
     }
 };
@@ -879,10 +1206,6 @@ const scheduleNextUpdate = () => {
     updateTimer = setTimeout(() => {
         updateContent().finally(scheduleNextUpdate);
     }, randomInterval);
-};
-
-const toggleLanguage = async () => {
-    await I18n.toggleLang();
 };
 
 const triggerFileUpload = () => {
@@ -952,6 +1275,17 @@ const checkForUpdates = async () => {
     }
 };
 
+watchEffect(() => {
+    const theme = state.theme;
+    if (theme === "auto") {
+        const isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+        document.documentElement.setAttribute("data-theme", isDark ? "dark" : "light");
+    } else {
+        document.documentElement.setAttribute("data-theme", theme);
+    }
+    localStorage.setItem("theme", theme);
+});
+
 onMounted(() => {
     // Listen for language changes
     I18n.onChange(() => {
@@ -981,77 +1315,190 @@ watchEffect(() => {
 <style lang="less" scoped>
 @import "../styles/variables.less";
 
-.status-page {
+.main-layout {
+    display: flex;
     min-height: 100vh;
-    padding: 3em 0;
+    background-color: @background-light;
 }
 
-.status-container {
-    background: @background-white;
-    border-radius: @border-radius-xl;
+/* Sidebar Styling */
+.sidebar {
+    width: 60px;
+    background: #fff;
+    border-right: 1px solid @border-light;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 20px 0;
+    align-items: center;
+    position: fixed;
+    height: 100vh;
+    z-index: 100;
+}
+
+.sidebar-menu,
+.sidebar-footer {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    align-items: center;
+}
+
+.menu-item {
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    color: @text-secondary;
+    cursor: pointer;
+    transition: all 0.2s;
+    border: none;
+    background: transparent;
+
+    &:hover {
+        background-color: @background-light;
+        color: @primary-color;
+    }
+
+    &.active {
+        background-color: @primary-color;
+        color: #fff;
+        box-shadow: 0 4px 12px fade(@primary-color, 30%);
+    }
+
+    &.logout-button:hover {
+        color: @error-color;
+        background-color: fade(@error-color, 10%);
+    }
+}
+
+/* Content Area */
+.content-area {
+    flex: 1;
+    margin-left: 60px; /* Sidebar width */
+    padding: 2rem;
+    max-width: none;
+}
+
+.page-header {
+    margin-bottom: 2rem;
+
+    h1 {
+        font-size: 1.5rem;
+        font-weight: 600;
+        color: @text-primary;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+}
+
+.view-container {
+    animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Dashboard Grid */
+.dashboard-grid {
+    display: grid;
+    gap: 24px;
+    width: 100%;
+}
+
+/* Responsive Grid Columns */
+@media (max-width: 599px) {
+    .dashboard-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (min-width: 600px) and (max-width: 1023px) {
+    .dashboard-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (min-width: 1024px) {
+    .dashboard-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+}
+
+/* Common Card Styles */
+.status-card {
+    background: #fff;
+    border-radius: 16px;
+    padding: 24px;
     box-shadow: @shadow-light;
-    margin: 0 auto;
-    max-width: @container-max-width;
-    padding: 1em 2em 2em 2em;
-    position: relative;
+    border: 1px solid @border-light;
 }
 
-h1,
-h2 {
-    border-bottom: 2px solid @border-light;
+.card-title {
+    font-size: 0.9rem;
+    color: @text-secondary;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 600;
+    margin-bottom: 20px;
+    border-bottom: 1px solid @border-light;
+    padding-bottom: 15px;
+}
+
+/* Status Items */
+.status-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.status-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.95rem;
+}
+
+.label {
+    color: @text-secondary;
+}
+
+.value {
+    font-weight: 500;
     color: @text-primary;
-    padding-bottom: 0.5em;
-}
-
-pre {
-    background: @dark-background;
-    border-radius: @border-radius-md;
-    color: @dark-text;
-    font-size: @font-size-large;
-    line-height: 1.6;
-    padding: 1.5em;
-    white-space: pre-wrap;
-    word-wrap: break-word;
-}
-
-#log-container {
-    font-size: @font-size-small;
-    max-height: @log-container-max-height;
-    overflow-y: auto;
+    font-family: @font-family-mono;
 }
 
 .status-ok {
     color: @success-color;
-    font-weight: bold;
 }
-
 .status-warning {
     color: @warning-color;
-    font-weight: bold;
 }
-
 .status-error {
     color: @error-color;
-    font-weight: bold;
-}
-
-.label {
-    display: inline-block;
-    width: 220px;
 }
 
 .dot {
-    animation: blink 1s infinite alternate;
-    background-color: #bbb;
-    border-radius: @border-radius-circle;
-    display: inline-block;
-    height: 10px;
-    margin-left: @spacing-sm;
-    vertical-align: middle;
-    width: 10px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: @border-color;
 
     &.status-running {
         background-color: @success-color;
+        box-shadow: 0 0 8px @success-color;
     }
 
     &.status-error {
@@ -1059,120 +1506,192 @@ pre {
     }
 }
 
-@keyframes blink {
-    from {
-        opacity: 0.3;
-    }
+/* Account List */
+.account-list-container {
+    margin: 15px 0;
+    background: @background-light;
+    border-radius: 8px;
+    padding: 10px;
+    max-height: 150px;
+    overflow-y: auto;
+}
 
-    to {
-        opacity: 1;
+.account-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    font-size: 0.9rem;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+
+    &:last-child {
+        border-bottom: none;
     }
 }
 
+.account-idx {
+    color: @text-secondary;
+    font-family: @font-family-mono;
+}
+
+/* Settings View Specifics */
+.settings-card {
+    max-width: 600px;
+    margin: 0 auto;
+}
+
 .action-group {
-    align-items: center;
     display: flex;
     flex-wrap: wrap;
-    gap: @spacing-md;
+    gap: 15px;
+    margin-bottom: 30px;
+    align-items: center;
+}
 
-    button,
-    select {
-        align-items: center;
-        border: 1px solid @border-color;
-        border-radius: @border-radius-md;
-        box-sizing: border-box;
-        cursor: pointer;
-        display: inline-flex;
-        font-size: @font-size-base;
-        justify-content: center;
-        line-height: 1.5;
-        min-height: @button-min-height;
-        padding: @spacing-sm @spacing-md;
-        transition: background-color @transition-normal;
-        white-space: nowrap;
-
-        &:disabled {
-            cursor: not-allowed;
-            opacity: 0.7;
-        }
-    }
+.icon-buttons {
+    display: flex;
+    gap: 10px;
 
     button {
-        background: transparent;
-        border: none;
+        width: 36px;
+        height: 36px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid @border-color;
+        border-radius: 8px;
+        background: #fff;
         color: @text-secondary;
-        min-height: auto;
-        padding: @spacing-xs;
-
-        svg {
-            display: block;
-        }
+        cursor: pointer;
+        transition: all 0.2s;
 
         &:hover:not(:disabled) {
+            border-color: @primary-color;
             color: @primary-color;
-            transform: scale(1.1);
         }
 
         &:disabled {
             opacity: 0.5;
+            cursor: not-allowed;
         }
 
-        // Danger button uses error color on hover
         &.btn-danger:hover:not(:disabled) {
+            border-color: @error-color;
             color: @error-color;
         }
 
         &.btn-warning:hover:not(:disabled) {
+            border-color: @warning-color;
             color: @warning-color;
-        }
-
-        // Primary button uses primary color on hover (already default)
-        &.btn-primary:hover:not(:disabled) {
-            color: @primary-color;
         }
     }
 }
 
-// Desktop buttons (original position in container)
-.desktop-btn {
+.settings-switches {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.switch-container {
+    display: flex;
+    justify-content: space-between;
     align-items: center;
-    background: transparent;
-    border: none;
-    color: @text-secondary;
-    cursor: pointer;
-    display: none; // Hidden on mobile by default
+    padding: 10px 15px;
+    /* background removed as requested */
+    border-bottom: 1px solid @border-light;
+
+    &:last-child {
+        border-bottom: none;
+    }
+}
+
+/* Logs View Specifics */
+.logs-card {
+    height: calc(100vh - 150px);
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    overflow: hidden;
+}
+
+#log-container {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    margin: 0;
+    background: #f5f7fa;
+    color: #333;
+    font-family: @font-family-mono;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    border-radius: 0 0 16px 16px;
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-width: 100%;
+}
+
+.version-footer {
+    margin-top: 30px;
+    display: flex;
+    gap: 15px;
     justify-content: center;
-    padding: @spacing-xs;
-    position: absolute;
-    top: 35px;
-    transition: all @transition-fast;
+    align-items: center;
+    font-size: 0.9rem;
+    color: @text-secondary;
+}
 
-    &:disabled {
-        cursor: not-allowed;
-        opacity: 0.5;
+.github-link {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background-color: #24292f;
+    color: #fff !important;
+    padding: 6px 16px;
+    border-radius: 20px;
+    font-weight: 600;
+    transition: all 0.2s;
+
+    &:hover {
+        background-color: #333;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
     }
+}
 
-    svg {
-        display: block;
-    }
+.version-tag {
+    background-color: #0366d6;
+    color: #fff;
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-weight: 600;
+    font-size: 0.9rem;
+}
 
-    &.lang-switcher {
-        right: 70px;
+.update-tag {
+    color: @error-color !important;
+    font-weight: 600;
+    font-size: 0.9rem;
+}
 
-        &:hover:not(:disabled) {
-            color: @primary-color;
-            transform: scale(1.1);
-        }
-    }
+.repo-link {
+    color: @primary-color;
+    text-decoration: none;
+    font-weight: 500;
+}
 
-    &.logout-button {
-        right: @spacing-lg;
+.repo-link:hover {
+    text-decoration: underline;
+}
 
-        &:hover:not(:disabled) {
-            color: @error-color;
-            transform: scale(1.1);
-        }
-    }
+/* Theme Support (Basic Implementation) */
+.main-layout[data-theme="dark"] {
+    background: #1a1a1a;
+    color: #eee;
+}
+
+.main-layout[data-theme="dark"] .status-card {
+    background: #242424;
+    border-color: #333;
 }
 
 // Mobile floating action buttons
@@ -1208,6 +1727,8 @@ pre {
 
     svg {
         display: block;
+        width: 24px;
+        height: 24px;
     }
 
     &.lang-switcher {
@@ -1233,144 +1754,39 @@ pre {
     }
 }
 
+/* Mobile Adaptation */
+@media (max-width: 768px) {
+    .sidebar {
+        width: 100%;
+        height: 60px;
+        bottom: 0;
+        top: auto;
+        flex-direction: row;
+        border-right: none;
+        border-top: 1px solid @border-light;
+        padding: 0 20px;
+    }
+
+    .sidebar-menu {
+        flex-direction: row;
+        width: 100%;
+        justify-content: space-around;
+    }
+
+    .sidebar-footer {
+        display: none;
+    }
+
+    .content-area {
+        margin-left: 0;
+        padding-bottom: 80px;
+    }
+}
+
 // Media query: Desktop (>=768px)
-@media (width >= 768px) {
+@media (min-width: 768px) {
     .mobile-only {
         display: none !important;
-    }
-
-    .desktop-btn {
-        display: flex;
-    }
-}
-
-.switch-container {
-    align-items: center;
-    display: flex;
-    gap: @spacing-md;
-    margin: @spacing-md 0;
-
-    .switch-label {
-        color: @text-primary;
-        font-size: @font-size-base;
-        font-weight: 500;
-        min-width: 150px;
-    }
-
-    .switch-status {
-        color: @text-secondary;
-        font-size: @font-size-small;
-        min-width: 60px;
-    }
-}
-
-.file-actions {
-    align-items: center;
-    display: flex;
-    gap: @spacing-md;
-    margin-bottom: @spacing-md;
-
-    .action-btn {
-        background: transparent;
-        border: 1px solid @border-color;
-        border-radius: @border-radius-md;
-        box-sizing: border-box;
-        color: @text-primary;
-        cursor: pointer;
-        font-size: @font-size-base;
-        padding: @spacing-xs @spacing-md;
-        transition: all @transition-fast;
-
-        &:hover:not(:disabled) {
-            background: @primary-color;
-            border-color: @primary-color;
-            color: @background-white;
-        }
-
-        &:disabled {
-            cursor: not-allowed;
-            opacity: 0.5;
-        }
-    }
-}
-
-.version-footer {
-    align-items: center;
-    border-top: 2px solid @border-light;
-    display: flex;
-    font-size: @font-size-small;
-    gap: 12px;
-    justify-content: center;
-    margin-top: 2em;
-    padding-top: 1.5em;
-
-    .github-link,
-    .version-tag {
-        align-items: center;
-        border-radius: 16px;
-        color: #fff;
-        display: inline-flex;
-        font-size: 12px;
-        font-weight: 500;
-        gap: 6px;
-        padding: 6px 12px;
-        text-decoration: none;
-    }
-
-    .github-link {
-        background: linear-gradient(135deg, #24292f 0%, #1b1f23 100%);
-        transition: all @transition-fast;
-
-        &:hover {
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-            transform: translateY(-1px);
-        }
-
-        svg {
-            height: 14px;
-            width: 14px;
-        }
-    }
-
-    .version-tag {
-        background: linear-gradient(135deg, @primary-color 0%, @primary-active-color 100%);
-    }
-
-    .update-tag {
-        align-items: center;
-        animation: pulse 2s infinite;
-        background: linear-gradient(135deg, @error-color 0%, #c0392b 100%);
-        border-radius: 16px;
-        color: #fff;
-        display: inline-flex;
-        font-size: 12px;
-        font-weight: 500;
-        gap: 4px;
-        padding: 6px 12px;
-        text-decoration: none;
-        transition: all @transition-fast;
-
-        &:hover {
-            animation: none;
-            box-shadow: 0 4px 12px rgba(231, 76, 60, 0.4);
-            transform: translateY(-1px);
-        }
-
-        svg {
-            height: 12px;
-            width: 12px;
-        }
-    }
-
-    @keyframes pulse {
-        0%,
-        100% {
-            opacity: 1;
-        }
-
-        50% {
-            opacity: 0.7;
-        }
     }
 }
 </style>

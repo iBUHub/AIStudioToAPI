@@ -2,8 +2,7 @@
  * File: ui/app/pages/LoginPage.vue
  * Description: Login page component for user authentication with internationalization support
  *
- * Maintainers: iBenzene, bbbugg
- * Original Author: Ellinav
+ * Author: Ellinav, iBenzene, bbbugg
 -->
 
 <template>
