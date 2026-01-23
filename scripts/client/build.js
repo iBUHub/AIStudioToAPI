@@ -399,6 +399,12 @@ class RequestProcessor {
                         }
                     }
 
+                    // adapt gemini 3 pro preview
+                    // if raise `400 INVALID_ARGUMENT`, try to delete `thinkingLevel`
+                    // if (bodyObj.generationConfig?.thinkingConfig?.thinkingLevel) {
+                    //     delete bodyObj.generationConfig.thinkingConfig.thinkingLevel;
+                    // }
+
                     // upper case `thinkingLevel`
                     if (bodyObj.generationConfig?.thinkingConfig?.thinkingLevel) {
                         bodyObj.generationConfig.thinkingConfig.thinkingLevel = String(
@@ -419,6 +425,19 @@ class RequestProcessor {
                             ];
                         }
                     }
+
+                    // if raise `400 INVALID_ARGUMENT`, try to delete `thoughtSignature`
+                    // if (Array.isArray(bodyObj.contents)) {
+                    //     bodyObj.contents.forEach(msg => {
+                    //         if (Array.isArray(msg.parts)) {
+                    //             msg.parts.forEach(part => {
+                    //                 if (part.thoughtSignature) {
+                    //                     delete part.thoughtSignature;
+                    //                 }
+                    //             });
+                    //         }
+                    //     });
+                    // }
 
                     config.body = JSON.stringify(bodyObj);
                 } catch (e) {
