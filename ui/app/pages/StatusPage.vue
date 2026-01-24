@@ -331,7 +331,12 @@
                                     <span>
                                         {{ t("streamingMode") }}
                                         <span
-                                            style="font-size: 0.8em; color: #888; font-weight: normal; margin-left: 4px"
+                                            style="
+                                                font-size: 0.8em;
+                                                color: var(--text-secondary);
+                                                font-weight: normal;
+                                                margin-left: 4px;
+                                            "
                                             >({{ t("onlyAppliesWhenStreamingEnabled") }})</span
                                         >
                                     </span>
@@ -806,7 +811,7 @@
                         <div class="status-list">
                             <div class="status-item">
                                 <span class="label">{{ t("theme") }}</span>
-                                <el-select v-model="state.theme" style="width: 150px">
+                                <el-select :model-value="theme" style="width: 150px" @update:model-value="setTheme">
                                     <el-option :label="t('followSystem')" value="auto" />
                                     <el-option :label="t('light')" value="light" />
                                     <el-option :label="t('dark')" value="dark" />
@@ -977,6 +982,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watchEff
 import { useRouter } from "vue-router";
 import { ElMessage, ElMessageBox, ElNotification } from "element-plus";
 import I18n from "../utils/i18n";
+import { useTheme } from "../utils/useTheme";
 
 const router = useRouter();
 const fileInput = ref(null);
@@ -990,6 +996,8 @@ const t = (key, options) => {
     langVersion.value; // Access to track changes
     return I18n.t(key, options);
 };
+
+const { theme, setTheme } = useTheme();
 
 const state = reactive({
     accountDetails: [],
@@ -1013,7 +1021,7 @@ const state = reactive({
     releaseUrl: null,
     serviceConnected: false,
     streamingModeReal: false,
-    theme: localStorage.getItem("theme") || "auto",
+    // theme: handled by useTheme
     usageCount: 0,
 });
 
@@ -1531,16 +1539,7 @@ const checkForUpdates = async () => {
     }
 };
 
-watchEffect(() => {
-    const theme = state.theme;
-    if (theme === "auto") {
-        const isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-        document.documentElement.setAttribute("data-theme", isDark ? "dark" : "light");
-    } else {
-        document.documentElement.setAttribute("data-theme", theme);
-    }
-    localStorage.setItem("theme", theme);
-});
+// Theme handling is now managed by useTheme composable
 
 onMounted(() => {
     // Listen for language changes
@@ -1580,7 +1579,7 @@ watchEffect(() => {
 /* Sidebar Styling */
 .sidebar {
     width: 60px;
-    background: #fff;
+    background: @background-white;
     border-right: 1px solid @border-light;
     display: flex;
     flex-direction: column;
@@ -1620,13 +1619,13 @@ watchEffect(() => {
 
     &.active {
         background-color: @primary-color;
-        color: #fff;
-        box-shadow: 0 4px 12px fade(@primary-color, 30%);
+        color: #fff; // Always white on primary
+        box-shadow: 0 4px 12px rgba(var(--color-primary-rgb), 0.3);
     }
 
     &.logout-button:hover {
         color: @error-color;
-        background-color: fade(@error-color, 10%);
+        background-color: rgba(var(--color-error-rgb), 0.1);
     }
 }
 
@@ -1653,7 +1652,7 @@ watchEffect(() => {
 }
 
 .view-container {
-    animation: fadeIn 0.3s ease;
+    /* animation: fadeIn 0.3s ease; */
 }
 
 @keyframes fadeIn {
@@ -1701,7 +1700,7 @@ watchEffect(() => {
 
 /* Common Card Styles */
 .status-card {
-    background: #fff;
+    background: @background-white;
     border-radius: 16px;
     padding: 24px;
     box-shadow: @shadow-light;
@@ -1869,7 +1868,7 @@ watchEffect(() => {
         justify-content: center;
         border: 1px solid @border-color;
         border-radius: 8px;
-        background: #fff;
+        background: @background-white;
         color: @text-secondary;
         cursor: pointer;
         transition: all 0.2s;
@@ -1920,12 +1919,12 @@ watchEffect(() => {
     transition: all 0.2s;
 
     &:hover {
-        background: darken(@background-light, 3%);
+        background: var(--bg-list-item-hover);
     }
 
     &.is-current {
         border-color: @primary-color;
-        background: fade(@primary-color, 8%);
+        background: rgba(var(--color-primary-rgb), 0.08);
     }
 }
 
@@ -1965,7 +1964,7 @@ watchEffect(() => {
     font-size: 0.75rem;
     padding: 2px 8px;
     background: @primary-color;
-    color: #fff;
+    color: #fff; // Keep white on primary badge
     border-radius: 12px;
     flex-shrink: 0;
 }
@@ -1983,7 +1982,10 @@ watchEffect(() => {
         justify-content: center;
         border: 1px solid @border-color;
         border-radius: 6px;
-        background: #fff;
+        border: 1px solid @border-color;
+        border-radius: 6px;
+        background: @background-white;
+        color: @text-secondary;
         color: @text-secondary;
         cursor: pointer;
         transition: all 0.2s;
@@ -2038,9 +2040,10 @@ watchEffect(() => {
     flex: 1;
     overflow-y: auto;
     padding: 20px;
+    padding: 20px;
     margin: 0;
-    background: #f5f7fa;
-    color: #333;
+    background: @background-white;
+    color: @text-primary;
     font-family: @font-family-mono;
     font-size: 0.85rem;
     line-height: 1.5;
@@ -2126,19 +2129,8 @@ watchEffect(() => {
         color: @error-color;
     }
     50% {
-        color: fade(@error-color, 50%);
+        color: rgba(var(--color-error-rgb), 0.5);
     }
-}
-
-/* Theme Support (Basic Implementation) */
-.main-layout[data-theme="dark"] {
-    background: #1a1a1a;
-    color: #eee;
-}
-
-.main-layout[data-theme="dark"] .status-card {
-    background: #242424;
-    border-color: #333;
 }
 
 // Mobile floating action buttons
@@ -2173,7 +2165,7 @@ watchEffect(() => {
     align-items: center;
     backdrop-filter: blur(10px);
     background: @affix-button-bg;
-    border: 1px solid rgba(0, 0, 0, 0.1);
+    border: 1px solid @affix-button-border;
     border-radius: @border-radius-circle 0 0 @border-radius-circle; /* Rounded left side only when stuck */
     box-shadow: @affix-button-shadow;
     cursor: pointer;

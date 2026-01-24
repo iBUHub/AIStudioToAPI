@@ -11,6 +11,7 @@ import 'element-plus/dist/index.css';
 import App from './/App.vue';
 import router from './router';
 import I18n from './utils/i18n';
+import 'element-plus/theme-chalk/dark/css-vars.css';
 import './/styles/global.less';
 
 const app = createApp(App);

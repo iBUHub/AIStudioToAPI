@@ -26,3 +26,5 @@ configs/auth/
 # Temporary files
 tmp/
 ui/dist/
+*.css
+test/

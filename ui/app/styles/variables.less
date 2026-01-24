@@ -5,27 +5,100 @@
  * Author: iBenzene, bbbugg
  */
 
-// ========== Color Variables ==========
+// ========== CSS Variables System ==========
+:root {
+    // Light theme (Default)
+    --color-primary: #007bff;
+    --color-primary-rgb: 0, 123, 255;
+    --color-primary-hover: #0069d9;
+    --color-primary-active: #0056b3;
+    --color-success: #2ecc71;
+    --color-warning: #f39c12;
+    --color-error: #e74c3c;
+    --color-error-rgb: 231, 76, 60;
+    --bg-body: #f0f2f5;
+    --bg-card: #fff;
+    --bg-list-item-hover: #e1e6eb; // darken #f0f2f5 by ~3%
+    --text-primary: #333;
+    --text-secondary: #666;
+    --border-color: #ccc;
+    --border-light: #eee;
+
+    // Affix
+    --affix-bg: rgba(255, 255, 255, 0.95);
+    --affix-border: rgba(0, 0, 0, 0.1);
+    --affix-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+
+    // VNC
+    --vnc-overlay-bg: rgba(10, 12, 16, 0.7);
+    --vnc-overlay-card-bg: rgba(255, 255, 255, 0.95);
+    --vnc-overlay-border: rgba(0, 0, 0, 0.1);
+    --vnc-overlay-text: #333;
+    --vnc-overlay-muted: #666;
+    --vnc-overlay-code-bg: rgba(0, 0, 0, 0.08);
+    --vnc-overlay-shadow: 0 20px 45px rgba(0, 0, 0, 0.35);
+    --vnc-surface-gradient: radial-gradient(1200px 800px at 15% 10%, #1d2129 0%, #11141a 45%, #0b0d12 100%);
+    --vnc-toolbar-bg: rgba(255, 255, 255, 0.92);
+    --vnc-toolbar-hover-bg: rgba(255, 255, 255, 0.98);
+    --vnc-toolbar-border: rgba(0, 0, 0, 0.08);
+    --vnc-toolbar-shadow: 0 14px 30px rgba(0, 0, 0, 0.22);
+}
+
+[data-theme="dark"] {
+    // Dark theme overrides
+    --bg-body: #1a1a1a;
+    --bg-card: #242424;
+    --bg-list-item-hover: #2a2a2a; // slightly lighter than #1a1a1a
+    --text-primary: #f0f0f0;
+    --text-secondary: #aaa;
+    --border-color: #444;
+    --border-light: #333;
+
+    // Adjust brand colors for dark mode if needed
+    --color-primary: #339aff;
+    --color-primary-rgb: 51, 154, 255;
+
+    // Affix
+    --affix-bg: rgba(60, 60, 60, 0.95);
+    --affix-border: rgba(255, 255, 255, 0.15);
+    --affix-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+
+    // VNC
+    --vnc-overlay-bg: rgba(0, 0, 0, 0.75);
+    --vnc-overlay-card-bg: rgba(40, 40, 40, 0.95);
+    --vnc-overlay-border: rgba(255, 255, 255, 0.1);
+    --vnc-overlay-text: #f0f0f0;
+    --vnc-overlay-muted: #aaa;
+    --vnc-overlay-code-bg: rgba(255, 255, 255, 0.1);
+    --vnc-overlay-shadow: 0 20px 45px rgba(0, 0, 0, 0.6);
+    --vnc-surface-gradient: radial-gradient(1200px 800px at 15% 10%, #1d2129 0%, #11141a 45%, #0b0d12 100%);
+    --vnc-toolbar-bg: rgba(40, 40, 40, 0.92);
+    --vnc-toolbar-hover-bg: rgba(50, 50, 50, 0.98);
+    --vnc-toolbar-border: rgba(255, 255, 255, 0.1);
+    --vnc-toolbar-shadow: 0 14px 30px rgba(0, 0, 0, 0.4);
+}
+
+// ========== Color Variables (Mapped to CSS Vars) ==========
 // Primary colors
-@primary-color: #007bff;
-@primary-hover-color: #0069d9;
-@primary-active-color: #0056b3;
+@primary-color: var(--color-primary);
+@primary-hover-color: var(--color-primary-hover);
+@primary-active-color: var(--color-primary-active);
 
 // Status colors
-@success-color: #2ecc71;
-@warning-color: #f39c12;
-@error-color: #e74c3c;
+@success-color: var(--color-success);
+@warning-color: var(--color-warning);
+@error-color: var(--color-error);
 
 // Neutral colors
-@background-light: #f0f2f5;
-@background-white: #fff;
-@text-primary: #333;
-@text-secondary: #666;
-@border-color: #ccc;
-@border-light: #eee;
+@background-light: var(--bg-body);
+@background-white: var(--bg-card);
+@text-primary: var(--text-primary);
+@text-secondary: var(--text-secondary);
+@border-color: var(--border-color);
+@border-light: var(--border-light);
 
-// Dark theme colors
-@dark-background: #2d2d2d;
+// Deprecated or mapped to new system
+@dark-background: #2d2d2d; // Keeping for legacy if used elsewhere, but preferable to use vars
 @dark-text: #f0f0f0;
 
 // ========== Typography ==========
@@ -74,23 +147,24 @@
 @affix-bottom: 20px;
 @affix-button-size: 50px;
 @affix-button-gap: 12px;
-@affix-button-bg: rgba(255, 255, 255, 0.95);
-@affix-button-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
-@affix-button-hover-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+@affix-button-bg: var(--affix-bg);
+@affix-button-border: var(--affix-border);
+@affix-button-shadow: var(--affix-shadow);
+@affix-button-hover-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
 
 // ========== VNC Page ==========
-@vnc-surface-gradient: radial-gradient(1200px 800px at 15% 10%, #1d2129 0%, #11141a 45%, #0b0d12 100%);
-@vnc-overlay-bg: rgba(10, 12, 16, 0.7);
-@vnc-overlay-card-bg: rgba(255, 255, 255, 0.95);
-@vnc-overlay-border: rgba(0, 0, 0, 0.1);
-@vnc-overlay-text: #333;
-@vnc-overlay-muted: #666;
-@vnc-overlay-code-bg: rgba(0, 0, 0, 0.08);
-@vnc-overlay-shadow: 0 20px 45px rgba(0, 0, 0, 0.35);
-@vnc-toolbar-bg: rgba(255, 255, 255, 0.92);
-@vnc-toolbar-hover-bg: rgba(255, 255, 255, 0.98);
-@vnc-toolbar-border: rgba(0, 0, 0, 0.08);
-@vnc-toolbar-shadow: 0 14px 30px rgba(0, 0, 0, 0.22);
+@vnc-surface-gradient: var(--vnc-surface-gradient);
+@vnc-overlay-bg: var(--vnc-overlay-bg);
+@vnc-overlay-card-bg: var(--vnc-overlay-card-bg);
+@vnc-overlay-border: var(--vnc-overlay-border);
+@vnc-overlay-text: var(--vnc-overlay-text);
+@vnc-overlay-muted: var(--vnc-overlay-muted);
+@vnc-overlay-code-bg: var(--vnc-overlay-code-bg);
+@vnc-overlay-shadow: var(--vnc-overlay-shadow);
+@vnc-toolbar-bg: var(--vnc-toolbar-bg);
+@vnc-toolbar-hover-bg: var(--vnc-toolbar-hover-bg);
+@vnc-toolbar-border: var(--vnc-toolbar-border);
+@vnc-toolbar-shadow: var(--vnc-toolbar-shadow);
 @vnc-button-size: 48px;
 @vnc-icon-size: 22px;
 @vnc-bar-padding: 8px;
