@@ -869,7 +869,7 @@ class BrowserManager {
             const maxIterations = 12; // Max polling iterations
             const pollInterval = 500; // Interval between polls (ms)
             const minIterations = 4; // Min iterations (2s), ensure slow popups have time to load
-            const idleThreshold = 2; // Exit after N consecutive iterations with no new popups
+            const idleThreshold = 3; // Exit after N consecutive iterations with no new popups
             const handledPopups = new Set();
             let consecutiveIdleCount = 0; // Counter for consecutive idle iterations
 
@@ -882,16 +882,33 @@ class BrowserManager {
                     try {
                         const element = this.page.locator(popup.selector).first();
                         // Quick visibility check with very short timeout
-                        if (await element.isVisible({ timeout: 100 })) {
+                        if (await element.isVisible({ timeout: 200 })) {
                             this.logger.info(popup.logFound);
                             await element.click({ force: true });
                             handledPopups.add(popup.name);
                             foundAny = true;
                             // Short pause after clicking to let next popup appear
-                            await this.page.waitForTimeout(300);
+                            await this.page.waitForTimeout(800);
                         }
-                    } catch {
-                        // Element not visible or doesn't exist, continue
+                    } catch (error) {
+                        // Element not visible or doesn't exist is expected here,
+                        // but propagate clearly critical browser/page issues.
+                        if (error && error.message) {
+                            const msg = error.message;
+                            if (
+                                msg.includes("Execution context was destroyed") ||
+                                msg.includes("Target page, context or browser has been closed") ||
+                                msg.includes("Protocol error") ||
+                                msg.includes("Navigation failed because page was closed")
+                            ) {
+                                throw error;
+                            }
+                            if (this.logger && typeof this.logger.debug === "function") {
+                                this.logger.debug(
+                                    `[Browser] Ignored error while checking popup "${popup.name}": ${msg}`
+                                );
+                            }
+                        }
                     }
                 }
 
