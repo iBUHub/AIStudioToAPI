@@ -1518,6 +1518,7 @@ watchEffect(() => {
     margin-left: 60px; /* Sidebar width */
     padding: 2rem;
     max-width: none;
+    min-width: 0;
 }
 
 .page-header {
@@ -1587,6 +1588,7 @@ watchEffect(() => {
     padding: 24px;
     box-shadow: @shadow-light;
     border: 1px solid @border-light;
+    min-width: 0;
 }
 
 .card-title {
@@ -1643,6 +1645,7 @@ watchEffect(() => {
     text-overflow: ellipsis;
     white-space: nowrap;
     max-width: 450px;
+    min-width: 0;
     margin-left: 0.5em;
 }
 
@@ -1818,6 +1821,7 @@ watchEffect(() => {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    min-width: 0;
 
     &.is-error {
         color: @error-color;
