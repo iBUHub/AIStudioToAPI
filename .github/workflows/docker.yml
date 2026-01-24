@@ -74,13 +74,6 @@ jobs:
           username: ibuhub
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Log into Docker Hub (ibenzene)
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@343f7c4344506bcbf9b4de18042ae17996df046d # v3.0.0
-        with:
-          username: ibenzene
-          password: ${{ secrets.DOCKERHUB_TOKEN_LEGACY }}
-
       - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@96383f45573cb7f253c731d3b3ab81c87ef81934 # v5.0.0
@@ -89,12 +82,11 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PRIMARY }}
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LEGACY }}
             ${{ env.DOCKERHUB_REPO }}
-            ${{ env.DOCKERHUB_REPO_LEGACY }}
           tags: |
             type=ref,event=tag
             type=raw,value=${{ steps.generate_tag.outputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' }}
 
-      - name: Build and push Docker image
+      - name: Build and push Primary (GHCR & ibuhub)
         id: build-and-push
         uses: docker/build-push-action@0565240e2d4ab88bba5387d719585280857ece09 # v5.0.0
         with:
@@ -108,9 +100,39 @@ jobs:
           build-args: VERSION=${{ steps.generate_tag.outputs.tag || env.VERSION }}
           provenance: false
 
+      - name: Log into Docker Hub (ibenzene)
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@343f7c4344506bcbf9b4de18042ae17996df046d # v3.0.0
+        with:
+          username: ibenzene
+          password: ${{ secrets.DOCKERHUB_TOKEN_LEGACY }}
+
+      - name: Extract Docker metadata (Legacy Hub)
+        id: meta-legacy
+        uses: docker/metadata-action@96383f45573cb7f253c731d3b3ab81c87ef81934 # v5.0.0
+        with:
+          images: |
+            ${{ env.DOCKERHUB_REPO_LEGACY }}
+          tags: |
+            type=ref,event=tag
+            type=raw,value=${{ steps.generate_tag.outputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' }}
+
+      - name: Push Legacy to Docker Hub
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@0565240e2d4ab88bba5387d719585280857ece09 # v5.0.0
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta-legacy.outputs.tags }}
+          labels: ${{ steps.meta-legacy.outputs.labels }}
+          cache-from: type=gha
+          platforms: linux/amd64,linux/arm64
+          build-args: VERSION=${{ steps.generate_tag.outputs.tag || env.VERSION }}
+          provenance: false
+
       - name: Sign the published Docker image
         if: ${{ github.event_name != 'pull_request' }}
         env:
-          TAGS: ${{ steps.meta.outputs.tags }}
+          TAGS: ${{ steps.meta.outputs.tags }} ${{ steps.meta-legacy.outputs.tags }}
           DIGEST: ${{ steps.build-and-push.outputs.digest }}
         run: echo "$TAGS" | xargs -I {} cosign sign --yes {}@${DIGEST}
