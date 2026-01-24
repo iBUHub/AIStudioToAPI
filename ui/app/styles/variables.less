@@ -42,6 +42,9 @@
     --vnc-toolbar-hover-bg: rgba(255, 255, 255, 0.98);
     --vnc-toolbar-border: rgba(0, 0, 0, 0.08);
     --vnc-toolbar-shadow: 0 14px 30px rgba(0, 0, 0, 0.22);
+
+    // Text on primary
+    --text-on-primary: #fff;
 }
 
 [data-theme="dark"] {
@@ -57,6 +60,9 @@
     // Adjust brand colors for dark mode if needed
     --color-primary: #339aff;
     --color-primary-rgb: 51, 154, 255;
+
+    // Ensure sufficient contrast on potentially lighter primary in dark mode
+    --text-on-primary: #fff; // Can be changed to #000 if primary becomes too light
 
     // Affix
     --affix-bg: rgba(60, 60, 60, 0.95);
@@ -83,6 +89,7 @@
 @primary-color: var(--color-primary);
 @primary-hover-color: var(--color-primary-hover);
 @primary-active-color: var(--color-primary-active);
+@text-on-primary: var(--text-on-primary);
 
 // Status colors
 @success-color: var(--color-success);
