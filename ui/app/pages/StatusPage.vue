@@ -262,11 +262,54 @@
                                 </span>
                                 <span class="value">{{ state.failureCount }}</span>
                             </div>
+                            <div class="status-item">
+                                <span class="label">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="14"
+                                        height="14"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        style="margin-right: 6px"
+                                    >
+                                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                                        <circle cx="9" cy="7" r="4"></circle>
+                                        <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                                        <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                                    </svg>
+                                    {{ t("totalScanned") }}
+                                </span>
+                                <span class="value">{{ totalScannedCount }}</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="14"
+                                        height="14"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        style="margin-right: 6px"
+                                    >
+                                        <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+                                    </svg>
+                                    {{ t("dedupedAvailable") }}
+                                </span>
+                                <span class="value">{{ dedupedAvailableCount }}</span>
+                            </div>
                         </div>
                     </div>
 
                     <!-- Proxy Settings Status Card -->
-                    <div class="status-card">
+                    <div v-if="state.serviceConnected" class="status-card">
                         <h3 class="card-title">{{ t("proxySettingsStatus") }}</h3>
                         <div class="status-list">
                             <div class="status-item">
@@ -378,12 +421,34 @@
                                     >{{ state.forceUrlContextEnabled ? t("enabled") : t("disabled") }}</span
                                 >
                             </div>
+                            <div class="status-item">
+                                <span class="label">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="14"
+                                        height="14"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        style="margin-right: 6px; vertical-align: middle"
+                                    >
+                                        <path
+                                            d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"
+                                        ></path>
+                                    </svg>
+                                    {{ t("apiKey") }}
+                                </span>
+                                <span class="value status-text-bold">{{ apiKeySourceText }}</span>
+                            </div>
                         </div>
                     </div>
                 </div>
 
                 <!-- Account Management Section (Full Width) -->
-                <div class="full-width-section">
+                <div v-if="state.serviceConnected" class="full-width-section">
                     <div class="status-card">
                         <h3 class="card-title">
                             <svg
@@ -486,7 +551,10 @@
                                 >
                                     <div class="account-info" style="cursor: pointer">
                                         <span class="account-index">#{{ item.index }}</span>
-                                        <span class="account-email" :class="{ 'is-error': item.isInvalid }">
+                                        <span
+                                            class="account-email"
+                                            :class="{ 'is-error': item.isInvalid, 'is-duplicate': item.isDuplicate }"
+                                        >
                                             {{ getAccountDisplayName(item) }}
                                         </span>
                                         <span v-if="item.index === state.currentAuthIndex" class="current-badge">
@@ -654,7 +722,18 @@
                                     </svg>
                                     {{ t("latestVersion") }}
                                 </span>
-                                <span class="value">{{ latestVersionFormatted }}</span>
+                                <span class="value">
+                                    <a
+                                        v-if="state.hasUpdate"
+                                        :href="state.releaseUrl || 'https://github.com/iBUHub/AIStudioToAPI/releases'"
+                                        target="_blank"
+                                        class="update-link"
+                                        :title="t('newVersionAvailable')"
+                                    >
+                                        {{ latestVersionFormatted }}
+                                    </a>
+                                    <span v-else>{{ latestVersionFormatted }}</span>
+                                </span>
                             </div>
                         </div>
                     </div>
@@ -823,16 +902,16 @@
             :offset="90"
             position="bottom"
             class="mobile-only"
-            style="position: fixed; right: 20px; bottom: 90px; z-index: 999"
+            style="position: fixed; right: 0; bottom: 90px; z-index: 999"
         >
-            <div class="floating-actions">
+            <div class="floating-actions" :class="{ 'is-expanded': state.floatingActionsExpanded }">
                 <button
-                    class="floating-btn lang-switcher"
-                    :title="t('switchLanguage')"
-                    @click="handleLanguageChange(state.currentLang === 'en' ? 'zh' : 'en')"
+                    class="floating-btn toggle-btn primary-btn"
+                    :class="{ 'is-active': state.floatingActionsExpanded }"
+                    :title="state.floatingActionsExpanded ? t('collapse') : t('expand')"
+                    @click="state.floatingActionsExpanded = !state.floatingActionsExpanded"
                 >
                     <svg
-                        data-v-3ee666f0=""
                         xmlns="http://www.w3.org/2000/svg"
                         width="24"
                         height="24"
@@ -842,17 +921,12 @@
                         stroke-width="2"
                         stroke-linecap="round"
                         stroke-linejoin="round"
-                        data-v-f62b98b8=""
                     >
-                        <path data-v-3ee666f0="" d="m5 8 6 6" data-v-f62b98b8=""></path>
-                        <path data-v-3ee666f0="" d="m4 14 6-6 2-3" data-v-f62b98b8=""></path>
-                        <path data-v-3ee666f0="" d="M2 5h12" data-v-f62b98b8=""></path>
-                        <path data-v-3ee666f0="" d="M7 2h1" data-v-f62b98b8=""></path>
-                        <path data-v-3ee666f0="" d="m22 22-5-10-5 10" data-v-f62b98b8=""></path>
-                        <path data-v-3ee666f0="" d="M14 18h6" data-v-f62b98b8=""></path>
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
                     </svg>
                 </button>
-                <button class="floating-btn logout-button" :title="t('logout')" @click="handleLogout">
+                <button class="floating-btn logout-button secondary-btn" :title="t('logout')" @click="handleLogout">
                     <svg
                         xmlns="http://www.w3.org/2000/svg"
                         width="24"
@@ -867,6 +941,30 @@
                         <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
                         <polyline points="16 17 21 12 16 7"></polyline>
                         <line x1="21" y1="12" x2="9" y2="12"></line>
+                    </svg>
+                </button>
+                <button
+                    class="floating-btn lang-switcher secondary-btn"
+                    :title="t('switchLanguage')"
+                    @click="handleLanguageChange(state.currentLang === 'en' ? 'zh' : 'en')"
+                >
+                    <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="24"
+                        height="24"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    >
+                        <path d="m5 8 6 6"></path>
+                        <path d="m4 14 6-6 2-3"></path>
+                        <path d="M2 5h12"></path>
+                        <path d="M7 2h1"></path>
+                        <path d="m22 22-5-10-5 10"></path>
+                        <path d="M14 18h6"></path>
                     </svg>
                 </button>
             </div>
@@ -900,15 +998,12 @@ const state = reactive({
     currentAuthIndex: -1,
     currentLang: I18n.getLang(),
     debugModeEnabled: false,
-    duplicateIndicesRaw: [],
     failureCount: 0,
+    floatingActionsExpanded: false,
     forceThinkingEnabled: false,
     forceUrlContextEnabled: false,
     forceWebSearchEnabled: false,
     hasUpdate: false,
-    initialIndicesRaw: [],
-    invalidIndicesRaw: [],
-    isInitializing: true,
     isSwitchingAccount: false,
     isSystemBusy: false,
     isUpdating: false,
@@ -916,8 +1011,6 @@ const state = reactive({
     logCount: 0,
     logs: t("loading"),
     releaseUrl: null,
-    rotationIndicesRaw: [],
-    selectedAccount: null,
     serviceConnected: false,
     streamingModeReal: false,
     theme: localStorage.getItem("theme") || "auto",
@@ -936,6 +1029,14 @@ const browserConnectedText = computed(() => {
         return t("connecting");
     }
     return state.browserConnected ? t("running") : t("disconnected");
+});
+
+// Total scanned accounts count
+const totalScannedCount = computed(() => state.accountDetails.length);
+
+// Deduped available accounts count (excluding duplicates and invalid)
+const dedupedAvailableCount = computed(() => {
+    return state.accountDetails.filter(acc => !acc.isDuplicate && !acc.isInvalid).length;
 });
 
 const isBusy = computed(() => state.isSwitchingAccount || state.isSystemBusy);
@@ -959,6 +1060,12 @@ const currentAccountNameClass = computed(() => {
 const serviceConnectedClass = computed(() => (state.serviceConnected ? "status-ok" : "status-error"));
 
 const serviceConnectedText = computed(() => (state.serviceConnected ? t("running") : t("disconnected")));
+
+const apiKeySourceText = computed(() => {
+    const key = state.apiKeySource ? state.apiKeySource.toLowerCase() : "";
+    const translated = key ? t(key) : "";
+    return translated === key ? state.apiKeySource : translated || state.apiKeySource;
+});
 
 // App version from build-time injection
 const appVersion = computed(() => {
@@ -1286,9 +1393,6 @@ const switchAccountByIndex = targetIndex => {
 
 const updateStatus = data => {
     state.serviceConnected = true;
-    if (state.isInitializing) {
-        state.isInitializing = false;
-    }
 
     const isEnabled = val => {
         if (val === true) return true;
@@ -1311,18 +1415,7 @@ const updateStatus = data => {
     state.failureCount = data.status.failureCount;
     state.logCount = data.logCount || 0;
     state.logs = data.logs || "";
-    state.initialIndicesRaw = data.status.initialIndicesRaw;
-    state.rotationIndicesRaw = data.status.rotationIndicesRaw || [];
-    state.invalidIndicesRaw = data.status.invalidIndicesRaw;
-    state.duplicateIndicesRaw = data.status.duplicateIndicesRaw || [];
     state.isSystemBusy = data.status.isSystemBusy;
-
-    const isSelectedAccountValid = state.accountDetails.some(acc => acc.index === state.selectedAccount);
-
-    if (!isSelectedAccountValid) {
-        const isActiveAccountValid = state.accountDetails.some(acc => acc.index === state.currentAuthIndex);
-        state.selectedAccount = isActiveAccountValid ? state.currentAuthIndex : null;
-    }
 
     nextTick(() => {
         state.isUpdating = false;
@@ -1862,6 +1955,10 @@ watchEffect(() => {
     &.is-error {
         color: @error-color;
     }
+
+    &.is-duplicate {
+        color: @warning-color;
+    }
 }
 
 .current-badge {
@@ -2006,6 +2103,33 @@ watchEffect(() => {
     text-decoration: underline;
 }
 
+.update-link {
+    color: @error-color;
+    text-decoration: none;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.2s;
+    animation: red-white-breath 2s infinite ease-in-out;
+
+    &:hover {
+        animation: none;
+        color: @error-color;
+        opacity: 1;
+    }
+}
+
+@keyframes red-white-breath {
+    0%,
+    100% {
+        color: @error-color;
+    }
+    50% {
+        color: fade(@error-color, 50%);
+    }
+}
+
 /* Theme Support (Basic Implementation) */
 .main-layout[data-theme="dark"] {
     background: #1a1a1a;
@@ -2023,10 +2147,26 @@ watchEffect(() => {
 }
 
 .floating-actions {
-    align-items: center;
+    align-items: flex-end;
     display: flex;
-    flex-direction: column;
-    gap: @affix-button-gap;
+    flex-direction: column-reverse; /* Put toggle button at bottom */
+    gap: 12px;
+    transition: all @transition-normal;
+
+    &:not(.is-expanded) {
+        opacity: 0.5;
+        transform: translateX(15px); /* Peek from the edge */
+
+        &:hover {
+            opacity: 1;
+            transform: translateX(0);
+        }
+    }
+
+    &.is-expanded {
+        opacity: 1;
+        transform: translateX(0);
+    }
 }
 
 .floating-btn {
@@ -2034,14 +2174,16 @@ watchEffect(() => {
     backdrop-filter: blur(10px);
     background: @affix-button-bg;
     border: 1px solid rgba(0, 0, 0, 0.1);
-    border-radius: @border-radius-circle;
+    border-radius: @border-radius-circle 0 0 @border-radius-circle; /* Rounded left side only when stuck */
     box-shadow: @affix-button-shadow;
     cursor: pointer;
     display: flex;
     height: @affix-button-size;
     justify-content: center;
-    transition: all @transition-fast;
+    transition: all @transition-normal;
     width: @affix-button-size;
+    position: relative;
+    z-index: 1;
 
     &:disabled {
         cursor: not-allowed;
@@ -2052,6 +2194,15 @@ watchEffect(() => {
         display: block;
         width: 24px;
         height: 24px;
+        transition: transform @transition-normal;
+    }
+
+    &.secondary-btn {
+        opacity: 0;
+        transform: translateY(20px) scale(0.5);
+        pointer-events: none;
+        visibility: hidden;
+        border-radius: @border-radius-circle; /* Secondary buttons remain round */
     }
 
     &.lang-switcher {
@@ -2074,6 +2225,35 @@ watchEffect(() => {
             color: @background-white;
             transform: scale(1.05);
         }
+    }
+
+    &.toggle-btn {
+        color: @text-secondary;
+        z-index: 2;
+
+        &:hover:not(:disabled) {
+            background: @background-white;
+            color: @primary-color;
+        }
+
+        &.is-active {
+            background: @primary-color;
+            color: #fff;
+            border-radius: @border-radius-circle; /* Become round when expanded */
+
+            svg {
+                transform: rotate(45deg);
+            }
+        }
+    }
+}
+
+.floating-actions.is-expanded {
+    .secondary-btn {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+        pointer-events: auto;
+        visibility: visible;
     }
 }
 
