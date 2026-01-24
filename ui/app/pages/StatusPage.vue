@@ -907,7 +907,7 @@
             :offset="90"
             position="bottom"
             class="mobile-only"
-            style="position: fixed; right: 0; bottom: 90px; z-index: 999"
+            style="position: fixed; right: 0; bottom: calc(90px + env(safe-area-inset-bottom, 0px)); z-index: 999"
         >
             <div class="floating-actions" :class="{ 'is-expanded': state.floatingActionsExpanded }">
                 <button
@@ -1619,7 +1619,7 @@ watchEffect(() => {
 
     &.active {
         background-color: @primary-color;
-        color: #fff; // Always white on primary
+        color: @text-on-primary;
         box-shadow: 0 4px 12px rgba(var(--color-primary-rgb), 0.3);
     }
 
@@ -1964,7 +1964,7 @@ watchEffect(() => {
     font-size: 0.75rem;
     padding: 2px 8px;
     background: @primary-color;
-    color: #fff; // Keep white on primary badge
+    color: @text-on-primary;
     border-radius: 12px;
     flex-shrink: 0;
 }
@@ -1982,10 +1982,7 @@ watchEffect(() => {
         justify-content: center;
         border: 1px solid @border-color;
         border-radius: 6px;
-        border: 1px solid @border-color;
-        border-radius: 6px;
         background: @background-white;
-        color: @text-secondary;
         color: @text-secondary;
         cursor: pointer;
         transition: all 0.2s;
@@ -2039,7 +2036,6 @@ watchEffect(() => {
 #log-container {
     flex: 1;
     overflow-y: auto;
-    padding: 20px;
     padding: 20px;
     margin: 0;
     background: @background-white;
@@ -2230,7 +2226,7 @@ watchEffect(() => {
 
         &.is-active {
             background: @primary-color;
-            color: #fff;
+            color: @text-on-primary;
             border-radius: @border-radius-circle; /* Become round when expanded */
 
             svg {
