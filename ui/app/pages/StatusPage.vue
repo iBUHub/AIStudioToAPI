@@ -158,7 +158,9 @@
                                     </svg>
                                     {{ t("serviceStatus") }}
                                 </span>
-                                <span class="value" :class="serviceConnectedClass">{{ serviceConnectedText }}</span>
+                                <span class="value status-text-bold" :class="serviceConnectedClass">{{
+                                    serviceConnectedText
+                                }}</span>
                             </div>
                             <div v-if="state.serviceConnected" class="status-item">
                                 <span class="label">
@@ -178,7 +180,9 @@
                                     </svg>
                                     {{ t("browserConnection") }}
                                 </span>
-                                <span class="value" :class="browserConnectedClass">{{ browserConnectedText }}</span>
+                                <span class="value status-text-bold" :class="browserConnectedClass">{{
+                                    browserConnectedText
+                                }}</span>
                             </div>
                         </div>
                     </div>
@@ -207,10 +211,9 @@
                                     {{ t("currentAccount") }}
                                 </span>
                                 <span class="value account-value">
-                                    #{{ state.currentAuthIndex }}
-                                    <span class="account-name" :class="currentAccountNameClass"
-                                        >({{ currentAccountName }})</span
-                                    >
+                                    <span class="account-name" :class="currentAccountNameClass">
+                                        #{{ state.currentAuthIndex }} {{ currentAccountName }}
+                                    </span>
                                 </span>
                             </div>
                             <div class="status-item">
@@ -282,11 +285,19 @@
                                     >
                                         <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
                                     </svg>
-                                    {{ t("streamingMode") }}
+                                    <span>
+                                        {{ t("streamingMode") }}
+                                        <span
+                                            style="font-size: 0.8em; color: #888; font-weight: normal; margin-left: 4px"
+                                            >({{ t("onlyAppliesWhenStreamingEnabled") }})</span
+                                        >
+                                    </span>
                                 </span>
-                                <span class="value" :class="state.streamingModeReal ? 'status-ok' : 'status-error'">{{
-                                    state.streamingModeReal ? t("enabled") : t("disabled")
-                                }}</span>
+                                <span
+                                    class="value status-text-bold"
+                                    :class="state.streamingModeReal ? 'status-ok' : 'status-error'"
+                                    >{{ state.streamingModeReal ? t("real") : t("fake") }}</span
+                                >
                             </div>
                             <div class="status-item">
                                 <span class="label">
@@ -309,7 +320,7 @@
                                     {{ t("forceThinking") }}
                                 </span>
                                 <span
-                                    class="value"
+                                    class="value status-text-bold"
                                     :class="state.forceThinkingEnabled ? 'status-ok' : 'status-error'"
                                     >{{ state.forceThinkingEnabled ? t("enabled") : t("disabled") }}</span
                                 >
@@ -337,7 +348,7 @@
                                     {{ t("forceWebSearch") }}
                                 </span>
                                 <span
-                                    class="value"
+                                    class="value status-text-bold"
                                     :class="state.forceWebSearchEnabled ? 'status-ok' : 'status-error'"
                                     >{{ state.forceWebSearchEnabled ? t("enabled") : t("disabled") }}</span
                                 >
@@ -362,7 +373,7 @@
                                     {{ t("forceUrlContext") }}
                                 </span>
                                 <span
-                                    class="value"
+                                    class="value status-text-bold"
                                     :class="state.forceUrlContextEnabled ? 'status-ok' : 'status-error'"
                                     >{{ state.forceUrlContextEnabled ? t("enabled") : t("disabled") }}</span
                                 >
@@ -467,20 +478,27 @@
                                 class="account-list-item"
                                 :class="{ 'is-current': item.index === state.currentAuthIndex }"
                             >
-                                <div class="account-info">
-                                    <span class="account-index">#{{ item.index }}</span>
-                                    <span class="account-email" :class="{ 'is-error': item.isInvalid }">
-                                        {{ getAccountDisplayName(item) }}
-                                    </span>
-                                    <span v-if="item.index === state.currentAuthIndex" class="current-badge">
-                                        {{ t("currentAccount") }}
-                                    </span>
-                                </div>
+                                <el-tooltip
+                                    :content="getAccountDisplayName(item)"
+                                    placement="top"
+                                    effect="dark"
+                                    :hide-after="0"
+                                >
+                                    <div class="account-info" style="cursor: pointer">
+                                        <span class="account-index">#{{ item.index }}</span>
+                                        <span class="account-email" :class="{ 'is-error': item.isInvalid }">
+                                            {{ getAccountDisplayName(item) }}
+                                        </span>
+                                        <span v-if="item.index === state.currentAuthIndex" class="current-badge">
+                                            {{ t("tagCurrent") }}
+                                        </span>
+                                    </div>
+                                </el-tooltip>
                                 <div class="account-actions">
                                     <button
                                         :disabled="isBusy || item.index === state.currentAuthIndex"
                                         :title="t('btnSwitchAccount')"
-                                        @click="switchAccountByIndex(item.index)"
+                                        @click.stop="switchAccountByIndex(item.index)"
                                     >
                                         <svg
                                             xmlns="http://www.w3.org/2000/svg"
@@ -498,7 +516,7 @@
                                         class="btn-danger"
                                         :disabled="isBusy"
                                         :title="t('btnDeleteUser')"
-                                        @click="deleteAccountByIndex(item.index)"
+                                        @click.stop="deleteAccountByIndex(item.index)"
                                     >
                                         <svg
                                             xmlns="http://www.w3.org/2000/svg"
@@ -519,7 +537,7 @@
                                             <line x1="14" y1="11" x2="14" y2="17"></line>
                                         </svg>
                                     </button>
-                                    <button :title="t('download')" @click="downloadAccountByIndex(item.index)">
+                                    <button :title="t('download')" @click.stop="downloadAccountByIndex(item.index)">
                                         <svg
                                             xmlns="http://www.w3.org/2000/svg"
                                             width="16"
@@ -753,6 +771,10 @@
                                 <span class="label">{{ t("streamingMode") }}</span>
                                 <el-switch
                                     v-model="state.streamingModeReal"
+                                    inline-prompt
+                                    :width="50"
+                                    :active-text="t('real')"
+                                    :inactive-text="t('fake')"
                                     :before-change="handleStreamingModeBeforeChange"
                                 />
                             </div>
@@ -760,6 +782,7 @@
                                 <span class="label">{{ t("forceThinking") }}</span>
                                 <el-switch
                                     v-model="state.forceThinkingEnabled"
+                                    :width="50"
                                     :before-change="handleForceThinkingBeforeChange"
                                 />
                             </div>
@@ -767,6 +790,7 @@
                                 <span class="label">{{ t("forceWebSearch") }}</span>
                                 <el-switch
                                     v-model="state.forceWebSearchEnabled"
+                                    :width="50"
                                     :before-change="handleForceWebSearchBeforeChange"
                                 />
                             </div>
@@ -774,6 +798,7 @@
                                 <span class="label">{{ t("forceUrlContext") }}</span>
                                 <el-switch
                                     v-model="state.forceUrlContextEnabled"
+                                    :width="50"
                                     :before-change="handleForceUrlContextBeforeChange"
                                 />
                             </div>
@@ -783,7 +808,7 @@
             </div>
 
             <!-- LOGS VIEW -->
-            <div v-if="activeTab === 'logs'" class="view-container">
+            <div v-if="activeTab === 'logs'" class="view-container mobile-logs-view">
                 <header class="page-header">
                     <h1>{{ t("realtimeLogs") }} ({{ state.logCount }})</h1>
                 </header>
@@ -1633,20 +1658,31 @@ watchEffect(() => {
     font-family: @font-family-mono;
 }
 
+.status-text-bold {
+    font-weight: 700 !important;
+    opacity: 1 !important;
+}
+
 .account-value {
-    display: inline-flex;
-    align-items: baseline;
+    display: flex;
+    justify-content: flex-end;
+    align-items: flex-start; /* Align to top for multiline names */
+    gap: 6px;
     min-width: 0;
     max-width: 100%;
+    text-align: right;
+}
+
+.account-idx-display {
+    white-space: nowrap;
 }
 
 .account-name {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
     max-width: 450px;
+    word-break: break-word;
+    white-space: normal;
     min-width: 0;
-    margin-left: 0.5em;
+    text-align: right;
 }
 
 @media (min-width: 600px) {
@@ -1803,7 +1839,7 @@ watchEffect(() => {
 .account-info {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 5px;
     flex: 1;
     min-width: 0;
 }
@@ -2066,7 +2102,35 @@ watchEffect(() => {
 
     .content-area {
         margin-left: 0;
-        padding-bottom: 80px;
+        padding: 16px;
+        padding-bottom: 90px;
+    }
+
+    .mobile-logs-view {
+        /* Calculate height: 100vh - top padding (16px) - bottom padding (90px) */
+        height: calc(100vh - 106px);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+
+    .mobile-logs-view .page-header {
+        flex-shrink: 0;
+        margin-bottom: 16px;
+    }
+
+    .mobile-logs-view .logs-card {
+        flex: 1;
+        height: auto !important; /* Override previous fixed height, use flex for responsiveness */
+        margin-bottom: 0;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .mobile-logs-view #log-container {
+        flex: 1;
+        overflow-y: auto;
     }
 }
 
