@@ -252,7 +252,7 @@ class BrowserManager {
                 const destY = i === steps ? targetY : intermediateY;
 
                 await page.mouse.move(destX, destY, {
-                    steps: 10 + Math.floor(Math.random() * 10), // Random speed
+                    steps: 5 + Math.floor(Math.random() * 5), // Optimized speed (was 10-20)
                 });
             }
         } catch (e) {
@@ -323,24 +323,27 @@ class BrowserManager {
 
             try {
                 // 1. Keep-Alive: Random micro-actions (30% chance)
-                if (Math.random() > 0.3) {
+                if (Math.random() < 0.3) {
                     try {
+                        // Optimized randomness based on viewport
+                        const vp = page.viewportSize() || { height: 1080, width: 1920 };
+
                         // Scroll
                         // eslint-disable-next-line no-undef
                         await page.evaluate(() => window.scrollBy(0, (Math.random() - 0.5) * 20));
-                        // Mouse jitter
-                        const x = Math.floor(Math.random() * 500);
-                        const y = Math.floor(Math.random() * 500);
-                        await page.mouse.move(x, y, { steps: 5 });
+                        // Human-like mouse jitter
+                        const x = Math.floor(Math.random() * (vp.width * 0.8));
+                        const y = Math.floor(Math.random() * (vp.height * 0.8));
+                        await this._simulateHumanMovement(page, x, y);
                     } catch (e) {
                         /* empty */
                     }
                 }
 
-                // 2. Anti-Timeout: Click (1,1) every ~1 minute (15 ticks)
+                // 2. Anti-Timeout: Click top-left corner (1,1) every ~1 minute (15 ticks)
                 if (tickCount % 15 === 0) {
                     try {
-                        await page.mouse.move(1, 1, { steps: 5 });
+                        await this._simulateHumanMovement(page, 1, 1);
                         await page.mouse.down();
                         await page.waitForTimeout(100 + Math.random() * 100);
                         await page.mouse.up();
@@ -421,8 +424,10 @@ class BrowserManager {
                 await currentPage.bringToFront().catch(() => {});
 
                 // Micro-movements to trigger rendering frames in headless mode
-                await currentPage.mouse.move(10, 10);
-                await currentPage.mouse.move(20, 20);
+                const vp = currentPage.viewportSize() || { height: 1080, width: 1920 };
+                const moveX = Math.floor(Math.random() * (vp.width * 0.3));
+                const moveY = Math.floor(Math.random() * (vp.height * 0.3));
+                await this._simulateHumanMovement(currentPage, moveX, moveY);
 
                 // 2. Intelligent Scan for "Launch" or "Rocket" button
                 const targetInfo = await currentPage.evaluate(() => {
@@ -761,7 +766,11 @@ class BrowserManager {
                 await this.page.bringToFront();
                 // eslint-disable-next-line no-undef
                 await this.page.evaluate(() => window.focus());
-                await this._simulateHumanMovement(this.page, 10, 10);
+                // Get viewport size for realistic movement range
+                const vp = this.page.viewportSize() || { height: 1080, width: 1920 };
+                const startX = Math.floor(Math.random() * (vp.width * 0.5));
+                const startY = Math.floor(Math.random() * (vp.height * 0.5));
+                await this._simulateHumanMovement(this.page, startX, startY);
                 await this.page.mouse.down();
                 await this.page.waitForTimeout(100);
                 await this.page.mouse.up();
@@ -790,14 +799,29 @@ class BrowserManager {
             // Wake up window using JS and Human Movement
             try {
                 await this.page.bringToFront();
-                await this._simulateHumanMovement(this.page, 10, 10); // Move to safe corner
+
+                // Get viewport size for realistic movement range
+                const vp = this.page.viewportSize() || { height: 1080, width: 1920 };
+
+                // Move to a random start point (Top-Left quadrant)
+                const startX = Math.floor(Math.random() * (vp.width * 0.4));
+                const startY = Math.floor(Math.random() * (vp.height * 0.4));
+                await this._simulateHumanMovement(this.page, startX, startY);
+
                 await this.page.mouse.down();
                 await this.page.waitForTimeout(50 + Math.random() * 150);
                 await this.page.mouse.up();
-                await this._simulateHumanMovement(this.page, 100, 100);
-                this.logger.info("[Browser] ✅ Executed human-like page activation (path + click).");
+
+                // Move to a random end point (Bottom-Right quadrant)
+                const endX = Math.floor(vp.width * 0.6 + Math.random() * (vp.width * 0.3));
+                const endY = Math.floor(vp.height * 0.6 + Math.random() * (vp.height * 0.3));
+                await this._simulateHumanMovement(this.page, endX, endY);
+
+                this.logger.info(
+                    `[Browser] ✅ Executed realistic page activation (${startX},${startY} -> ${endX},${endY}).`
+                );
             } catch (e) {
-                /* Ignore wakeup errors */
+                this.logger.warn(`[Browser] Wakeup minor error: ${e.message}`);
             }
             await this.page.waitForTimeout(2000 + Math.random() * 2000);
 
@@ -867,8 +891,8 @@ class BrowserManager {
             // - Consecutive idle tracking: exit after N consecutive iterations with no new popups
             const maxIterations = 12; // Max polling iterations
             const pollInterval = 500; // Interval between polls (ms)
-            const minIterations = 4; // Min iterations (2s), ensure slow popups have time to load
-            const idleThreshold = 3; // Exit after N consecutive iterations with no new popups
+            const minIterations = 6; // Min iterations (3s), ensure slow popups have time to load
+            const idleThreshold = 4; // Exit after N consecutive iterations with no new popups
             const handledPopups = new Set();
             let consecutiveIdleCount = 0; // Counter for consecutive idle iterations
 
