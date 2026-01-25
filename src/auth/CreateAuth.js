@@ -21,19 +21,36 @@ class CreateAuth {
         this.config = serverSystem.config;
         this.vncSession = null;
         this.isVncOperationInProgress = false; // Mutex for VNC operations
+        this.currentVncAbortController = null; // Controller to abort ongoing setup
     }
 
-    _waitForPort(port, timeout = 5000) {
+    _waitForPort(port, timeout = 5000, signal = null) {
         return new Promise((resolve, reject) => {
             const startTime = Date.now();
+
+            const onAbort = () => {
+                reject(new Error("VNC_SETUP_ABORTED"));
+            };
+            if (signal) {
+                if (signal.aborted) return onAbort();
+                signal.addEventListener("abort", onAbort);
+            }
+
             const tryConnect = () => {
+                if (signal?.aborted) return; // Stop retrying
+
                 const socket = new net.Socket();
                 socket.on("connect", () => {
                     socket.end();
+                    if (signal) signal.removeEventListener("abort", onAbort);
                     resolve();
                 });
                 socket.on("error", () => {
+                    socket.destroy();
+                    if (signal?.aborted) return; // Don't schedule next retry if aborted
+
                     if (Date.now() - startTime > timeout) {
+                        if (signal) signal.removeEventListener("abort", onAbort);
                         reject(new Error(`Timeout waiting for port ${port}`));
                     } else {
                         setTimeout(tryConnect, 100);
@@ -51,18 +68,54 @@ class CreateAuth {
             return res.status(501).json({ message: "errorVncUnsupportedOs" });
         }
 
+        // --- Concurrency Handling with Interruption ---
         if (this.isVncOperationInProgress) {
-            this.logger.warn("[VNC] A VNC operation is already in progress. Please wait.");
-            return res.status(429).json({ message: "errorVncInProgress" });
+            this.logger.warn("[VNC] A VNC operation is already in progress. Signal interruption...");
+
+            if (this.currentVncAbortController) {
+                this.currentVncAbortController.abort();
+            }
+
+            // Wait for the previous operation to clean up and release the lock
+            const waitStart = Date.now();
+            while (this.isVncOperationInProgress) {
+                // If another session managed to start while we were waiting, abort it too.
+                // This ensures the latest request always wins and doesn't queue up behind others.
+                if (this.currentVncAbortController) {
+                    this.currentVncAbortController.abort();
+                }
+
+                if (Date.now() - waitStart > 2500) {
+                    // Maximum wait 2.5s (2s cleanup + buffer)
+                    this.logger.error("[VNC] Timeout waiting for previous session to abort.");
+                    return res.status(503).json({ message: "errorVncBusyTimeout" });
+                }
+                await new Promise(resolve => setTimeout(resolve, 200));
+            }
+            this.logger.info("[VNC] Lock acquired after previous session cleanup.");
         }
 
         this.isVncOperationInProgress = true;
+        this.currentVncAbortController = new AbortController();
+        const { signal } = this.currentVncAbortController;
+
+        const checkAborted = () => {
+            if (signal.aborted) {
+                throw new Error("VNC_SETUP_ABORTED");
+            }
+        };
 
         try {
+            // Check immediately
+            checkAborted();
+
             // Always clean up any existing session before starting a new one
             await this._cleanupVncSession("new_session_request");
+            checkAborted();
+
             // Add a small delay to ensure OS releases ports
             await new Promise(resolve => setTimeout(resolve, 200));
+            checkAborted();
 
             const userAgent = req.headers["user-agent"] || "";
             const isMobile = /Mobi|Android/i.test(userAgent);
@@ -82,6 +135,7 @@ class CreateAuth {
             const display = ":99";
 
             const sessionResources = {};
+            this.vncSession = sessionResources; // Early assignment to ensure cleanup works on error/abort
 
             const cleanup = reason => this._cleanupVncSession(reason);
 
@@ -112,6 +166,7 @@ class CreateAuth {
 
             // Wait for Xvfb to be ready
             await new Promise(resolve => setTimeout(resolve, 500));
+            checkAborted();
 
             this.logger.info(`[VNC] Starting VNC server (x11vnc) on port ${vncPort}...`);
             const x11vnc = spawn("x11vnc", [
@@ -151,8 +206,9 @@ class CreateAuth {
             });
             sessionResources.x11vnc = x11vnc;
 
-            await this._waitForPort(vncPort);
+            await this._waitForPort(vncPort, 5000, signal);
             this.logger.info("[VNC] VNC server is ready.");
+            checkAborted();
 
             this.logger.info(`[VNC] Starting websockify on port ${websockifyPort}...`);
             const websockify = spawn("websockify", [String(websockifyPort), `localhost:${vncPort}`]);
@@ -200,8 +256,9 @@ class CreateAuth {
             });
             sessionResources.websockify = websockify;
 
-            await this._waitForPort(websockifyPort);
+            await this._waitForPort(websockifyPort, 5000, signal);
             this.logger.info("[VNC] Websockify is ready.");
+            checkAborted();
 
             this.logger.info("[VNC] Launching browser for VNC session...");
             const { browser, context } = await this.serverSystem.browserManager.launchBrowserForVNC({
@@ -215,6 +272,9 @@ class CreateAuth {
                 this.logger.warn("[VNC] Browser disconnected. Triggering cleanup.");
                 cleanup("browser_disconnected");
             });
+
+            // Double check before heavy page load
+            checkAborted();
 
             const page = await context.newPage();
 
@@ -246,6 +306,7 @@ class CreateAuth {
                 waitUntil: "domcontentloaded",
             });
             sessionResources.page = page;
+            checkAborted();
 
             sessionResources.timeoutHandle = setTimeout(
                 () => {
@@ -260,11 +321,36 @@ class CreateAuth {
             this.logger.info(`[VNC] VNC session is live and accessible via the server's WebSocket proxy.`);
             res.json({ protocol: "websocket", success: true });
         } catch (error) {
-            this.logger.error(`[VNC] Failed to start VNC session: ${error.message}`);
-            await this._cleanupVncSession("startup_error");
-            res.status(500).json({ message: "errorVncStartFailed" });
+            if (error.message === "VNC_SETUP_ABORTED") {
+                this.logger.warn("[VNC] Current session setup aborted by new incoming request.");
+                await this._cleanupVncSession("setup_aborted");
+                // Do NOT respond with error, as checkAborted() is called mid-flight.
+                // The new request is waiting at the top of the function.
+                // However, wait... if this is the OLD request, we should probably just return/end.
+                // But the CLIENT of the OLD request might still be pending?
+                // Yes, the OLD client is waiting for res.json().
+                // We should probably tell the OLD client "Request Aborted/Cancelled".
+                if (!res.headersSent) {
+                    res.status(499).json({ message: "errorVncSetupAborted" }); // 499 Client Closed Request (Nginx style) or just 503
+                }
+            } else {
+                this.logger.error(`[VNC] Failed to start VNC session: ${error.message}`);
+                await this._cleanupVncSession("startup_error");
+                if (!res.headersSent) {
+                    res.status(500).json({ message: "errorVncStartFailed" });
+                }
+            }
         } finally {
+            // Only release lock if *this* instance holds it.
+            // Actually, since we abort the old one, the startVncSession of the OLD one will hit 'finally'.
+            // The NEW one is waiting for isVncOperationInProgress to be false.
+            // If the OLD one clears it, the NEW one grabs it.
+            // But wait, if multiple requests queue up, we want to be careful.
+            // But here we only have boolean flag.
+
+            // If we aborted processing, we should release the lock.
             this.isVncOperationInProgress = false;
+            this.currentVncAbortController = null;
         }
     }
 
@@ -381,21 +467,18 @@ class CreateAuth {
             Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), ms))]);
 
         try {
-            if (context) {
-                // Wait max 2 seconds for context to close, otherwise proceed
+            if (browser) {
+                // Optimize: Browser close includes context close.
+                // Only need to wait for browser. Max 2 seconds.
+                await withTimeout(browser.close(), 2000);
+            } else if (context) {
+                // Fallback: If no browser (failed launch), try valid context
                 await withTimeout(context.close(), 2000);
             }
         } catch (e) {
-            // Ignore errors or timeouts
-        }
-
-        try {
-            if (browser) {
-                // Wait max 2 seconds for browser to close, otherwise proceed
-                await withTimeout(browser.close(), 2000);
-            }
-        } catch (e) {
-            this.logger.info(`[VNC] Browser close timed out or failed: ${e.message}. Proceeding to force kill.`);
+            this.logger.info(
+                `[VNC] Browser/Context close timed out or failed: ${e.message}. Proceeding to force kill.`
+            );
         }
 
         const killProcess = (proc, name) => {
