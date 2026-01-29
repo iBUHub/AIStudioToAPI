@@ -42,23 +42,22 @@ class WebRoutes {
         app.set("trust proxy", 1);
 
         app.use(cookieParser());
-        app.use(
-            session({
-                cookie: {
-                    httpOnly: true,
+        this.sessionParser = session({
+            cookie: {
+                httpOnly: true,
 
-                    maxAge: 86400000,
+                maxAge: 86400000,
 
-                    sameSite: "lax",
-                    // This allows HTTP access in production if HTTPS is not configured
-                    // Set SECURE_COOKIES=true when using HTTPS/SSL
-                    secure: process.env.SECURE_COOKIES?.toLowerCase() === "true",
-                },
-                resave: false,
-                saveUninitialized: false,
-                secret: sessionSecret,
-            })
-        );
+                sameSite: "lax",
+                // This allows HTTP access in production if HTTPS is not configured
+                // Set SECURE_COOKIES=true when using HTTPS/SSL
+                secure: process.env.SECURE_COOKIES?.toLowerCase() === "true",
+            },
+            resave: false,
+            saveUninitialized: false,
+            secret: sessionSecret,
+        });
+        app.use(this.sessionParser);
 
         // Setup all route handlers
         this.authRoutes.setupRoutes(app);
