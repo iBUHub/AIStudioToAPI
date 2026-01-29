@@ -125,16 +125,6 @@ class ProxyServerSystem extends EventEmitter {
 
     _createAuthMiddleware() {
         return (req, res, next) => {
-            // strict method check for static files
-            const staticPrefixes = ["/assets/", "/AIStudio_logo.svg", "/AIStudio_icon.svg", "/locales/"];
-            const isStaticFile =
-                req.method === "GET" &&
-                staticPrefixes.some(prefix => req.path.startsWith(prefix) || req.path === prefix);
-
-            if (isStaticFile) {
-                return next();
-            }
-
             // Allow access if session is authenticated (e.g. browser accessing /vnc or API from UI)
             if (req.session && req.session.isAuthenticated) {
                 if (req.path === "/vnc") {
