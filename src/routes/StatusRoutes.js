@@ -416,21 +416,6 @@ class StatusRoutes {
         });
     }
 
-    /**
-     * Escape HTML to prevent XSS attacks
-     */
-    _escapeHtml(text) {
-        const htmlEscapeMap = {
-            '"': "&quot;",
-            "&": "&amp;",
-            "'": "&#x27;",
-            "/": "&#x2F;",
-            "<": "&lt;",
-            ">": "&gt;",
-        };
-        return text.replace(/[&<>"'/]/g, char => htmlEscapeMap[char]);
-    }
-
     _getStatusData() {
         const { config, requestHandler, authSource, browserManager } = this.serverSystem;
         const initialIndices = authSource.initialIndices || [];
