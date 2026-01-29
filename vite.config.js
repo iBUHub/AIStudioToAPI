@@ -15,7 +15,7 @@ module.exports = defineConfig({
     },
     base: "/",
     build: {
-        assetsDir: "assests",
+        assetsDir: "assets",
         emptyOutDir: true,
         outDir: "../dist",
     },

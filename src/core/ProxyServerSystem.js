@@ -126,7 +126,7 @@ class ProxyServerSystem extends EventEmitter {
     _createAuthMiddleware() {
         return (req, res, next) => {
             // strict method check for static files
-            const staticPrefixes = ["/assests/", "/assets/", "/AIStudio_logo.svg", "/AIStudio_icon.svg", "/locales/"];
+            const staticPrefixes = ["/assets/", "/AIStudio_logo.svg", "/AIStudio_icon.svg", "/locales/"];
             const isStaticFile =
                 req.method === "GET" &&
                 staticPrefixes.some(prefix => req.path.startsWith(prefix) || req.path === prefix);
@@ -289,7 +289,6 @@ class ProxyServerSystem extends EventEmitter {
                 req.path !== "/login" &&
                 req.path !== "/health" &&
                 !req.path.startsWith("/locales/") &&
-                !req.path.startsWith("/assests/") &&
                 !req.path.startsWith("/assets/") &&
                 req.path !== "/AIStudio_logo.svg"
             ) {
