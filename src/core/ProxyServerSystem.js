@@ -206,9 +206,8 @@ class ProxyServerSystem extends EventEmitter {
                 // Use the session parser from WebRoutes to verify authentication
                 this.webRoutes.sessionParser(req, {}, () => {
                     if (!req.session || !req.session.isAuthenticated) {
-                        this.logger.warn(
-                            `[VNC Proxy] Unauthorized WebSocket connection attempt from ${req.socket.remoteAddress}`
-                        );
+                        const clientIp = this.webRoutes.authRoutes.getClientIP(req);
+                        this.logger.warn(`[VNC Proxy] Unauthorized WebSocket connection attempt from ${clientIp}`);
                         socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
                         socket.destroy();
                         return;
