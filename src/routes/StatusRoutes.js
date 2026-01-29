@@ -494,25 +494,6 @@ class StatusRoutes {
             },
         };
     }
-
-    /**
-     * Load HTML template and replace placeholders
-     */
-    _loadTemplate(templateName, data = {}) {
-        const templatePath = path.join(__dirname, "..", "ui", "templates", templateName);
-        let template = fs.readFileSync(templatePath, "utf8");
-
-        // Replace all {{placeholder}} with corresponding data
-        for (const [key, value] of Object.entries(data)) {
-            const regex = new RegExp(`{{${key}}}`, "g");
-
-            // HTML escape the value to prevent XSS (except for pre-built HTML like accountDetailsHtml)
-            const escapedValue = key.endsWith("Html") ? value : this._escapeHtml(String(value));
-            template = template.replace(regex, escapedValue);
-        }
-
-        return template;
-    }
 }
 
 module.exports = StatusRoutes;

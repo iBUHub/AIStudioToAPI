@@ -125,56 +125,11 @@ class ProxyServerSystem extends EventEmitter {
 
     _createAuthMiddleware() {
         return (req, res, next) => {
-            // Whitelist paths that don't require API key authentication
-            // Note: /, /api/status use session authentication instead
-            // Whitelist paths that don't require API key authentication (Method specific)
-            // Note: /, /api/status use session authentication instead
-            const whitelistRules = [
-                { methods: ["GET", "POST"], path: "/" }, // POST is 405 but handled
-                { methods: ["GET"], path: "/favicon.ico" },
-                { methods: ["GET", "POST"], path: "/login" },
-                { methods: ["GET"], path: "/health" },
-                { methods: ["GET"], path: "/api/status" },
-                { methods: ["GET"], path: "/api/version/check" },
-                { methods: ["PUT"], path: "/api/accounts/current" },
-                { methods: ["POST"], path: "/api/accounts/deduplicate" },
-                { methods: ["PUT"], path: "/api/settings/streaming-mode" },
-                { methods: ["PUT"], path: "/api/settings/force-thinking" },
-                { methods: ["PUT"], path: "/api/settings/force-web-search" },
-                { methods: ["PUT"], path: "/api/settings/force-url-context" },
-                { methods: ["PUT"], path: "/api/settings/debug-mode" },
-                { methods: ["PUT"], path: "/api/settings/log-max-count" },
-                { methods: ["GET"], path: "/auth" },
-                // VNC Routes must be accessible for authenticated sessions (which bypass key check via session check below),
-                // but checking here explicitely is safer
-                { methods: ["POST", "DELETE"], path: "/api/vnc/sessions" },
-                { methods: ["POST"], path: "/api/vnc/auth" },
-                { methods: ["POST"], path: "/api/files" },
-            ];
-
-            // Whitelist path patterns (regex) with allowed methods
-            const whitelistPatterns = [
-                { methods: ["DELETE"], pattern: /^\/api\/accounts\/\d+$/ }, // Matches /api/accounts/:index for DELETE operations
-                { methods: ["GET"], pattern: /^\/api\/files\/[a-zA-Z0-9.-]+$/ },
-            ];
-
             // strict method check for static files
             const staticPrefixes = ["/assests/", "/assets/", "/AIStudio_logo.svg", "/AIStudio_icon.svg", "/locales/"];
             const isStaticFile =
                 req.method === "GET" &&
                 staticPrefixes.some(prefix => req.path.startsWith(prefix) || req.path === prefix);
-
-            // Check exact path match
-            const matchedRule = whitelistRules.find(rule => rule.path === req.path);
-            if (matchedRule && matchedRule.methods.includes(req.method)) {
-                return next();
-            }
-
-            // Check pattern match
-            const matchedPattern = whitelistPatterns.find(rule => rule.pattern.test(req.path));
-            if (matchedPattern && matchedPattern.methods.includes(req.method)) {
-                return next();
-            }
 
             if (isStaticFile) {
                 return next();
@@ -332,7 +287,11 @@ class ProxyServerSystem extends EventEmitter {
                 req.path !== "/" &&
                 req.path !== "/favicon.ico" &&
                 req.path !== "/login" &&
-                req.path !== "/health"
+                req.path !== "/health" &&
+                !req.path.startsWith("/locales/") &&
+                !req.path.startsWith("/assests/") &&
+                !req.path.startsWith("/assets/") &&
+                req.path !== "/AIStudio_logo.svg"
             ) {
                 this.logger.info(`[Entrypoint] Received a request: ${req.method} ${req.path}`);
             }
