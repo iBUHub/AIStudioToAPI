@@ -293,7 +293,8 @@ class ProxyServerSystem extends EventEmitter {
                 req.path !== "/health" &&
                 !req.path.startsWith("/locales/") &&
                 !req.path.startsWith("/assets/") &&
-                req.path !== "/AIStudio_logo.svg"
+                req.path !== "/AIStudio_logo.svg" &&
+                req.path !== "/AIStudio_icon.svg"
             ) {
                 this.logger.info(`[Entrypoint] Received a request: ${req.method} ${req.path}`);
             }
