@@ -303,7 +303,11 @@ class CreateAuth {
                 }
 
                 // Log normal connection info as INFO
-                if (msg.includes("Plain non-SSL (ws://) WebSocket connection") || msg.includes("Path: '/vnc'")) {
+                if (
+                    msg.includes("Plain non-SSL (ws://) WebSocket connection") ||
+                    msg.includes("Path: '/vnc'") ||
+                    msg.includes("connecting to:")
+                ) {
                     this.logger.info(`[VNC:Proxy] ${msg.trim()}`);
                     return;
                 }
