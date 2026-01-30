@@ -56,6 +56,29 @@ class RequestHandler {
         return this.authSwitcher.switchToSpecificAuth(targetIndex);
     }
 
+    async _waitForGraceReconnect(timeoutMs = 60000) {
+        const start = Date.now();
+        while (Date.now() - start < timeoutMs) {
+            if (!this.connectionRegistry.isInGracePeriod()) {
+                return this.connectionRegistry.hasActiveConnections();
+            }
+            if (this.connectionRegistry.hasActiveConnections()) {
+                return true;
+            }
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        return this.connectionRegistry.hasActiveConnections();
+    }
+
+    _isConnectionResetError(error) {
+        if (!error || !error.message) return false;
+        return (
+            error.message.includes("Queue closed") ||
+            error.message.includes("Queue is closed") ||
+            error.message.includes("Connection lost")
+        );
+    }
+
     /**
      * Wait for WebSocket connection to be established
      * @param {number} timeoutMs - Maximum time to wait in milliseconds
@@ -113,6 +136,21 @@ class RequestHandler {
      * @returns {boolean} true if recovery successful, false otherwise
      */
     async _handleBrowserRecovery(res) {
+        // If ConnectionRegistry is still within its reconnect grace period,
+        // wait a short time to allow the browser client to auto-reconnect
+        // and avoid unnecessary restart/switch.
+        if (this.connectionRegistry.isInGracePeriod()) {
+            this.logger.info(
+                "[System] WebSocket disconnected, awaiting grace-period reconnection before triggering recovery..."
+            );
+            const reconnected = await this._waitForGraceReconnect();
+            if (reconnected) {
+                this.logger.info("[System] Connection restored during grace period, skipping recovery.");
+                return true;
+            }
+            this.logger.warn("[System] Grace period elapsed without reconnection, proceeding to recovery workflow.");
+        }
+
         // Wait for system to become ready if it's busy (someone else is starting/switching browser)
         if (this.authSwitcher.isSystemBusy) {
             const ready = await this._waitForSystemReady();
@@ -498,8 +536,14 @@ class RequestHandler {
                     // Send standard HTTP error response
                     this._sendErrorResponse(res, initialMessage.status || 500, initialMessage.message);
 
-                    // Handle account switch without sending callback to client (response is closed)
-                    await this.authSwitcher.handleRequestFailureAndSwitch(initialMessage, null);
+                    // Avoid switching account if the error is just a connection reset
+                    if (!this._isConnectionResetError(initialMessage)) {
+                        await this.authSwitcher.handleRequestFailureAndSwitch(initialMessage, null);
+                    } else {
+                        this.logger.info(
+                            "[Request] Failure due to connection reset (Real Stream), skipping account switch."
+                        );
+                    }
                     return;
                 }
 
@@ -549,8 +593,14 @@ class RequestHandler {
                         if (connectionMaintainer) clearTimeout(connectionMaintainer);
                         this._sendErrorResponse(res, result.error.status || 500, result.error.message);
 
-                        // Handle account switch without sending callback to client
-                        await this.authSwitcher.handleRequestFailureAndSwitch(result.error, null);
+                        // Avoid switching account if the error is just a connection reset
+                        if (!this._isConnectionResetError(result.error)) {
+                            await this.authSwitcher.handleRequestFailureAndSwitch(result.error, null);
+                        } else {
+                            this.logger.info(
+                                "[Request] Failure due to connection reset (OpenAI), skipping account switch."
+                            );
+                        }
                         return;
                     }
 
@@ -663,8 +713,14 @@ class RequestHandler {
                     // Send standard HTTP error response
                     this._sendErrorResponse(res, result.error.status || 500, result.error.message);
 
-                    // Handle account switch without sending callback to client
-                    await this.authSwitcher.handleRequestFailureAndSwitch(result.error, null);
+                    // Avoid switching account if the error is just a connection reset
+                    if (!this._isConnectionResetError(result.error)) {
+                        await this.authSwitcher.handleRequestFailureAndSwitch(result.error, null);
+                    } else {
+                        this.logger.info(
+                            "[Request] Failure due to connection reset (Gemini Non-Stream), skipping account switch."
+                        );
+                    }
                 }
                 return;
             }
@@ -808,7 +864,14 @@ class RequestHandler {
                 );
             } else {
                 this.logger.error(`[Request] Request failed, will be counted in failure statistics.`);
-                await this.authSwitcher.handleRequestFailureAndSwitch(headerMessage, null);
+                // Avoid switching account if the error is just a connection reset
+                if (!this._isConnectionResetError(headerMessage)) {
+                    await this.authSwitcher.handleRequestFailureAndSwitch(headerMessage, null);
+                } else {
+                    this.logger.info(
+                        "[Request] Failure due to connection reset (Gemini Real Stream), skipping account switch."
+                    );
+                }
                 return this._sendErrorResponse(res, headerMessage.status, headerMessage.message);
             }
             if (!res.writableEnded) res.end();
@@ -880,7 +943,14 @@ class RequestHandler {
                     this.logger.info(`[Request] Request #${proxyRequest.request_id} was properly cancelled by user.`);
                 } else {
                     this.logger.error(`[Request] Browser returned error after retries: ${result.error.message}`);
-                    await this.authSwitcher.handleRequestFailureAndSwitch(result.error, null);
+                    // Avoid switching account if the error is just a connection reset
+                    if (!this._isConnectionResetError(result.error)) {
+                        await this.authSwitcher.handleRequestFailureAndSwitch(result.error, null);
+                    } else {
+                        this.logger.info(
+                            "[Request] Failure due to connection reset (Gemini Non-Stream), skipping account switch."
+                        );
+                    }
                 }
                 return this._sendErrorResponse(res, result.error.status || 500, result.error.message);
             }
@@ -1004,6 +1074,15 @@ class RequestHandler {
                     errorPayload = JSON.parse(error.message);
                 } catch (e) {
                     errorPayload = { message: error.message, status: 500 };
+                }
+
+                // Stop retrying immediately if the queue is closed (connection reset)
+                if (this._isConnectionResetError(errorPayload)) {
+                    this.logger.warn(
+                        `[Request] Message queue closed unexpectedly (likely due to connection reset), aborting retries.`
+                    );
+                    lastError = { message: "Connection lost (Queue closed)", status: 503 };
+                    break;
                 }
 
                 lastError = errorPayload;
@@ -1147,7 +1226,13 @@ class RequestHandler {
             if (!res.writableEnded) res.end();
         } else {
             this.logger.error(`[Request] Request processing error: ${error.message}`);
-            const status = error.message.toLowerCase().includes("timeout") ? 504 : 500;
+            let status = 500;
+            if (error.message.toLowerCase().includes("timeout")) {
+                status = 504;
+            } else if (this._isConnectionResetError(error)) {
+                status = 503;
+                this.logger.info("[Request] Mapping connection reset error to 503 Service Unavailable.");
+            }
             this._sendErrorResponse(res, status, `Proxy error: ${error.message}`);
         }
     }

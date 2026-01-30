@@ -31,7 +31,8 @@ class ConnectionRegistry extends EventEmitter {
         if (this.reconnectGraceTimer) {
             clearTimeout(this.reconnectGraceTimer);
             this.reconnectGraceTimer = null;
-            this.logger.info("[Server] New connection detected during grace period, canceling disconnect handling.");
+            this.messageQueues.forEach(queue => queue.close());
+            this.messageQueues.clear();
         }
 
         this.connections.add(websocket);
@@ -54,7 +55,7 @@ class ConnectionRegistry extends EventEmitter {
             clearTimeout(this.reconnectGraceTimer);
         }
 
-        this.logger.info("[Server] Starting 5-second reconnect grace period...");
+        this.logger.info("[Server] Starting 60-second reconnect grace period...");
         this.reconnectGraceTimer = setTimeout(async () => {
             this.logger.error(
                 "[Server] Grace period ended, no reconnection detected. Connection lost confirmed, cleaning up all pending requests..."
@@ -79,7 +80,7 @@ class ConnectionRegistry extends EventEmitter {
             this.emit("connectionLost");
 
             this.reconnectGraceTimer = null;
-        }, 5000);
+        }, 60000);
 
         this.emit("connectionRemoved", websocket);
     }
@@ -121,6 +122,10 @@ class ConnectionRegistry extends EventEmitter {
 
     hasActiveConnections() {
         return this.connections.size > 0;
+    }
+
+    isInGracePeriod() {
+        return !!this.reconnectGraceTimer;
     }
 
     getFirstConnection() {
