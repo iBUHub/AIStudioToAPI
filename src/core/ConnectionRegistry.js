@@ -77,6 +77,8 @@ class ConnectionRegistry extends EventEmitter {
             }
 
             this.emit("connectionLost");
+
+            this.reconnectGraceTimer = null;
         }, 5000);
 
         this.emit("connectionRemoved", websocket);
