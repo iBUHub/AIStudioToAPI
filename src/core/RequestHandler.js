@@ -134,7 +134,7 @@ class RequestHandler {
      * @returns {boolean} true if recovery successful, false otherwise
      */
     async _handleBrowserRecovery(res) {
-        // If within grace period or lightweight reconnect is running, wait up to 60s for WS恢复
+        // If within grace period or lightweight reconnect is running, wait up to 60s for WebSocket reconnection
         if (this.connectionRegistry.isInGracePeriod() || this.connectionRegistry.isReconnectingInProgress()) {
             this.logger.info(
                 "[System] Waiting up to 60s for WebSocket reconnection (grace/reconnect in progress) before full recovery..."
