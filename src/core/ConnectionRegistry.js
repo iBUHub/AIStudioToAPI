@@ -55,8 +55,6 @@ class ConnectionRegistry extends EventEmitter {
             clearTimeout(this.reconnectGraceTimer);
         }
 
-        const reconnectTimeoutMs = 55000;
-
         this.logger.info("[Server] Starting 5-second reconnect grace period...");
         this.reconnectGraceTimer = setTimeout(async () => {
             this.logger.error(
@@ -68,8 +66,9 @@ class ConnectionRegistry extends EventEmitter {
             // Attempt lightweight reconnect if callback is provided and not already reconnecting
             if (this.onConnectionLostCallback && !this.isReconnecting) {
                 this.isReconnecting = true;
+                const lightweightReconnectTimeoutMs = 55000;
                 this.logger.info(
-                    `[Server] Attempting lightweight reconnect (timeout ${reconnectTimeoutMs / 1000}s)...`
+                    `[Server] Attempting lightweight reconnect (timeout ${lightweightReconnectTimeoutMs / 1000}s)...`
                 );
                 let timeoutId;
                 try {
@@ -77,7 +76,7 @@ class ConnectionRegistry extends EventEmitter {
                     const timeoutPromise = new Promise((_, reject) => {
                         timeoutId = setTimeout(
                             () => reject(new Error("Lightweight reconnect timed out")),
-                            reconnectTimeoutMs
+                            lightweightReconnectTimeoutMs
                         );
                     });
                     await Promise.race([callbackPromise, timeoutPromise]);
