@@ -13,12 +13,18 @@ const MessageQueue = require("../utils/MessageQueue");
  * Responsible for managing WebSocket connections and message queues
  */
 class ConnectionRegistry extends EventEmitter {
-    constructor(logger) {
+    /**
+     * @param {Object} logger - Logger instance
+     * @param {Function} [onConnectionLostCallback] - Optional callback to invoke when connection is lost after grace period
+     */
+    constructor(logger, onConnectionLostCallback = null) {
         super();
         this.logger = logger;
+        this.onConnectionLostCallback = onConnectionLostCallback;
         this.connections = new Set();
         this.messageQueues = new Map();
         this.reconnectGraceTimer = null;
+        this.isReconnecting = false; // Flag to prevent multiple simultaneous reconnect attempts
     }
 
     addConnection(websocket, clientInfo) {
@@ -42,13 +48,34 @@ class ConnectionRegistry extends EventEmitter {
         this.connections.delete(websocket);
         this.logger.warn("[Server] Internal WebSocket client disconnected.");
 
+        // Clear any existing grace timer before starting a new one
+        // This prevents multiple timers from running if connections disconnect in quick succession
+        if (this.reconnectGraceTimer) {
+            clearTimeout(this.reconnectGraceTimer);
+        }
+
         this.logger.info("[Server] Starting 5-second reconnect grace period...");
-        this.reconnectGraceTimer = setTimeout(() => {
+        this.reconnectGraceTimer = setTimeout(async () => {
             this.logger.error(
                 "[Server] Grace period ended, no reconnection detected. Connection lost confirmed, cleaning up all pending requests..."
             );
             this.messageQueues.forEach(queue => queue.close());
             this.messageQueues.clear();
+
+            // Attempt lightweight reconnect if callback is provided and not already reconnecting
+            if (this.onConnectionLostCallback && !this.isReconnecting) {
+                this.isReconnecting = true;
+                this.logger.info("[Server] Attempting lightweight reconnect...");
+                try {
+                    await this.onConnectionLostCallback();
+                    this.logger.info("[Server] Lightweight reconnect callback completed.");
+                } catch (error) {
+                    this.logger.error(`[Server] Lightweight reconnect failed: ${error.message}`);
+                } finally {
+                    this.isReconnecting = false;
+                }
+            }
+
             this.emit("connectionLost");
         }, 5000);
 

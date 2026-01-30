@@ -27,6 +27,10 @@ class BrowserManager {
         this._currentAuthIndex = -1;
         this.scriptFileName = "build.js";
 
+        // Flag to distinguish intentional close from unexpected disconnect
+        // Used by ConnectionRegistry callback to skip unnecessary reconnect attempts
+        this.isClosingIntentionally = false;
+
         // Added for background wakeup logic from new core
         this.noButtonCount = 0;
 
@@ -297,6 +301,371 @@ class BrowserManager {
         }
 
         throw new Error('Unable to find "Code" button or alternatives (Smart Click Failed)');
+    }
+
+    /**
+     * Helper: Load and configure build.js script content
+     * Applies environment-specific configurations (TARGET_DOMAIN, WS_PORT, LOG_LEVEL)
+     * @returns {string} Configured build.js script content
+     */
+    _loadAndConfigureBuildScript() {
+        let buildScriptContent = fs.readFileSync(
+            path.join(__dirname, "..", "..", "scripts", "client", "build.js"),
+            "utf-8"
+        );
+
+        if (process.env.TARGET_DOMAIN) {
+            const lines = buildScriptContent.split("\n");
+            let domainReplaced = false;
+            for (let i = 0; i < lines.length; i++) {
+                if (lines[i].includes("this.targetDomain =")) {
+                    this.logger.info(`[Config] Found targetDomain line: ${lines[i]}`);
+                    lines[i] = `        this.targetDomain = "${process.env.TARGET_DOMAIN}";`;
+                    this.logger.info(`[Config] Replaced with: ${lines[i]}`);
+                    domainReplaced = true;
+                    break;
+                }
+            }
+            if (domainReplaced) {
+                buildScriptContent = lines.join("\n");
+            } else {
+                this.logger.warn("[Config] Failed to find targetDomain line in build.js, ignoring.");
+            }
+        }
+
+        if (process.env.WS_PORT) {
+            const lines = buildScriptContent.split("\n");
+            let portReplaced = false;
+            for (let i = 0; i < lines.length; i++) {
+                if (lines[i].includes('constructor(endpoint = "ws://127.0.0.1:9998")')) {
+                    this.logger.info(`[Config] Found port config line: ${lines[i]}`);
+                    lines[i] = `    constructor(endpoint = "ws://127.0.0.1:${process.env.WS_PORT}") {`;
+                    this.logger.info(`[Config] Replaced with: ${lines[i]}`);
+                    portReplaced = true;
+                    break;
+                }
+            }
+            if (portReplaced) {
+                buildScriptContent = lines.join("\n");
+            } else {
+                this.logger.warn("[Config] Failed to find port config line in build.js, using default.");
+            }
+        }
+
+        // Inject LOG_LEVEL configuration into build.js
+        // Read from LoggingService.currentLevel instead of environment variable
+        // This ensures runtime log level changes are respected when browser restarts
+        const LoggingService = require("../utils/LoggingService");
+        const currentLogLevel = LoggingService.currentLevel; // 0=DEBUG, 1=INFO, 2=WARN, 3=ERROR
+        const currentLogLevelName = LoggingService.getLevel(); // "DEBUG", "INFO", etc.
+
+        if (currentLogLevel !== 1) {
+            const lines = buildScriptContent.split("\n");
+            let levelReplaced = false;
+            for (let i = 0; i < lines.length; i++) {
+                // Match "currentLevel: <number>," pattern, ignoring comments
+                // This is more robust than looking for specific comments like "// Default: INFO"
+                if (/^\s*currentLevel:\s*\d+/.test(lines[i])) {
+                    this.logger.info(`[Config] Found LOG_LEVEL config line: ${lines[i]}`);
+                    lines[i] = `    currentLevel: ${currentLogLevel}, // Injected: ${currentLogLevelName}`;
+                    this.logger.info(`[Config] Replaced with: ${lines[i]}`);
+                    levelReplaced = true;
+                    break;
+                }
+            }
+            if (levelReplaced) {
+                buildScriptContent = lines.join("\n");
+            } else {
+                this.logger.warn("[Config] Failed to find LOG_LEVEL config line in build.js, using default INFO.");
+            }
+        }
+
+        return buildScriptContent;
+    }
+
+    /**
+     * Helper: Inject script into editor and activate
+     * Contains the common UI interaction logic for both launchOrSwitchContext and attemptLightweightReconnect
+     * @param {string} buildScriptContent - The script content to inject
+     * @param {string} logPrefix - Log prefix for step messages (e.g., "[Browser]" or "[Reconnect]")
+     */
+    async _injectScriptToEditor(buildScriptContent, logPrefix = "[Browser]") {
+        this.logger.info(`${logPrefix} Preparing UI interaction, forcefully removing all possible overlay layers...`);
+        /* eslint-disable no-undef */
+        await this.page.evaluate(() => {
+            const overlays = document.querySelectorAll("div.cdk-overlay-backdrop");
+            if (overlays.length > 0) {
+                console.log(`[ProxyClient] (Internal JS) Found and removed ${overlays.length} overlay layers.`);
+                overlays.forEach(el => el.remove());
+            }
+        });
+        /* eslint-enable no-undef */
+
+        this.logger.info(`${logPrefix} (Step 1/5) Preparing to click "Code" button...`);
+        const maxTimes = 15;
+        for (let i = 1; i <= maxTimes; i++) {
+            try {
+                this.logger.info(`  [Attempt ${i}/${maxTimes}] Cleaning overlay layers and clicking...`);
+                /* eslint-disable no-undef */
+                await this.page.evaluate(() => {
+                    document.querySelectorAll("div.cdk-overlay-backdrop").forEach(el => el.remove());
+                });
+                /* eslint-enable no-undef */
+                await this.page.waitForTimeout(500);
+
+                // Use Smart Click instead of hardcoded locator
+                await this._smartClickCode(this.page);
+
+                this.logger.info("  ✅ Click successful!");
+                break;
+            } catch (error) {
+                this.logger.warn(`  [Attempt ${i}/${maxTimes}] Click failed: ${error.message.split("\n")[0]}`);
+                if (i === maxTimes) {
+                    throw new Error(`Unable to click "Code" button after multiple attempts, initialization failed.`);
+                }
+            }
+        }
+
+        this.logger.info(
+            `${logPrefix} (Step 2/5) "Code" button clicked successfully, waiting for editor to become visible...`
+        );
+        const editorContainerLocator = this.page.locator("div.monaco-editor").first();
+        await editorContainerLocator.waitFor({
+            state: "visible",
+            timeout: 60000,
+        });
+
+        this.logger.info(
+            `${logPrefix} (Cleanup #2) Preparing to click editor, forcefully removing all possible overlay layers again...`
+        );
+        /* eslint-disable no-undef */
+        await this.page.evaluate(() => {
+            const overlays = document.querySelectorAll("div.cdk-overlay-backdrop");
+            if (overlays.length > 0) {
+                console.log(
+                    `[ProxyClient] (Internal JS) Found and removed ${overlays.length} newly appeared overlay layers.`
+                );
+                overlays.forEach(el => el.remove());
+            }
+        });
+        /* eslint-enable no-undef */
+        await this.page.waitForTimeout(250);
+
+        this.logger.info(`${logPrefix} (Step 3/5) Editor displayed, focusing and pasting script...`);
+        await editorContainerLocator.click({ timeout: 30000 });
+
+        /* eslint-disable no-undef */
+        await this.page.evaluate(text => navigator.clipboard.writeText(text), buildScriptContent);
+        /* eslint-enable no-undef */
+        const isMac = os.platform() === "darwin";
+        const pasteKey = isMac ? "Meta+V" : "Control+V";
+        await this.page.keyboard.press(pasteKey);
+        this.logger.info(`${logPrefix} (Step 4/5) Script pasted.`);
+        this.logger.info(`${logPrefix} (Step 5/5) Clicking "Preview" button to activate script...`);
+        await this.page.locator('button:text("Preview")').click();
+        this.logger.info(`${logPrefix} ✅ UI interaction complete, script is now running.`);
+
+        // Active Trigger (Hack to wake up Google Backend)
+        this.logger.info(`${logPrefix} ⚡ Sending active trigger request to Launch flow...`);
+        try {
+            await this.page.evaluate(async () => {
+                try {
+                    await fetch("https://generativelanguage.googleapis.com/v1beta/models?key=ActiveTrigger", {
+                        headers: { "Content-Type": "application/json" },
+                        method: "GET",
+                    });
+                } catch (e) {
+                    console.log("[ProxyClient] Active trigger sent");
+                }
+            });
+        } catch (e) {
+            /* empty */
+        }
+
+        this._startHealthMonitor();
+    }
+
+    /**
+     * Helper: Navigate to target page and wake up the page
+     * Contains the common navigation and page activation logic
+     * @param {string} logPrefix - Log prefix for messages (e.g., "[Browser]" or "[Reconnect]")
+     */
+    async _navigateAndWakeUpPage(logPrefix = "[Browser]") {
+        this.logger.info(`${logPrefix} Navigating to target page...`);
+        const targetUrl =
+            "https://aistudio.google.com/u/0/apps/bundled/blank?showPreview=true&showCode=true&showAssistant=true";
+        await this.page.goto(targetUrl, {
+            timeout: 180000,
+            waitUntil: "domcontentloaded",
+        });
+        this.logger.info(`${logPrefix} Page loaded.`);
+
+        // Wake up window using JS and Human Movement
+        try {
+            await this.page.bringToFront();
+
+            // Get viewport size for realistic movement range
+            const vp = this.page.viewportSize() || { height: 1080, width: 1920 };
+
+            // 1. Move to a random point to simulate activity
+            const randomX = Math.floor(Math.random() * (vp.width * 0.7));
+            const randomY = Math.floor(Math.random() * (vp.height * 0.7));
+            await this._simulateHumanMovement(this.page, randomX, randomY);
+
+            // 2. Move to (1,1) specifically for a safe click, using human simulation
+            await this._simulateHumanMovement(this.page, 1, 1);
+            await this.page.mouse.down();
+            await this.page.waitForTimeout(50 + Math.random() * 100);
+            await this.page.mouse.up();
+
+            this.logger.info(`${logPrefix} ✅ Executed realistic page activation (Random -> 1,1 Click).`);
+        } catch (e) {
+            this.logger.warn(`${logPrefix} Wakeup minor error: ${e.message}`);
+        }
+        await this.page.waitForTimeout(2000 + Math.random() * 2000);
+    }
+
+    /**
+     * Helper: Check page status and detect various error conditions
+     * Detects: cookie expiration, region restrictions, 403 errors, page load failures
+     * @param {string} logPrefix - Log prefix for messages (e.g., "[Browser]" or "[Reconnect]")
+     * @throws {Error} If any error condition is detected
+     */
+    async _checkPageStatusAndErrors(logPrefix = "[Browser]") {
+        const currentUrl = this.page.url();
+        let pageTitle = "";
+        try {
+            pageTitle = await this.page.title();
+        } catch (e) {
+            this.logger.warn(`${logPrefix} Unable to get page title: ${e.message}`);
+        }
+
+        this.logger.info(`${logPrefix} [Diagnostic] URL: ${currentUrl}`);
+        this.logger.info(`${logPrefix} [Diagnostic] Title: "${pageTitle}"`);
+
+        // Check for various error conditions
+        if (
+            currentUrl.includes("accounts.google.com") ||
+            currentUrl.includes("ServiceLogin") ||
+            pageTitle.includes("Sign in") ||
+            pageTitle.includes("登录")
+        ) {
+            throw new Error(
+                "🚨 Cookie expired/invalid! Browser was redirected to Google login page. Please re-extract storageState."
+            );
+        }
+
+        if (pageTitle.includes("Available regions") || pageTitle.includes("not available")) {
+            throw new Error(
+                "🚨 Current IP does not support access to Google AI Studio (region restricted). Claw node may be identified as restricted region, try restarting container to get a new IP."
+            );
+        }
+
+        if (pageTitle.includes("403") || pageTitle.includes("Forbidden")) {
+            throw new Error("🚨 403 Forbidden: Current IP reputation too low, access denied by Google risk control.");
+        }
+
+        if (currentUrl === "about:blank") {
+            throw new Error("🚨 Page load failed (about:blank), possibly network timeout or browser crash.");
+        }
+    }
+
+    /**
+     * Helper: Handle various popups with intelligent detection
+     * Uses short polling instead of long hard-coded timeouts
+     * @param {string} logPrefix - Log prefix for messages (e.g., "[Browser]" or "[Reconnect]")
+     */
+    async _handlePopups(logPrefix = "[Browser]") {
+        this.logger.info(`${logPrefix} 🔍 Starting intelligent popup detection (max 6s)...`);
+
+        const popupConfigs = [
+            {
+                logFound: `${logPrefix} ✅ Found Cookie consent banner, clicking "Agree"...`,
+                name: "Cookie consent",
+                selector: 'button:text("Agree")',
+            },
+            {
+                logFound: `${logPrefix} ✅ Found "Got it" popup, clicking...`,
+                name: "Got it dialog",
+                selector: 'div.dialog button:text("Got it")',
+            },
+            {
+                logFound: `${logPrefix} ✅ Found onboarding tutorial popup, clicking close button...`,
+                name: "Onboarding tutorial",
+                selector: 'button[aria-label="Close"]',
+            },
+        ];
+
+        // Polling-based detection with smart exit conditions
+        // - Initial wait: give popups time to render after page load
+        // - Consecutive idle tracking: exit after N consecutive iterations with no new popups
+        const maxIterations = 12; // Max polling iterations
+        const pollInterval = 500; // Interval between polls (ms)
+        const minIterations = 6; // Min iterations (3s), ensure slow popups have time to load
+        const idleThreshold = 4; // Exit after N consecutive iterations with no new popups
+        const handledPopups = new Set();
+        let consecutiveIdleCount = 0; // Counter for consecutive idle iterations
+
+        for (let i = 0; i < maxIterations; i++) {
+            let foundAny = false;
+
+            for (const popup of popupConfigs) {
+                if (handledPopups.has(popup.name)) continue;
+
+                try {
+                    const element = this.page.locator(popup.selector).first();
+                    // Quick visibility check with very short timeout
+                    if (await element.isVisible({ timeout: 200 })) {
+                        this.logger.info(popup.logFound);
+                        await element.click({ force: true });
+                        handledPopups.add(popup.name);
+                        foundAny = true;
+                        // Short pause after clicking to let next popup appear
+                        await this.page.waitForTimeout(800);
+                    }
+                } catch (error) {
+                    // Element not visible or doesn't exist is expected here,
+                    // but propagate clearly critical browser/page issues.
+                    if (error && error.message) {
+                        const msg = error.message;
+                        if (
+                            msg.includes("Execution context was destroyed") ||
+                            msg.includes("Target page, context or browser has been closed") ||
+                            msg.includes("Protocol error") ||
+                            msg.includes("Navigation failed because page was closed")
+                        ) {
+                            throw error;
+                        }
+                        if (this.logger && typeof this.logger.debug === "function") {
+                            this.logger.debug(
+                                `${logPrefix} Ignored error while checking popup "${popup.name}": ${msg}`
+                            );
+                        }
+                    }
+                }
+            }
+
+            // Update consecutive idle counter
+            if (foundAny) {
+                consecutiveIdleCount = 0; // Found popup, reset counter
+            } else {
+                consecutiveIdleCount++;
+            }
+
+            // Exit conditions:
+            // 1. Must have completed minimum iterations (ensure slow popups have time to load)
+            // 2. Consecutive idle count exceeds threshold (no new popups appearing)
+            if (i >= minIterations - 1 && consecutiveIdleCount >= idleThreshold) {
+                this.logger.info(
+                    `${logPrefix} ✅ Popup detection complete (${i + 1} iterations, ${handledPopups.size} popups handled)`
+                );
+                break;
+            }
+
+            if (i < maxIterations - 1) {
+                await this.page.waitForTimeout(pollInterval);
+            }
+        }
     }
 
     /**
@@ -696,76 +1065,7 @@ class BrowserManager {
             throw new Error(`Failed to get or parse auth source for index ${authIndex}.`);
         }
 
-        let buildScriptContent = fs.readFileSync(
-            path.join(__dirname, "..", "..", "scripts", "client", "build.js"),
-            "utf-8"
-        );
-
-        if (process.env.TARGET_DOMAIN) {
-            const lines = buildScriptContent.split("\n");
-            let domainReplaced = false;
-            for (let i = 0; i < lines.length; i++) {
-                if (lines[i].includes("this.targetDomain =")) {
-                    this.logger.info(`[Config] Found targetDomain line: ${lines[i]}`);
-                    lines[i] = `        this.targetDomain = "${process.env.TARGET_DOMAIN}";`;
-                    this.logger.info(`[Config] Replaced with: ${lines[i]}`);
-                    domainReplaced = true;
-                    break;
-                }
-            }
-            if (domainReplaced) {
-                buildScriptContent = lines.join("\n");
-            } else {
-                this.logger.warn("[Config] Failed to find targetDomain line in build.js, ignoring.");
-            }
-        }
-
-        if (process.env.WS_PORT) {
-            const lines = buildScriptContent.split("\n");
-            let portReplaced = false;
-            for (let i = 0; i < lines.length; i++) {
-                if (lines[i].includes('constructor(endpoint = "ws://127.0.0.1:9998")')) {
-                    this.logger.info(`[Config] Found port config line: ${lines[i]}`);
-                    lines[i] = `    constructor(endpoint = "ws://127.0.0.1:${process.env.WS_PORT}") {`;
-                    this.logger.info(`[Config] Replaced with: ${lines[i]}`);
-                    portReplaced = true;
-                    break;
-                }
-            }
-            if (portReplaced) {
-                buildScriptContent = lines.join("\n");
-            } else {
-                this.logger.warn("[Config] Failed to find port config line in build.js, using default.");
-            }
-        }
-
-        // Inject LOG_LEVEL configuration into build.js
-        // Read from LoggingService.currentLevel instead of environment variable
-        // This ensures runtime log level changes are respected when browser restarts
-        const LoggingService = require("../utils/LoggingService");
-        const currentLogLevel = LoggingService.currentLevel; // 0=DEBUG, 1=INFO, 2=WARN, 3=ERROR
-        const currentLogLevelName = LoggingService.getLevel(); // "DEBUG", "INFO", etc.
-
-        if (currentLogLevel !== 1) {
-            const lines = buildScriptContent.split("\n");
-            let levelReplaced = false;
-            for (let i = 0; i < lines.length; i++) {
-                // Match "currentLevel: <number>," pattern, ignoring comments
-                // This is more robust than looking for specific comments like "// Default: INFO"
-                if (/^\s*currentLevel:\s*\d+/.test(lines[i])) {
-                    this.logger.info(`[Config] Found LOG_LEVEL config line: ${lines[i]}`);
-                    lines[i] = `    currentLevel: ${currentLogLevel}, // Injected: ${currentLogLevelName}`;
-                    this.logger.info(`[Config] Replaced with: ${lines[i]}`);
-                    levelReplaced = true;
-                    break;
-                }
-            }
-            if (levelReplaced) {
-                buildScriptContent = lines.join("\n");
-            } else {
-                this.logger.warn("[Config] Failed to find LOG_LEVEL config line in build.js, using default INFO.");
-            }
-        }
+        const buildScriptContent = this._loadAndConfigureBuildScript();
 
         try {
             // Viewport Randomization
@@ -815,266 +1115,19 @@ class BrowserManager {
                 }
             });
 
-            this.logger.info(`[Browser] Navigating to target page...`);
-            const targetUrl =
-                "https://aistudio.google.com/u/0/apps/bundled/blank?showPreview=true&showCode=true&showAssistant=true";
-            await this.page.goto(targetUrl, {
-                timeout: 180000,
-                waitUntil: "domcontentloaded",
-            });
-            this.logger.info("[Browser] Page loaded.");
-            // Wake up window using JS and Human Movement
-            try {
-                await this.page.bringToFront();
+            await this._navigateAndWakeUpPage("[Browser]");
 
-                // Get viewport size for realistic movement range
-                const vp = this.page.viewportSize() || { height: 1080, width: 1920 };
+            // Check for cookie expiration, region restrictions, and other errors
+            await this._checkPageStatusAndErrors("[Browser]");
 
-                // 1. Move to a random point to simulate activity
-                const randomX = Math.floor(Math.random() * (vp.width * 0.7));
-                const randomY = Math.floor(Math.random() * (vp.height * 0.7));
-                await this._simulateHumanMovement(this.page, randomX, randomY);
+            // Handle various popups (Cookie consent, Got it, Onboarding, etc.)
+            await this._handlePopups("[Browser]");
 
-                // 2. Move to (1,1) specifically for a safe click, using human simulation
-                await this._simulateHumanMovement(this.page, 1, 1);
-                await this.page.mouse.down();
-                await this.page.waitForTimeout(50 + Math.random() * 100);
-                await this.page.mouse.up();
+            await this._injectScriptToEditor(buildScriptContent, "[Browser]");
 
-                this.logger.info(`[Browser] ✅ Executed realistic page activation (Random -> 1,1 Click).`);
-            } catch (e) {
-                this.logger.warn(`[Browser] Wakeup minor error: ${e.message}`);
-            }
-            await this.page.waitForTimeout(2000 + Math.random() * 2000);
-
-            const currentUrl = this.page.url();
-            let pageTitle = "";
-            try {
-                pageTitle = await this.page.title();
-            } catch (e) {
-                this.logger.warn(`[Browser] Unable to get page title: ${e.message}`);
-            }
-
-            this.logger.info(`[Browser] [Diagnostic] URL: ${currentUrl}`);
-            this.logger.info(`[Browser] [Diagnostic] Title: "${pageTitle}"`);
-
-            // Check for various error conditions
-            if (
-                currentUrl.includes("accounts.google.com") ||
-                currentUrl.includes("ServiceLogin") ||
-                pageTitle.includes("Sign in") ||
-                pageTitle.includes("登录")
-            ) {
-                throw new Error(
-                    "🚨 Cookie expired/invalid! Browser was redirected to Google login page. Please re-extract storageState."
-                );
-            }
-
-            if (pageTitle.includes("Available regions") || pageTitle.includes("not available")) {
-                throw new Error(
-                    "🚨 Current IP does not support access to Google AI Studio (region restricted). Claw node may be identified as restricted region, try restarting container to get a new IP."
-                );
-            }
-
-            if (pageTitle.includes("403") || pageTitle.includes("Forbidden")) {
-                throw new Error(
-                    "🚨 403 Forbidden: Current IP reputation too low, access denied by Google risk control."
-                );
-            }
-
-            if (currentUrl === "about:blank") {
-                throw new Error("🚨 Page load failed (about:blank), possibly network timeout or browser crash.");
-            }
-
-            // Handle various popups with intelligent detection
-            // Use short polling instead of long hard-coded timeouts
-            this.logger.info(`[Browser] 🔍 Starting intelligent popup detection (max 6s)...`);
-
-            const popupConfigs = [
-                {
-                    logFound: `[Browser] ✅ Found Cookie consent banner, clicking "Agree"...`,
-                    name: "Cookie consent",
-                    selector: 'button:text("Agree")',
-                },
-                {
-                    logFound: `[Browser] ✅ Found "Got it" popup, clicking...`,
-                    name: "Got it dialog",
-                    selector: 'div.dialog button:text("Got it")',
-                },
-                {
-                    logFound: `[Browser] ✅ Found onboarding tutorial popup, clicking close button...`,
-                    name: "Onboarding tutorial",
-                    selector: 'button[aria-label="Close"]',
-                },
-            ];
-
-            // Polling-based detection with smart exit conditions
-            // - Initial wait: give popups time to render after page load
-            // - Consecutive idle tracking: exit after N consecutive iterations with no new popups
-            const maxIterations = 12; // Max polling iterations
-            const pollInterval = 500; // Interval between polls (ms)
-            const minIterations = 6; // Min iterations (3s), ensure slow popups have time to load
-            const idleThreshold = 4; // Exit after N consecutive iterations with no new popups
-            const handledPopups = new Set();
-            let consecutiveIdleCount = 0; // Counter for consecutive idle iterations
-
-            for (let i = 0; i < maxIterations; i++) {
-                let foundAny = false;
-
-                for (const popup of popupConfigs) {
-                    if (handledPopups.has(popup.name)) continue;
-
-                    try {
-                        const element = this.page.locator(popup.selector).first();
-                        // Quick visibility check with very short timeout
-                        if (await element.isVisible({ timeout: 200 })) {
-                            this.logger.info(popup.logFound);
-                            await element.click({ force: true });
-                            handledPopups.add(popup.name);
-                            foundAny = true;
-                            // Short pause after clicking to let next popup appear
-                            await this.page.waitForTimeout(800);
-                        }
-                    } catch (error) {
-                        // Element not visible or doesn't exist is expected here,
-                        // but propagate clearly critical browser/page issues.
-                        if (error && error.message) {
-                            const msg = error.message;
-                            if (
-                                msg.includes("Execution context was destroyed") ||
-                                msg.includes("Target page, context or browser has been closed") ||
-                                msg.includes("Protocol error") ||
-                                msg.includes("Navigation failed because page was closed")
-                            ) {
-                                throw error;
-                            }
-                            if (this.logger && typeof this.logger.debug === "function") {
-                                this.logger.debug(
-                                    `[Browser] Ignored error while checking popup "${popup.name}": ${msg}`
-                                );
-                            }
-                        }
-                    }
-                }
-
-                // Update consecutive idle counter
-                if (foundAny) {
-                    consecutiveIdleCount = 0; // Found popup, reset counter
-                } else {
-                    consecutiveIdleCount++;
-                }
-
-                // Exit conditions:
-                // 1. Must have completed minimum iterations (ensure slow popups have time to load)
-                // 2. Consecutive idle count exceeds threshold (no new popups appearing)
-                if (i >= minIterations - 1 && consecutiveIdleCount >= idleThreshold) {
-                    this.logger.info(
-                        `[Browser] ✅ Popup detection complete (${i + 1} iterations, ${handledPopups.size} popups handled)`
-                    );
-                    break;
-                }
-
-                if (i < maxIterations - 1) {
-                    await this.page.waitForTimeout(pollInterval);
-                }
-            }
-
-            this.logger.info("[Browser] Preparing UI interaction, forcefully removing all possible overlay layers...");
-            /* eslint-disable no-undef */
-            await this.page.evaluate(() => {
-                const overlays = document.querySelectorAll("div.cdk-overlay-backdrop");
-                if (overlays.length > 0) {
-                    console.log(`[ProxyClient] (Internal JS) Found and removed ${overlays.length} overlay layers.`);
-                    overlays.forEach(el => el.remove());
-                }
-            });
-            /* eslint-enable no-undef */
-
-            this.logger.info('[Browser] (Step 1/5) Preparing to click "Code" button...');
-            const maxTimes = 15;
-            for (let i = 1; i <= maxTimes; i++) {
-                try {
-                    this.logger.info(`  [Attempt ${i}/${maxTimes}] Cleaning overlay layers and clicking...`);
-                    /* eslint-disable no-undef */
-                    await this.page.evaluate(() => {
-                        document.querySelectorAll("div.cdk-overlay-backdrop").forEach(el => el.remove());
-                    });
-                    /* eslint-enable no-undef */
-                    await this.page.waitForTimeout(500);
-
-                    // Use Smart Click instead of hardcoded locator
-                    await this._smartClickCode(this.page);
-
-                    this.logger.info("  ✅ Click successful!");
-                    break;
-                } catch (error) {
-                    this.logger.warn(`  [Attempt ${i}/${maxTimes}] Click failed: ${error.message.split("\n")[0]}`);
-                    if (i === maxTimes) {
-                        throw new Error(
-                            `Unable to click "Code" button after multiple attempts, initialization failed.`
-                        );
-                    }
-                }
-            }
-
-            this.logger.info(
-                '[Browser] (Step 2/5) "Code" button clicked successfully, waiting for editor to become visible...'
-            );
-            const editorContainerLocator = this.page.locator("div.monaco-editor").first();
-            await editorContainerLocator.waitFor({
-                state: "visible",
-                timeout: 60000,
-            });
-
-            this.logger.info(
-                "[Browser] (Cleanup #2) Preparing to click editor, forcefully removing all possible overlay layers again..."
-            );
-            /* eslint-disable no-undef */
-            await this.page.evaluate(() => {
-                const overlays = document.querySelectorAll("div.cdk-overlay-backdrop");
-                if (overlays.length > 0) {
-                    console.log(
-                        `[ProxyClient] (Internal JS) Found and removed ${overlays.length} newly appeared overlay layers.`
-                    );
-                    overlays.forEach(el => el.remove());
-                }
-            });
-            /* eslint-enable no-undef */
-            await this.page.waitForTimeout(250);
-
-            this.logger.info("[Browser] (Step 3/5) Editor displayed, focusing and pasting script...");
-            await editorContainerLocator.click({ timeout: 30000 });
-
-            /* eslint-disable no-undef */
-            await this.page.evaluate(text => navigator.clipboard.writeText(text), buildScriptContent);
-            /* eslint-enable no-undef */
-            const isMac = os.platform() === "darwin";
-            const pasteKey = isMac ? "Meta+V" : "Control+V";
-            await this.page.keyboard.press(pasteKey);
-            this.logger.info("[Browser] (Step 4/5) Script pasted.");
-            this.logger.info('[Browser] (Step 5/5) Clicking "Preview" button to activate script...');
-            await this.page.locator('button:text("Preview")').click();
-            this.logger.info("[Browser] ✅ UI interaction complete, script is now running.");
-
-            // Active Trigger (Hack to wake up Google Backend)
-            this.logger.info("[Browser] ⚡ Sending active trigger request to Launch flow...");
-            try {
-                await this.page.evaluate(async () => {
-                    try {
-                        await fetch("https://generativelanguage.googleapis.com/v1beta/models?key=ActiveTrigger", {
-                            headers: { "Content-Type": "application/json" },
-                            method: "GET",
-                        });
-                    } catch (e) {
-                        console.log("[ProxyClient] Active trigger sent");
-                    }
-                });
-            } catch (e) {
-                /* empty */
-            }
-
-            this._startHealthMonitor();
+            // Start background wakeup service - only started here during initial browser launch
             this._startBackgroundWakeup();
+
             this._currentAuthIndex = authIndex;
 
             // [Auth Update] Save the refreshed cookies to the auth file immediately
@@ -1086,7 +1139,6 @@ class BrowserManager {
             this.logger.info("==================================================");
         } catch (error) {
             this.logger.error(`❌ [Browser] Account ${authIndex} context initialization failed: ${error.message}`);
-            // Save debug info before closing browser
             await this._saveDebugArtifacts("init_failed");
             await this.closeBrowser();
             this._currentAuthIndex = -1;
@@ -1095,10 +1147,84 @@ class BrowserManager {
     }
 
     /**
+     * Lightweight Reconnect: Refreshes the page and re-injects the script
+     * without restarting the entire browser instance.
+     *
+     * This method is called when WebSocket connection is lost but the browser
+     * process is still running. It's much faster than a full browser restart.
+     *
+     * @returns {Promise<boolean>} true if reconnect was successful, false otherwise
+     */
+    async attemptLightweightReconnect() {
+        // Verify browser and page are still valid
+        if (!this.browser || !this.page) {
+            this.logger.warn("[Reconnect] Browser or page is not available, cannot perform lightweight reconnect.");
+            return false;
+        }
+
+        // Check if page is closed
+        if (this.page.isClosed()) {
+            this.logger.warn("[Reconnect] Page is closed, cannot perform lightweight reconnect.");
+            return false;
+        }
+
+        const authIndex = this._currentAuthIndex;
+        if (authIndex < 0) {
+            this.logger.warn("[Reconnect] No current auth index, cannot perform lightweight reconnect.");
+            return false;
+        }
+
+        this.logger.info("==================================================");
+        this.logger.info(`🔄 [Reconnect] Starting lightweight reconnect for account #${authIndex}...`);
+        this.logger.info("==================================================");
+
+        // Stop existing background tasks
+        if (this.healthMonitorInterval) {
+            clearInterval(this.healthMonitorInterval);
+            this.healthMonitorInterval = null;
+            this.logger.info("[Reconnect] Stopped background health monitor.");
+        }
+
+        try {
+            // Load and configure the build.js script using the shared helper
+            const buildScriptContent = this._loadAndConfigureBuildScript();
+
+            // Navigate to target page and wake it up
+            await this._navigateAndWakeUpPage("[Reconnect]");
+
+            // Check for cookie expiration, region restrictions, and other errors
+            await this._checkPageStatusAndErrors("[Reconnect]");
+
+            // Handle various popups (Cookie consent, Got it, Onboarding, etc.)
+            await this._handlePopups("[Reconnect]");
+
+            // Use shared script injection helper with [Reconnect] log prefix
+            await this._injectScriptToEditor(buildScriptContent, "[Reconnect]");
+
+            // [Auth Update] Save the refreshed cookies to the auth file immediately
+            await this._updateAuthFile(authIndex);
+
+            this.logger.info("==================================================");
+            this.logger.info(`✅ [Reconnect] Lightweight reconnect successful for account #${authIndex}!`);
+            this.logger.info("==================================================");
+
+            return true;
+        } catch (error) {
+            this.logger.error(`❌ [Reconnect] Lightweight reconnect failed: ${error.message}`);
+            await this._saveDebugArtifacts("reconnect_failed");
+            return false;
+        }
+    }
+
+    /**
      * Unified cleanup method for the main browser instance.
      * Handles intervals, timeouts, and resetting all references.
      */
     async closeBrowser() {
+        // Set flag to indicate intentional close - prevents ConnectionRegistry from
+        // attempting lightweight reconnect when WebSocket disconnects
+        this.isClosingIntentionally = true;
+
         if (this.healthMonitorInterval) {
             clearInterval(this.healthMonitorInterval);
             this.healthMonitorInterval = null;
@@ -1119,6 +1245,9 @@ class BrowserManager {
             this._currentAuthIndex = -1;
             this.logger.info("[Browser] Main browser instance closed, currentAuthIndex reset to -1.");
         }
+
+        // Reset flag after close is complete
+        this.isClosingIntentionally = false;
     }
 
     async switchAccount(newAuthIndex) {

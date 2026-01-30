@@ -40,7 +40,31 @@ class ProxyServerSystem extends EventEmitter {
 
         this.authSource = new AuthSource(this.logger);
         this.browserManager = new BrowserManager(this.logger, this.config, this.authSource);
-        this.connectionRegistry = new ConnectionRegistry(this.logger);
+
+        // Create ConnectionRegistry with lightweight reconnect callback
+        // When WebSocket connection is lost but browser is still running,
+        // this callback attempts to refresh the page and re-inject the script
+        this.connectionRegistry = new ConnectionRegistry(this.logger, async () => {
+            // Skip if browser is being intentionally closed (not an unexpected disconnect)
+            if (this.browserManager.isClosingIntentionally) {
+                this.logger.info("[System] Browser is closing intentionally, skipping reconnect attempt.");
+                return;
+            }
+
+            if (this.browserManager.browser && this.browserManager.page && !this.browserManager.page.isClosed()) {
+                this.logger.info(
+                    "[System] WebSocket lost but browser still running, attempting lightweight reconnect..."
+                );
+                const success = await this.browserManager.attemptLightweightReconnect();
+                if (!success) {
+                    this.logger.warn(
+                        "[System] Lightweight reconnect failed. Will attempt full recovery on next request."
+                    );
+                }
+            } else {
+                this.logger.info("[System] Browser not available, skipping lightweight reconnect.");
+            }
+        });
         this.requestHandler = new RequestHandler(
             this,
             this.connectionRegistry,
