@@ -50,6 +50,13 @@ class ProxyServerSystem extends EventEmitter {
                 this.logger.info("[System] Browser is closing intentionally, skipping reconnect attempt.");
                 return;
             }
+            // Skip if the system is busy switching/recovering to avoid conflicting refreshes
+            if (this.requestHandler?.isSystemBusy) {
+                this.logger.info(
+                    "[System] System is busy (switching/recovering), skipping lightweight reconnect attempt."
+                );
+                return;
+            }
 
             if (this.browserManager.browser && this.browserManager.page && !this.browserManager.page.isClosed()) {
                 this.logger.info(
