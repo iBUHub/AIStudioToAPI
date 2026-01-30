@@ -59,11 +59,9 @@ class RequestHandler {
     async _waitForGraceReconnect(timeoutMs = 60000) {
         const start = Date.now();
         while (Date.now() - start < timeoutMs) {
-            if (!this.connectionRegistry.isInGracePeriod()) {
-                return this.connectionRegistry.hasActiveConnections();
-            }
-            if (this.connectionRegistry.hasActiveConnections()) {
-                return true;
+            if (!this.connectionRegistry.isInGracePeriod() && !this.connectionRegistry.isReconnectingInProgress()) {
+                const connectionReady = await this._waitForConnection(10000);
+                return connectionReady;
             }
             await new Promise(resolve => setTimeout(resolve, 100));
         }
@@ -136,19 +134,17 @@ class RequestHandler {
      * @returns {boolean} true if recovery successful, false otherwise
      */
     async _handleBrowserRecovery(res) {
-        // If ConnectionRegistry is still within its reconnect grace period,
-        // wait a short time to allow the browser client to auto-reconnect
-        // and avoid unnecessary restart/switch.
-        if (this.connectionRegistry.isInGracePeriod()) {
+        // If within grace period or lightweight reconnect is running, wait up to 60s for WS恢复
+        if (this.connectionRegistry.isInGracePeriod() || this.connectionRegistry.isReconnectingInProgress()) {
             this.logger.info(
-                "[System] WebSocket disconnected, awaiting grace-period reconnection before triggering recovery..."
+                "[System] Waiting up to 60s for WebSocket reconnection (grace/reconnect in progress) before full recovery..."
             );
-            const reconnected = await this._waitForGraceReconnect();
+            const reconnected = await this._waitForGraceReconnect(60000);
             if (reconnected) {
-                this.logger.info("[System] Connection restored during grace period, skipping recovery.");
+                this.logger.info("[System] Connection restored, skipping recovery.");
                 return true;
             }
-            this.logger.warn("[System] Grace period elapsed without reconnection, proceeding to recovery workflow.");
+            this.logger.warn("[System] Reconnection wait expired, proceeding to recovery workflow.");
         }
 
         // Wait for system to become ready if it's busy (someone else is starting/switching browser)

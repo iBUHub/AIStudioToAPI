@@ -55,7 +55,9 @@ class ConnectionRegistry extends EventEmitter {
             clearTimeout(this.reconnectGraceTimer);
         }
 
-        this.logger.info("[Server] Starting 60-second reconnect grace period...");
+        const reconnectTimeoutMs = 55000;
+
+        this.logger.info("[Server] Starting 5-second reconnect grace period...");
         this.reconnectGraceTimer = setTimeout(async () => {
             this.logger.error(
                 "[Server] Grace period ended, no reconnection detected. Connection lost confirmed, cleaning up all pending requests..."
@@ -66,13 +68,26 @@ class ConnectionRegistry extends EventEmitter {
             // Attempt lightweight reconnect if callback is provided and not already reconnecting
             if (this.onConnectionLostCallback && !this.isReconnecting) {
                 this.isReconnecting = true;
-                this.logger.info("[Server] Attempting lightweight reconnect...");
+                this.logger.info(
+                    `[Server] Attempting lightweight reconnect (timeout ${reconnectTimeoutMs / 1000}s)...`
+                );
+                let timeoutId;
                 try {
-                    await this.onConnectionLostCallback();
+                    const callbackPromise = this.onConnectionLostCallback();
+                    const timeoutPromise = new Promise((_, reject) => {
+                        timeoutId = setTimeout(
+                            () => reject(new Error("Lightweight reconnect timed out")),
+                            reconnectTimeoutMs
+                        );
+                    });
+                    await Promise.race([callbackPromise, timeoutPromise]);
                     this.logger.info("[Server] Lightweight reconnect callback completed.");
                 } catch (error) {
                     this.logger.error(`[Server] Lightweight reconnect failed: ${error.message}`);
                 } finally {
+                    if (timeoutId) {
+                        clearTimeout(timeoutId);
+                    }
                     this.isReconnecting = false;
                 }
             }
@@ -80,7 +95,7 @@ class ConnectionRegistry extends EventEmitter {
             this.emit("connectionLost");
 
             this.reconnectGraceTimer = null;
-        }, 60000);
+        }, 5000);
 
         this.emit("connectionRemoved", websocket);
     }
@@ -122,6 +137,10 @@ class ConnectionRegistry extends EventEmitter {
 
     hasActiveConnections() {
         return this.connections.size > 0;
+    }
+
+    isReconnectingInProgress() {
+        return this.isReconnecting;
     }
 
     isInGracePeriod() {
