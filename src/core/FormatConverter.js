@@ -1299,6 +1299,10 @@ class FormatConverter {
         // Flush remaining tool parts
         flushToolParts();
 
+        // [DEBUG] Log full content construction
+        this.logger.debug(`[Adapter] Debug: googleContents length = ${googleContents.length}`);
+        this.logger.debug(`[Adapter] Debug: googleContents = ${JSON.stringify(googleContents, null, 2)}`);
+
         // Build Google request
         const googleRequest = {
             contents: googleContents,
@@ -1348,12 +1352,16 @@ class FormatConverter {
 
         if (thinkingConfig) {
             generationConfig.thinkingConfig = thinkingConfig;
+            this.logger.info(
+                `[Adapter] Successfully extracted and converted thinking config: ${JSON.stringify(thinkingConfig)}`
+            );
         }
 
         googleRequest.generationConfig = generationConfig;
 
         // Convert Claude tools to Gemini functionDeclarations
         if (claudeBody.tools && Array.isArray(claudeBody.tools) && claudeBody.tools.length > 0) {
+            this.logger.debug(`[Adapter] Debug: original Claude tools = ${JSON.stringify(claudeBody.tools, null, 2)}`);
             const functionDeclarations = [];
 
             for (const tool of claudeBody.tools) {
@@ -1411,6 +1419,14 @@ class FormatConverter {
         ];
 
         this.logger.info("[Adapter] Claude to Google translation complete.");
+
+        // [DEBUG] Log full request body for troubleshooting
+        if (googleRequest.tools && googleRequest.tools.length > 0) {
+            this.logger.debug(
+                `[Adapter] Debug: Converted Gemini tools = ${JSON.stringify(googleRequest.tools, null, 2)}`
+            );
+        }
+
         return { cleanModelName, googleRequest };
     }
 
