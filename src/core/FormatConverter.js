@@ -1577,6 +1577,34 @@ class FormatConverter {
                         index: streamState.textBlockIndex,
                         type: "content_block_delta",
                     });
+                } else if (part.inlineData) {
+                    // Image output - convert to markdown image format for streaming
+                    // Close thinking block if open
+                    if (streamState.thinkingBlockStarted && !streamState.thinkingBlockStopped) {
+                        events.push({
+                            index: streamState.thinkingBlockIndex,
+                            type: "content_block_stop",
+                        });
+                        streamState.thinkingBlockStopped = true;
+                    }
+                    // Start text block if not started
+                    if (!streamState.textBlockStarted) {
+                        events.push({
+                            content_block: { text: "", type: "text" },
+                            index: streamState.contentBlockIndex,
+                            type: "content_block_start",
+                        });
+                        streamState.textBlockStarted = true;
+                        streamState.textBlockIndex = streamState.contentBlockIndex;
+                        streamState.contentBlockIndex++;
+                    }
+                    // Send image as markdown text delta
+                    const imageMarkdown = `![Generated Image](data:${part.inlineData.mimeType};base64,${part.inlineData.data})`;
+                    events.push({
+                        delta: { text: imageMarkdown, type: "text_delta" },
+                        index: streamState.textBlockIndex,
+                        type: "content_block_delta",
+                    });
                 } else if (part.functionCall) {
                     // Tool use
                     const toolUseId = `toolu_${this._generateRequestId()}`;
