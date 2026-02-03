@@ -627,11 +627,10 @@ class RequestHandler {
 
                         this.logger.info(`[Request] OpenAI streaming response (Fake Mode) started...`);
                         let fullBody = "";
-                        let streaming = true;
-                        while (streaming) {
+                        // eslint-disable-next-line no-constant-condition
+                        while (true) {
                             const message = await messageQueue.dequeue();
                             if (message.type === "STREAM_END") {
-                                streaming = false;
                                 break;
                             }
 
@@ -644,7 +643,6 @@ class RequestHandler {
                                         `data: ${JSON.stringify({ error: { code: 500, message: message.message, type: "api_error" } })}\n\n`
                                     );
                                 }
-                                streaming = false;
                                 break;
                             }
 
@@ -863,11 +861,10 @@ class RequestHandler {
 
                         this.logger.info(`[Request] Claude streaming response (Fake Mode) started...`);
                         let fullBody = "";
-                        let streaming = true;
-                        while (streaming) {
+                        // eslint-disable-next-line no-constant-condition
+                        while (true) {
                             const message = await messageQueue.dequeue();
                             if (message.type === "STREAM_END") {
-                                streaming = false;
                                 break;
                             }
 
@@ -886,7 +883,6 @@ class RequestHandler {
                                         })}\n\n`
                                     );
                                 }
-                                streaming = false;
                                 break;
                             }
 
@@ -930,14 +926,13 @@ class RequestHandler {
 
     async _streamClaudeResponse(messageQueue, res, model) {
         const streamState = {};
-        let streaming = true;
 
-        while (streaming) {
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
             const message = await messageQueue.dequeue(30000);
 
             if (message.type === "STREAM_END") {
                 this.logger.info("[Request] Claude stream end signal received.");
-                streaming = false;
                 break;
             }
 
@@ -955,7 +950,6 @@ class RequestHandler {
                         })}\n\n`
                     );
                 }
-                streaming = false;
                 break;
             }
 
@@ -1112,18 +1106,16 @@ class RequestHandler {
 
             // Read all data chunks until STREAM_END to handle potential fragmentation
             let fullData = "";
-            let streaming = true;
-            while (streaming) {
+            // eslint-disable-next-line no-constant-condition
+            while (true) {
                 const message = await messageQueue.dequeue(); // 5 min timeout
                 if (message.type === "STREAM_END") {
-                    streaming = false;
                     break;
                 }
 
                 if (message.event_type === "error") {
                     this.logger.error(`[Request] Error received during Gemini pseudo-stream: ${message.message}`);
                     this._sendErrorChunkToClient(res, message.message);
-                    streaming = false;
                     break;
                 }
 
@@ -1271,12 +1263,11 @@ class RequestHandler {
         this.logger.info("[Request] Starting streaming transmission...");
         try {
             let lastChunk = "";
-            let streaming = true;
-            while (streaming) {
+            // eslint-disable-next-line no-constant-condition
+            while (true) {
                 const dataMessage = await messageQueue.dequeue(30000);
                 if (dataMessage.type === "STREAM_END") {
                     this.logger.info("[Request] Received stream end signal.");
-                    streaming = false;
                     break;
                 }
 
@@ -1287,7 +1278,6 @@ class RequestHandler {
                             `data: ${JSON.stringify({ error: { code: 500, message: dataMessage.message, status: "INTERNAL_ERROR" } })}\n\n`
                         );
                     }
-                    streaming = false;
                     break;
                 }
 
@@ -1519,14 +1509,13 @@ class RequestHandler {
 
     async _streamOpenAIResponse(messageQueue, res, model) {
         const streamState = {};
-        let streaming = true;
 
-        while (streaming) {
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
             const message = await messageQueue.dequeue(30000);
             if (message.type === "STREAM_END") {
                 this.logger.info("[Request] OpenAI stream end signal received.");
                 res.write("data: [DONE]\n\n");
-                streaming = false;
                 break;
             }
 
@@ -1538,7 +1527,6 @@ class RequestHandler {
                         `data: ${JSON.stringify({ error: { code: 500, message: message.message, type: "api_error" } })}\n\n`
                     );
                 }
-                streaming = false;
                 break;
             }
 
