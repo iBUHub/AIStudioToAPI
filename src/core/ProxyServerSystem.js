@@ -446,6 +446,11 @@ class ProxyServerSystem extends EventEmitter {
             this.requestHandler.processOpenAIRequest(req, res);
         });
 
+        // Claude API compatible endpoint
+        app.post("/v1/messages", (req, res) => {
+            this.requestHandler.processClaudeRequest(req, res);
+        });
+
         // VNC WebSocket downgrade / missing headers handler
         // If Nginx or another proxy strips "Upgrade: websocket" headers, the request appears as a normal GET.
         // We intercept it here to prevent it from falling through to the Gemini proxy.

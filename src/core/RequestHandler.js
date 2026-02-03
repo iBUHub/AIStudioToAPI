@@ -663,7 +663,286 @@ class RequestHandler {
         if (!res.writableEnded) res.end();
     }
 
+    // Process Claude API format requests
+    async processClaudeRequest(req, res) {
+        const requestId = this._generateRequestId();
+
+        // Check browser connection
+        if (!this.connectionRegistry.hasActiveConnections()) {
+            const recovered = await this._handleBrowserRecovery(res);
+            if (!recovered) return;
+        }
+
+        // Wait for system to become ready if it's busy
+        if (this.authSwitcher.isSystemBusy) {
+            const ready = await this._waitForSystemReady();
+            if (!ready) {
+                return this._sendClaudeErrorResponse(res, 503, "overloaded_error",
+                    "Server undergoing internal maintenance, please try again later.");
+            }
+            if (!this.connectionRegistry.hasActiveConnections()) {
+                const connectionReady = await this._waitForConnection(10000);
+                if (!connectionReady) {
+                    return this._sendClaudeErrorResponse(res, 503, "overloaded_error",
+                        "Service temporarily unavailable: Connection not established.");
+                }
+            }
+        }
+
+        if (this.browserManager) {
+            this.browserManager.notifyUserActivity();
+        }
+
+        const isClaudeStream = req.body.stream === true;
+        const systemStreamMode = this.serverSystem.streamingMode;
+        const useRealStream = isClaudeStream && systemStreamMode === "real";
+
+        // Handle usage counting
+        const usageCount = this.authSwitcher.incrementUsageCount();
+        if (usageCount > 0) {
+            const rotationCountText =
+                this.config.switchOnUses > 0 ? `${usageCount}/${this.config.switchOnUses}` : `${usageCount}`;
+            this.logger.info(
+                `[Request] Claude generation request - account rotation count: ${rotationCountText} (Current account: ${this.currentAuthIndex})`
+            );
+            if (this.authSwitcher.shouldSwitchByUsage()) {
+                this.needsSwitchingAfterRequest = true;
+            }
+        }
+
+        // Translate Claude format to Google format
+        let googleBody, model;
+        try {
+            const result = await this.formatConverter.translateClaudeToGoogle(req.body);
+            googleBody = result.googleRequest;
+            model = result.cleanModelName;
+        } catch (error) {
+            this.logger.error(`[Adapter] Claude request translation failed: ${error.message}`);
+            return this._sendClaudeErrorResponse(res, 400, "invalid_request_error",
+                "Invalid Claude request format.");
+        }
+
+        const googleEndpoint = useRealStream ? "streamGenerateContent" : "generateContent";
+        const proxyRequest = {
+            body: JSON.stringify(googleBody),
+            headers: { "Content-Type": "application/json" },
+            is_generative: true,
+            method: "POST",
+            path: `/v1beta/models/${model}:${googleEndpoint}`,
+            query_params: useRealStream ? { alt: "sse" } : {},
+            request_id: requestId,
+            streaming_mode: useRealStream ? "real" : "fake",
+        };
+
+        const messageQueue = this.connectionRegistry.createMessageQueue(requestId);
+
+        try {
+            if (useRealStream) {
+                this._forwardRequest(proxyRequest);
+                const initialMessage = await messageQueue.dequeue();
+
+                if (initialMessage.event_type === "error") {
+                    this.logger.error(
+                        `[Adapter] Received error from browser for Claude request. Status: ${initialMessage.status}`
+                    );
+                    this._sendClaudeErrorResponse(res, initialMessage.status || 500, "api_error",
+                        initialMessage.message);
+                    if (!this._isConnectionResetError(initialMessage)) {
+                        await this.authSwitcher.handleRequestFailureAndSwitch(initialMessage, null);
+                    }
+                    return;
+                }
+
+                if (this.authSwitcher.failureCount > 0) {
+                    this.logger.info(`✅ [Auth] Claude request successful - failure count reset to 0`);
+                    this.authSwitcher.failureCount = 0;
+                }
+
+                res.status(200).set({
+                    "Cache-Control": "no-cache",
+                    Connection: "keep-alive",
+                    "Content-Type": "text/event-stream",
+                });
+                this.logger.info(`[Adapter] Claude streaming response (Real Mode) started...`);
+                await this._streamClaudeResponse(messageQueue, res, model);
+            } else {
+                // Claude Fake Stream / Non-Stream mode
+                let connectionMaintainer;
+                if (isClaudeStream) {
+                    const scheduleNextKeepAlive = () => {
+                        const randomInterval = 12000 + Math.floor(Math.random() * 6000);
+                        connectionMaintainer = setTimeout(() => {
+                            if (!res.headersSent) {
+                                res.status(200).set({
+                                    "Cache-Control": "no-cache",
+                                    Connection: "keep-alive",
+                                    "Content-Type": "text/event-stream",
+                                });
+                            }
+                            if (!res.writableEnded) {
+                                res.write("event: ping\ndata: {}\n\n");
+                                scheduleNextKeepAlive();
+                            }
+                        }, randomInterval);
+                    };
+                    scheduleNextKeepAlive();
+                }
+
+                try {
+                    const result = await this._executeRequestWithRetries(proxyRequest, messageQueue);
+
+                    if (!result.success) {
+                        if (connectionMaintainer) clearTimeout(connectionMaintainer);
+                        this._sendClaudeErrorResponse(res, result.error.status || 500, "api_error",
+                            result.error.message);
+                        if (!this._isConnectionResetError(result.error)) {
+                            await this.authSwitcher.handleRequestFailureAndSwitch(result.error, null);
+                        }
+                        return;
+                    }
+
+                    if (this.authSwitcher.failureCount > 0) {
+                        this.logger.info(`✅ [Auth] Claude request successful - failure count reset to 0`);
+                        this.authSwitcher.failureCount = 0;
+                    }
+
+                    if (isClaudeStream) {
+                        // Fake stream
+                        if (!res.headersSent) {
+                            res.status(200).set({
+                                "Cache-Control": "no-cache",
+                                Connection: "keep-alive",
+                                "Content-Type": "text/event-stream",
+                            });
+                        }
+                        if (connectionMaintainer) clearTimeout(connectionMaintainer);
+
+                        this.logger.info(`[Adapter] Claude streaming response (Fake Mode) started...`);
+                        let fullBody = "";
+                        let streaming = true;
+                        while (streaming) {
+                            const message = await messageQueue.dequeue();
+                            if (message.type === "STREAM_END") {
+                                streaming = false;
+                                break;
+                            }
+                            if (message.data) fullBody += message.data;
+                        }
+                        const streamState = {};
+                        const translatedChunk = this.formatConverter.translateGoogleToClaudeStream(
+                            fullBody,
+                            model,
+                            streamState
+                        );
+                        if (translatedChunk) res.write(translatedChunk);
+                        this.logger.info("[Adapter] Claude fake mode: Complete content sent at once.");
+                    } else {
+                        // Non-stream
+                        await this._sendClaudeNonStreamResponse(messageQueue, res, model);
+                    }
+                } finally {
+                    if (connectionMaintainer) clearTimeout(connectionMaintainer);
+                }
+            }
+        } catch (error) {
+            this._handleClaudeRequestError(error, res);
+        } finally {
+            this.connectionRegistry.removeMessageQueue(requestId);
+            if (this.needsSwitchingAfterRequest) {
+                this.logger.info(
+                    `[Auth] Rotation count reached switching threshold, will automatically switch account in background...`
+                );
+                this.authSwitcher.switchToNextAuth().catch(err => {
+                    this.logger.error(`[Auth] Background account switching task failed: ${err.message}`);
+                });
+                this.needsSwitchingAfterRequest = false;
+            }
+        }
+
+        if (!res.writableEnded) res.end();
+    }
+
     // === Response Handlers ===
+
+    async _streamClaudeResponse(messageQueue, res, model) {
+        const streamState = {};
+        let streaming = true;
+
+        while (streaming) {
+            const message = await messageQueue.dequeue(30000);
+            if (message.type === "STREAM_END") {
+                this.logger.info("[Request] Claude stream end signal received.");
+                streaming = false;
+                break;
+            }
+            if (message.data) {
+                const claudeChunk = this.formatConverter.translateGoogleToClaudeStream(
+                    message.data,
+                    model,
+                    streamState
+                );
+                if (claudeChunk) {
+                    res.write(claudeChunk);
+                }
+            }
+        }
+    }
+
+    async _sendClaudeNonStreamResponse(messageQueue, res, model) {
+        let fullBody = "";
+        let receiving = true;
+        while (receiving) {
+            const message = await messageQueue.dequeue();
+            if (message.type === "STREAM_END") {
+                this.logger.info("[Request] Claude received end signal.");
+                receiving = false;
+                break;
+            }
+            if (message.event_type === "chunk" && message.data) {
+                fullBody += message.data;
+            }
+        }
+
+        try {
+            const googleResponse = JSON.parse(fullBody);
+            const claudeResponse = this.formatConverter.convertGoogleToClaudeNonStream(googleResponse, model);
+            res.type("application/json").send(JSON.stringify(claudeResponse));
+        } catch (e) {
+            this.logger.error(`[Request] Failed to parse response for Claude: ${e.message}`);
+            this._sendClaudeErrorResponse(res, 500, "api_error", "Failed to parse backend response");
+        }
+    }
+
+    _sendClaudeErrorResponse(res, status, errorType, message) {
+        if (!res.headersSent) {
+            res.status(status).type("application/json").send(JSON.stringify({
+                type: "error",
+                error: {
+                    type: errorType,
+                    message: message,
+                },
+            }));
+        }
+    }
+
+    _handleClaudeRequestError(error, res) {
+        if (res.headersSent) {
+            this.logger.error(`[Request] Claude request error (headers already sent): ${error.message}`);
+            if (!res.writableEnded) res.end();
+        } else {
+            this.logger.error(`[Request] Claude request error: ${error.message}`);
+            let status = 500;
+            let errorType = "api_error";
+            if (error.message.toLowerCase().includes("timeout")) {
+                status = 504;
+                errorType = "timeout_error";
+            } else if (this._isConnectionResetError(error)) {
+                status = 503;
+                errorType = "overloaded_error";
+            }
+            this._sendClaudeErrorResponse(res, status, errorType, `Proxy error: ${error.message}`);
+        }
+    }
 
     async _handlePseudoStreamResponse(proxyRequest, messageQueue, req, res) {
         this.logger.info("[Request] Entering pseudo-stream mode...");
