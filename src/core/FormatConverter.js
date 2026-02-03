@@ -1207,7 +1207,7 @@ class FormatConverter {
 
                         if (!functionName) {
                             this.logger.warn(
-                                `[Adapter] Warning: efficient tool name resolution failed for ID: ${toolUseId}. outputting as unknown_function`
+                                `[Adapter] Warning: Tool name resolution failed for ID: ${toolUseId}. outputting as unknown_function`
                             );
                             functionName = "unknown_function";
                         }
