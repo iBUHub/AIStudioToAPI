@@ -1118,7 +1118,9 @@ class FormatConverter {
         }
 
         // [DEBUG] Log incoming messages
-        this.logger.debug(`[Adapter] Debug: incoming Claude messages = ${JSON.stringify(claudeBody.messages, null, 2)}`);
+        this.logger.debug(
+            `[Adapter] Debug: incoming Claude messages = ${JSON.stringify(claudeBody.messages, null, 2)}`
+        );
 
         let systemInstruction = null;
         const googleContents = [];
@@ -1208,8 +1210,11 @@ class FormatConverter {
             }
 
             // Flush pending tool parts before non-tool messages
-            if (message.role !== "user" || !Array.isArray(message.content) ||
-                !message.content.some(block => block.type === "tool_result")) {
+            if (
+                message.role !== "user" ||
+                !Array.isArray(message.content) ||
+                !message.content.some(block => block.type === "tool_result")
+            ) {
                 flushToolParts();
             }
 
@@ -1273,7 +1278,9 @@ class FormatConverter {
                                     });
                                 } catch (error) {
                                     this.logger.error(`[Adapter] Failed to download image: ${error.message}`);
-                                    googleParts.push({ text: `[System Note: Failed to load image from ${source.url}]` });
+                                    googleParts.push({
+                                        text: `[System Note: Failed to load image from ${source.url}]`,
+                                    });
                                 }
                             }
                         }
@@ -1309,13 +1316,21 @@ class FormatConverter {
             topP: claudeBody.top_p,
         };
 
-        // Handle thinking config from Claude's metadata
+        // Handle thinking config from Claude's metadata or top-level thinking
         let thinkingConfig = null;
-        if (claudeBody.metadata?.thinking?.enabled) {
+
+        const thinkingParam = claudeBody.thinking || claudeBody.metadata?.thinking;
+
+        // Check if thinking is enabled:
+        // 1. metadata style: { enabled: true }
+        // 2. top-level style: { type: "enabled" }
+        const isThinkingEnabled = thinkingParam && (thinkingParam.enabled === true || thinkingParam.type === "enabled");
+
+        if (isThinkingEnabled) {
             thinkingConfig = { includeThoughts: true };
-            if (claudeBody.metadata.thinking.budget_tokens) {
+            if (thinkingParam.budget_tokens) {
                 // Gemini doesn't have budget_tokens, but we can log it
-                this.logger.info(`[Adapter] Claude thinking budget_tokens: ${claudeBody.metadata.thinking.budget_tokens}`);
+                this.logger.info(`[Adapter] Claude thinking budget_tokens: ${thinkingParam.budget_tokens}`);
             }
         }
 
@@ -1452,21 +1467,26 @@ class FormatConverter {
             return null;
         }
 
+        const candidate = googleResponse.candidates?.[0];
+        const usage = googleResponse.usageMetadata;
+
+        // Update stream state with usage if available
+        if (usage) {
+            const inputTokens = (usage.promptTokenCount || 0) + (usage.toolUsePromptTokenCount || 0);
+            const outputTokens = (usage.candidatesTokenCount || 0) + (usage.thoughtsTokenCount || 0);
+
+            if (inputTokens > 0) streamState.inputTokens = inputTokens;
+            streamState.outputTokens = outputTokens;
+        }
+
         // Initialize stream state
         if (!streamState.messageId) {
             streamState.messageId = `msg_${this._generateRequestId()}`;
             streamState.contentBlockIndex = 0;
-            streamState.inputTokens = 0;
-            streamState.outputTokens = 0;
+            if (!streamState.inputTokens) streamState.inputTokens = 0;
+            if (!streamState.outputTokens) streamState.outputTokens = 0;
         }
 
-        // Cache usage data
-        if (googleResponse.usageMetadata) {
-            streamState.inputTokens = googleResponse.usageMetadata.promptTokenCount || 0;
-            streamState.outputTokens = googleResponse.usageMetadata.candidatesTokenCount || 0;
-        }
-
-        const candidate = googleResponse.candidates?.[0];
         if (!candidate) {
             if (googleResponse.promptFeedback) {
                 this.logger.warn(`[Adapter] Google returned promptFeedback for Claude stream`);
@@ -1479,20 +1499,20 @@ class FormatConverter {
         // Send message_start event once
         if (!streamState.messageStartSent) {
             events.push({
-                type: "message_start",
                 message: {
-                    id: streamState.messageId,
-                    type: "message",
-                    role: "assistant",
                     content: [],
+                    id: streamState.messageId,
                     model: modelName,
+                    role: "assistant",
                     stop_reason: null,
                     stop_sequence: null,
+                    type: "message",
                     usage: {
-                        input_tokens: streamState.inputTokens,
+                        input_tokens: streamState.inputTokens || 0,
                         output_tokens: 0,
                     },
                 },
+                type: "message_start",
             });
             streamState.messageStartSent = true;
         }
@@ -1504,67 +1524,67 @@ class FormatConverter {
                     // Thinking content
                     if (!streamState.thinkingBlockStarted) {
                         events.push({
-                            type: "content_block_start",
+                            content_block: { thinking: "", type: "thinking" },
                             index: streamState.contentBlockIndex,
-                            content_block: { type: "thinking", thinking: "" },
+                            type: "content_block_start",
                         });
                         streamState.thinkingBlockStarted = true;
                         streamState.thinkingBlockIndex = streamState.contentBlockIndex;
                         streamState.contentBlockIndex++;
                     }
                     events.push({
-                        type: "content_block_delta",
+                        delta: { thinking: part.text, type: "thinking_delta" },
                         index: streamState.thinkingBlockIndex,
-                        delta: { type: "thinking_delta", thinking: part.text },
+                        type: "content_block_delta",
                     });
                 } else if (part.text) {
                     // Regular text content
                     if (streamState.thinkingBlockStarted && !streamState.thinkingBlockStopped) {
                         events.push({
-                            type: "content_block_stop",
                             index: streamState.thinkingBlockIndex,
+                            type: "content_block_stop",
                         });
                         streamState.thinkingBlockStopped = true;
                     }
                     if (!streamState.textBlockStarted) {
                         events.push({
-                            type: "content_block_start",
+                            content_block: { text: "", type: "text" },
                             index: streamState.contentBlockIndex,
-                            content_block: { type: "text", text: "" },
+                            type: "content_block_start",
                         });
                         streamState.textBlockStarted = true;
                         streamState.textBlockIndex = streamState.contentBlockIndex;
                         streamState.contentBlockIndex++;
                     }
                     events.push({
-                        type: "content_block_delta",
+                        delta: { text: part.text, type: "text_delta" },
                         index: streamState.textBlockIndex,
-                        delta: { type: "text_delta", text: part.text },
+                        type: "content_block_delta",
                     });
                 } else if (part.functionCall) {
                     // Tool use
                     const toolUseId = `toolu_${this._generateRequestId()}`;
                     events.push({
-                        type: "content_block_start",
-                        index: streamState.contentBlockIndex,
                         content_block: {
-                            type: "tool_use",
                             id: toolUseId,
-                            name: part.functionCall.name,
                             input: {},
+                            name: part.functionCall.name,
+                            type: "tool_use",
                         },
+                        index: streamState.contentBlockIndex,
+                        type: "content_block_start",
                     });
                     events.push({
-                        type: "content_block_delta",
-                        index: streamState.contentBlockIndex,
                         delta: {
-                            type: "input_json_delta",
                             partial_json: JSON.stringify(part.functionCall.args || {}),
+                            type: "input_json_delta",
                         },
+                        index: streamState.contentBlockIndex,
+                        type: "content_block_delta",
                     });
                     events.push({
-                        type: "content_block_stop",
                         index: streamState.contentBlockIndex,
+                        type: "content_block_stop",
                     });
                     streamState.contentBlockIndex++;
                     streamState.hasToolUse = true;
@@ -1577,15 +1597,15 @@ class FormatConverter {
             // Close any open blocks
             if (streamState.textBlockStarted && !streamState.textBlockStopped) {
                 events.push({
-                    type: "content_block_stop",
                     index: streamState.textBlockIndex,
+                    type: "content_block_stop",
                 });
                 streamState.textBlockStopped = true;
             }
             if (streamState.thinkingBlockStarted && !streamState.thinkingBlockStopped) {
                 events.push({
-                    type: "content_block_stop",
                     index: streamState.thinkingBlockIndex,
+                    type: "content_block_stop",
                 });
                 streamState.thinkingBlockStopped = true;
             }
@@ -1601,13 +1621,13 @@ class FormatConverter {
             }
 
             events.push({
-                type: "message_delta",
                 delta: {
                     stop_reason: stopReason,
                     stop_sequence: null,
                 },
+                type: "message_delta",
                 usage: {
-                    output_tokens: streamState.outputTokens,
+                    output_tokens: streamState.outputTokens || 0,
                 },
             });
 
@@ -1631,16 +1651,17 @@ class FormatConverter {
 
         if (!candidate) {
             return {
+                content: [{ text: "", type: "text" }],
                 id: messageId,
-                type: "message",
-                role: "assistant",
-                content: [{ type: "text", text: "" }],
                 model: modelName,
+                role: "assistant",
                 stop_reason: "end_turn",
                 stop_sequence: null,
+                type: "message",
                 usage: {
-                    input_tokens: usage.promptTokenCount || 0,
-                    output_tokens: usage.candidatesTokenCount || 0,
+                    input_tokens: (usage.promptTokenCount || 0) + (usage.toolUsePromptTokenCount || 0),
+                    // Match OpenAI logic: sum candidates tokens + thoughts tokens
+                    output_tokens: (usage.candidatesTokenCount || 0) + (usage.thoughtsTokenCount || 0),
                 },
             };
         }
@@ -1651,27 +1672,27 @@ class FormatConverter {
             for (const part of candidate.content.parts) {
                 if (part.thought === true && part.text) {
                     content.push({
-                        type: "thinking",
                         thinking: part.text,
+                        type: "thinking",
                     });
                 } else if (part.text) {
                     content.push({
-                        type: "text",
                         text: part.text,
+                        type: "text",
                     });
                 } else if (part.inlineData) {
                     // Image output - convert to base64 format
                     content.push({
-                        type: "text",
                         text: `![Generated Image](data:${part.inlineData.mimeType};base64,${part.inlineData.data})`,
+                        type: "text",
                     });
                 } else if (part.functionCall) {
                     hasToolUse = true;
                     content.push({
-                        type: "tool_use",
                         id: `toolu_${this._generateRequestId()}`,
-                        name: part.functionCall.name,
                         input: part.functionCall.args || {},
+                        name: part.functionCall.name,
+                        type: "tool_use",
                     });
                 }
             }
@@ -1688,16 +1709,17 @@ class FormatConverter {
         }
 
         return {
+            content: content.length > 0 ? content : [{ text: "", type: "text" }],
             id: messageId,
-            type: "message",
-            role: "assistant",
-            content: content.length > 0 ? content : [{ type: "text", text: "" }],
             model: modelName,
+            role: "assistant",
             stop_reason: stopReason,
             stop_sequence: null,
+            type: "message",
             usage: {
-                input_tokens: usage.promptTokenCount || 0,
-                output_tokens: usage.candidatesTokenCount || 0,
+                input_tokens: (usage.promptTokenCount || 0) + (usage.toolUsePromptTokenCount || 0),
+                // Match OpenAI logic: sum candidates tokens + thoughts tokens
+                output_tokens: (usage.candidatesTokenCount || 0) + (usage.thoughtsTokenCount || 0),
             },
         };
     }

@@ -343,6 +343,7 @@ class ProxyServerSystem extends EventEmitter {
                     " origin, accept, baggage, sentry-trace, openai-organization, openai-project, openai-beta, x-stainless-lang, " +
                     "x-stainless-package-version, x-stainless-os, x-stainless-arch, x-stainless-runtime, x-stainless-runtime-version, " +
                     "x-stainless-retry-count, x-stainless-timeout, sec-ch-ua, sec-ch-ua-mobile, sec-ch-ua-platform, " +
+                    "anthropic-version, anthropic-beta, anthropic-dangerous-direct-browser-access, " +
                     "x-goog-upload-protocol, x-goog-upload-command, x-goog-upload-header-content-length, " +
                     "x-goog-upload-header-content-type, x-goog-upload-url, x-goog-upload-offset, x-goog-upload-status"
             );
