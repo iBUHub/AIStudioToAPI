@@ -1125,6 +1125,22 @@ class FormatConverter {
         let systemInstruction = null;
         const googleContents = [];
 
+        // Pre-scan messages to build a map of tool_use_id -> function_name
+        // This is required because Gemini's functionResponse needs the original function name,
+        // but Claude's tool_result only provides the tool_use_id.
+        const toolIdToNameMap = new Map();
+        if (claudeBody.messages && Array.isArray(claudeBody.messages)) {
+            for (const message of claudeBody.messages) {
+                if (message.role === "assistant" && Array.isArray(message.content)) {
+                    for (const block of message.content) {
+                        if (block.type === "tool_use" && block.id && block.name) {
+                            toolIdToNameMap.set(block.id, block.name);
+                        }
+                    }
+                }
+            }
+        }
+
         // Extract system message (Claude uses a separate 'system' field)
         if (claudeBody.system) {
             const systemContent = Array.isArray(claudeBody.system)
@@ -1162,7 +1178,8 @@ class FormatConverter {
                         if (typeof toolResult.content === "string") {
                             try {
                                 responseContent = JSON.parse(toolResult.content);
-                            } catch {
+                            } catch (e) {
+                                /* eslint-disable-line no-unused-vars */
                                 responseContent = { result: toolResult.content };
                             }
                         } else if (Array.isArray(toolResult.content)) {
@@ -1180,9 +1197,20 @@ class FormatConverter {
                             responseContent = toolResult.content || { result: "" };
                         }
 
+                        // Resolve function name using the map
+                        const toolUseId = toolResult.tool_use_id;
+                        let functionName = toolIdToNameMap.get(toolUseId);
+
+                        if (!functionName) {
+                            this.logger.warn(
+                                `[Adapter] Warning: efficient tool name resolution failed for ID: ${toolUseId}. outputting as unknown_function`
+                            );
+                            functionName = "unknown_function";
+                        }
+
                         pendingToolParts.push({
                             functionResponse: {
-                                name: toolResult.tool_use_id || "unknown_function",
+                                name: functionName,
                                 response: responseContent,
                             },
                         });
@@ -1397,6 +1425,16 @@ class FormatConverter {
             if (Object.keys(functionCallingConfig).length > 0) {
                 googleRequest.toolConfig = { functionCallingConfig };
             }
+        }
+
+        // Handle Claude's disable_parallel_tool_use
+        // Note: Gemini doesn't have a direct equivalent for this at the toolConfig level,
+        // but we can log it for debug purposes. Future improvements might involve
+        // filtering outputs if the model ignores the implied constraint.
+        if (claudeBody.tool_choice && claudeBody.tool_choice.disable_parallel_tool_use === true) {
+            this.logger.info(
+                "[Adapter] Claude request specifies disable_parallel_tool_use=true (Note: Applied as best-effort in Gemini)."
+            );
         }
 
         // Force web search and URL context
