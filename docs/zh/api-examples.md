@@ -1,6 +1,6 @@
 # API 使用示例
 
-本文档提供了简要的 API 使用示例，包括 OpenAI 兼容 API 和 Gemini 原生 API 格式。
+本文档提供了简要的 API 使用示例，包括 OpenAI 兼容 API、Anthropic 兼容 API 和 Gemini 原生 API 格式。
 
 ## 🤖 OpenAI 兼容 API
 
@@ -361,5 +361,45 @@ curl -X POST http://localhost:7860/v1beta/models/gemini-embedding-001:batchEmbed
         }
       }
     ]
+  }'
+```
+
+## 👤 Anthropic 兼容 API
+
+```bash
+curl -X POST http://localhost:7860/v1/messages \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key-1" \
+  -H "anthropic-version: 2023-06-01" \
+  -d '{
+    "model": "gemini-2.5-flash-lite",
+    "max_tokens": 1024,
+    "messages": [
+      {
+        "role": "user",
+        "content": "你好，最近怎么样？"
+      }
+    ],
+    "stream": false
+  }'
+```
+
+### 🌊 使用流式响应
+
+```bash
+curl -X POST http://localhost:7860/v1/messages \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key-1" \
+  -H "anthropic-version: 2023-06-01" \
+  -d '{
+    "model": "gemini-2.5-flash-lite",
+    "max_tokens": 1024,
+    "messages": [
+      {
+        "role": "user",
+        "content": "写一首关于秋天的诗"
+      }
+    ],
+    "stream": true
   }'
 ```

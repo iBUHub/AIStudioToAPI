@@ -1,6 +1,6 @@
 # API Usage Examples
 
-This document provides simple API usage examples, including both OpenAI-compatible API and Gemini native API formats.
+This document provides simple API usage examples, including OpenAI-compatible API, Anthropic-compatible API, and Gemini native API formats.
 
 ## 🤖 OpenAI-Compatible API
 
@@ -361,5 +361,45 @@ curl -X POST http://localhost:7860/v1beta/models/gemini-embedding-001:batchEmbed
         }
       }
     ]
+  }'
+```
+
+## 👤 Anthropic Compatible API
+
+```bash
+curl -X POST http://localhost:7860/v1/messages \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key-1" \
+  -H "anthropic-version: 2023-06-01" \
+  -d '{
+    "model": "gemini-2.5-flash-lite",
+    "max_tokens": 1024,
+    "messages": [
+      {
+        "role": "user",
+        "content": "Hello, how are you?"
+      }
+    ],
+    "stream": false
+  }'
+```
+
+### 🌊 Streaming Response
+
+```bash
+curl -X POST http://localhost:7860/v1/messages \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key-1" \
+  -H "anthropic-version: 2023-06-01" \
+  -d '{
+    "model": "gemini-2.5-flash-lite",
+    "max_tokens": 1024,
+    "messages": [
+      {
+        "role": "user",
+        "content": "Write a poem about autumn"
+      }
+    ],
+    "stream": true
   }'
 ```

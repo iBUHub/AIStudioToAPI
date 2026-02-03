@@ -6,7 +6,7 @@ A tool that wraps Google AI Studio web interface to provide OpenAI API and Gemin
 
 ## ✨ Features
 
-- 🔄 **API Compatibility**: Compatible with both OpenAI API and Gemini API formats
+- 🔄 **API Compatibility**: Compatible with OpenAI API, Gemini API, and Anthropic API formats
 - 🌐 **Web Automation**: Uses browser automation to interact with AI Studio web interface
 - 🔐 **Authentication**: Secure API key-based authentication
 - 🔧 **Tool Calls Support**: Both OpenAI and Gemini APIs support Tool Calls (Function Calling)
@@ -203,6 +203,13 @@ This endpoint is forwarded to the official Gemini API format endpoint.
 - `POST /v1beta/models/{model_name}:streamGenerateContent`: Stream content, image, and speech generation, supports real and fake streaming.
 - `POST /v1beta/models/{model_name}:batchEmbedContents`: Batch generate text embedding vectors.
 - `POST /v1beta/models/{model_name}:predict`: Imagen series models image generation.
+
+### 👤 Anthropic Compatible API
+
+This endpoint forwards requests to the official Gemini API format endpoint.
+
+- `GET /v1/models`: List models.
+- `POST /v1/messages`: Chat message completions, supports non-streaming, real streaming, and fake streaming.
 
 > 📖 For detailed API usage examples, see: [API Usage Examples](docs/en/api-examples.md)
 

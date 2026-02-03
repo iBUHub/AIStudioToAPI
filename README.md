@@ -6,7 +6,7 @@
 
 ## ✨ 功能特性
 
-- 🔄 **API 兼容性**：同时兼容 OpenAI API 和 Gemini API 格式
+- 🔄 **API 兼容性**：同时兼容 OpenAI API、Gemini API 和 Anthropic API 格式
 - 🌐 **网页自动化**：使用浏览器自动化技术与 AI Studio 网页界面交互
 - 🔐 **身份验证**：基于 API 密钥的安全认证机制
 - 🔧 **支持工具调用**：OpenAI 和 Gemini 接口均支持 Tool Calls (Function Calling)
@@ -205,6 +205,13 @@ sudo docker compose down
 - `POST /v1beta/models/{model_name}:streamGenerateContent`: 流式生成内容、图片和语音，支持真流式和假流式。
 - `POST /v1beta/models/{model_name}:batchEmbedContents`: 批量生成文本嵌入向量。
 - `POST /v1beta/models/{model_name}:predict`: Imagen 系列模型图像生成。
+
+### 👤 Anthropic 兼容 API
+
+此端点处理后转发到官方 Gemini API 格式端点。
+
+- `GET /v1/models`: 列出模型。
+- `POST /v1/messages`: 聊天消息补全，支持非流式、真流式和假流式。
 
 > 📖 详细的 API 使用示例请参阅：[API 使用示例文档](docs/zh/api-examples.md)
 
