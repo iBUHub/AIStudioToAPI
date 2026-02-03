@@ -134,7 +134,16 @@ class FormatConverter {
 
             for (const key of Object.keys(obj)) {
                 // Skip fields not supported by Gemini API
-                if (key === "$schema" || key === "additionalProperties") {
+                const unsupportedKeys = [
+                    "$schema",
+                    "additionalProperties",
+                    "ref",
+                    "$ref",
+                    "propertyNames",
+                    "patternProperties",
+                    "unevaluatedProperties",
+                ];
+                if (unsupportedKeys.includes(key)) {
                     continue;
                 }
 
@@ -175,7 +184,6 @@ class FormatConverter {
      * @returns {Promise<{ googleRequest: object, cleanModelName: string }>} - Converted request and cleaned model name
      */
     async translateOpenAIToGoogle(openaiBody) {
-        // eslint-disable-line no-unused-vars
         this.logger.info("[Adapter] Starting translation of OpenAI request format to Google format...");
 
         // Parse thinkingLevel suffix from model name (e.g., gemini-3-flash-preview-minimal or gemini-3-flash-preview(low))
@@ -760,8 +768,7 @@ class FormatConverter {
                 `[Adapter] Debug: Sanitized Openai tools = ${JSON.stringify(googleRequest.tools, null, 2)}`
             );
         }
-
-        this.logger.info("[Adapter] Translation complete.");
+        this.logger.info("[Adapter] OpenAI to Google translation complete.");
         return { cleanModelName, googleRequest };
     }
 
@@ -1304,6 +1311,9 @@ class FormatConverter {
                                             mimeType,
                                         },
                                     });
+                                    this.logger.info(
+                                        `[Adapter] Successfully downloaded and converted image to base64.`
+                                    );
                                 } catch (error) {
                                     this.logger.error(`[Adapter] Failed to download image: ${error.message}`);
                                     googleParts.push({
@@ -1511,7 +1521,15 @@ class FormatConverter {
         if (!schema || typeof schema !== "object") return schema;
 
         const result = Array.isArray(schema) ? [] : {};
-        const unsupportedKeys = ["$schema", "additionalProperties", "$ref", "patternProperties"];
+        const unsupportedKeys = [
+            "$schema",
+            "additionalProperties",
+            "ref",
+            "$ref",
+            "propertyNames",
+            "patternProperties",
+            "unevaluatedProperties",
+        ];
 
         for (const key of Object.keys(schema)) {
             if (unsupportedKeys.includes(key)) continue;
@@ -1679,6 +1697,7 @@ class FormatConverter {
                         index: streamState.textBlockIndex,
                         type: "content_block_delta",
                     });
+                    this.logger.info("[Adapter] Successfully parsed image from streaming response chunk.");
                 } else if (part.functionCall) {
                     // Tool use
                     const toolUseId = `toolu_${this._generateRequestId()}`;
