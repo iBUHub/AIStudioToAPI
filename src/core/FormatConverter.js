@@ -1390,9 +1390,29 @@ class FormatConverter {
         // Convert Claude tools to Gemini functionDeclarations
         if (claudeBody.tools && Array.isArray(claudeBody.tools) && claudeBody.tools.length > 0) {
             this.logger.debug(`[Adapter] Debug: original Claude tools = ${JSON.stringify(claudeBody.tools, null, 2)}`);
+            let hasWebSearchTool = false;
+            let hasUrlContextTool = false;
             const functionDeclarations = [];
 
             for (const tool of claudeBody.tools) {
+                // Handle specialized web search tool type (e.g. from Claude's search integration)
+                if (tool.type === "web_search_20250305" && tool.name === "web_search") {
+                    hasWebSearchTool = true;
+                    this.logger.info(
+                        `[Adapter] Detected web search tool in Claude request (name: ${tool.name}, type: ${tool.type}), mapping to Gemini googleSearch.`
+                    );
+                    continue; // Skip adding to functionDeclarations
+                }
+
+                // Handle specialized web fetch tool type, mapped to urlContext (Gemini 2.0 Feature)
+                if (tool.type === "web_fetch_20250910" && tool.name === "web_fetch") {
+                    hasUrlContextTool = true;
+                    this.logger.info(
+                        `[Adapter] Detected web fetch tool in Claude request (name: ${tool.name}, type: ${tool.type}), mapping to Gemini urlContext.`
+                    );
+                    continue; // Skip adding to functionDeclarations
+                }
+
                 if (tool.name) {
                     const declaration = { name: tool.name };
                     if (tool.description) declaration.description = tool.description;
@@ -1406,6 +1426,22 @@ class FormatConverter {
             if (functionDeclarations.length > 0) {
                 googleRequest.tools = [{ functionDeclarations }];
                 this.logger.info(`[Adapter] Converted ${functionDeclarations.length} Claude tool(s) to Gemini format`);
+            }
+
+            // If web search tool was found, ensure googleSearch is added to tools
+            if (hasWebSearchTool) {
+                if (!googleRequest.tools) googleRequest.tools = [];
+                if (!googleRequest.tools.some(t => t.googleSearch)) {
+                    googleRequest.tools.push({ googleSearch: {} });
+                }
+            }
+
+            // If web fetch tool was found, ensure urlContext is added to tools
+            if (hasUrlContextTool) {
+                if (!googleRequest.tools) googleRequest.tools = [];
+                if (!googleRequest.tools.some(t => t.urlContext)) {
+                    googleRequest.tools.push({ urlContext: {} });
+                }
             }
         }
 
