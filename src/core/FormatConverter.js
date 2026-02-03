@@ -179,6 +179,102 @@ class FormatConverter {
     }
 
     /**
+     * Convert JSON Schema to Gemini parameters format.
+     * Handles nullable types, enums, and ensures uppercase types.
+     *
+     * @param {Object} obj - The schema object to convert
+     * @param {boolean} [isResponseSchema=false] - If true, applies stricter rules (e.g. anyOf for unions) for Structured Outputs
+     * @returns {Object} The converted schema
+     */
+    _convertSchemaToGemini(obj, isResponseSchema = false) {
+        if (!obj || typeof obj !== "object") return obj;
+
+        const result = Array.isArray(obj) ? [] : {};
+
+        for (const key of Object.keys(obj)) {
+            // 1. Filter out unsupported fields using a blacklist approach
+            const unsupportedKeys = [
+                "$schema",
+                "additionalProperties",
+                "ref",
+                "$ref",
+                "propertyNames",
+                "patternProperties",
+                "unevaluatedProperties",
+                "exclusiveMinimum",
+                "exclusiveMaximum",
+                "const",
+            ];
+
+            if (isResponseSchema) {
+                // For Structured Outputs: stricter filtering of metadata that causes 400 errors
+                unsupportedKeys.push("title", "default", "examples", "$defs", "id");
+            }
+
+            if (unsupportedKeys.includes(key)) {
+                continue;
+            }
+
+            if (key === "type") {
+                if (Array.isArray(obj[key])) {
+                    // Handle nullable types like ["string", "null"]
+                    const types = obj[key];
+                    const nonNullTypes = types.filter(t => t !== "null");
+                    const hasNull = types.includes("null");
+
+                    if (hasNull) {
+                        result.nullable = true;
+                    }
+
+                    if (nonNullTypes.length === 1) {
+                        // Single non-null type: use it directly
+                        result[key] = nonNullTypes[0].toUpperCase();
+                    } else if (nonNullTypes.length > 1) {
+                        // Multiple non-null types: e.g. ["string", "integer"]
+                        if (isResponseSchema) {
+                            // For Response Schema: Gemini doesn't support array types, use anyOf
+                            result.anyOf = nonNullTypes.map(t => ({
+                                type: t.toUpperCase(),
+                            }));
+                        } else {
+                            result[key] = nonNullTypes.map(t => t.toUpperCase());
+                        }
+                    } else {
+                        // Only null type, default to STRING
+                        result[key] = "STRING";
+                    }
+                } else if (typeof obj[key] === "string") {
+                    // Convert lowercase type to uppercase for Gemini
+                    result[key] = obj[key].toUpperCase();
+                } else if (typeof obj[key] === "object" && obj[key] !== null) {
+                    result[key] = this._convertSchemaToGemini(obj[key], isResponseSchema);
+                } else {
+                    result[key] = obj[key];
+                }
+            } else if (key === "enum") {
+                // 2. Ensure all enum values are strings (Only for Response Schema)
+                if (isResponseSchema) {
+                    if (Array.isArray(obj[key])) {
+                        result[key] = obj[key].map(String);
+                    } else if (obj[key] !== undefined && obj[key] !== null) {
+                        result[key] = [String(obj[key])];
+                    }
+                    result["type"] = "STRING";
+                } else {
+                    // For Tools: Allow original enum values
+                    result[key] = obj[key];
+                }
+            } else if (typeof obj[key] === "object" && obj[key] !== null) {
+                result[key] = this._convertSchemaToGemini(obj[key], isResponseSchema);
+            } else {
+                result[key] = obj[key];
+            }
+        }
+
+        return result;
+    }
+
+    /**
      * Convert OpenAI request format to Google Gemini format
      * @param {object} openaiBody - OpenAI format request body
      * @returns {Promise<{ googleRequest: object, cleanModelName: string }>} - Converted request and cleaned model name
@@ -197,7 +293,7 @@ class FormatConverter {
         }
 
         // [DEBUG] Log incoming messages for troubleshooting
-        this.logger.debug(`[Adapter] Debug: incoming messages = ${JSON.stringify(openaiBody.messages, null, 2)}`);
+        this.logger.debug(`[Adapter] Debug: incoming OpenAI Body = ${JSON.stringify(openaiBody, null, 2)}`);
         // [DEBUG] Log original OpenAI tools
         if (openaiBody.tools && openaiBody.tools.length > 0) {
             this.logger.debug(`[Adapter] Debug: original OpenAI tools = ${JSON.stringify(openaiBody.tools, null, 2)}`);
@@ -505,101 +601,6 @@ class FormatConverter {
 
         googleRequest.generationConfig = generationConfig;
 
-        /**
-         * Helper function to convert OpenAI parameter types to Gemini format (uppercase).
-         * Also handles nullable types like ["string", "null"] -> type: "STRING", nullable: true.
-         * This function is used for both tools and response_format schema conversion.
-         *
-         * @param {Object} obj - The schema object to convert
-         * @param {boolean} [isResponseSchema=false] - If true, applies stricter rules (e.g. anyOf for unions) for Structured Outputs
-         * @returns {Object} The converted schema
-         */
-        const convertParameterTypes = (obj, isResponseSchema = false) => {
-            if (!obj || typeof obj !== "object") return obj;
-
-            const result = Array.isArray(obj) ? [] : {};
-
-            for (const key of Object.keys(obj)) {
-                // 1. Filter out unsupported fields using a blacklist approach
-                // This allows potentially valid fields to pass through while blocking known problematic ones
-                const unsupportedKeys = [
-                    "$schema",
-                    "additionalProperties",
-                    "ref",
-                    "$ref",
-                    "propertyNames",
-                    "patternProperties",
-                    "unevaluatedProperties",
-                ];
-
-                if (isResponseSchema) {
-                    // For Structured Outputs: stricter filtering of metadata that causes 400 errors
-                    unsupportedKeys.push("title", "default", "examples", "$defs", "id");
-                }
-
-                if (unsupportedKeys.includes(key)) {
-                    continue;
-                }
-
-                if (key === "type") {
-                    if (Array.isArray(obj[key])) {
-                        // Handle nullable types like ["string", "null"]
-                        const types = obj[key];
-                        const nonNullTypes = types.filter(t => t !== "null");
-                        const hasNull = types.includes("null");
-
-                        if (hasNull) {
-                            result.nullable = true;
-                        }
-
-                        if (nonNullTypes.length === 1) {
-                            // Single non-null type: use it directly
-                            result[key] = nonNullTypes[0].toUpperCase();
-                        } else if (nonNullTypes.length > 1) {
-                            // Multiple non-null types: e.g. ["string", "integer"]
-                            if (isResponseSchema) {
-                                // For Response Schema: Gemini doesn't support array types, use anyOf
-                                result.anyOf = nonNullTypes.map(t => ({
-                                    type: t.toUpperCase(),
-                                }));
-                            } else {
-                                result[key] = nonNullTypes.map(t => t.toUpperCase());
-                            }
-                        } else {
-                            // Only null type, default to STRING
-                            result[key] = "STRING";
-                        }
-                    } else if (typeof obj[key] === "string") {
-                        // Convert lowercase type to uppercase for Gemini
-                        result[key] = obj[key].toUpperCase();
-                    } else if (typeof obj[key] === "object" && obj[key] !== null) {
-                        result[key] = convertParameterTypes(obj[key], isResponseSchema);
-                    } else {
-                        result[key] = obj[key];
-                    }
-                } else if (key === "enum") {
-                    // 2. Ensure all enum values are strings (Only for Response Schema)
-                    if (isResponseSchema) {
-                        if (Array.isArray(obj[key])) {
-                            result[key] = obj[key].map(String);
-                        } else if (obj[key] !== undefined && obj[key] !== null) {
-                            result[key] = [String(obj[key])];
-                        }
-                        result["type"] = "STRING";
-                    } else {
-                        // For Tools: Allow original enum values
-                        result[key] = obj[key];
-                    }
-                } else if (typeof obj[key] === "object" && obj[key] !== null) {
-                    result[key] = convertParameterTypes(obj[key], isResponseSchema);
-                } else {
-                    result[key] = obj[key];
-                }
-            }
-
-            return result;
-        };
-
         // Convert OpenAI tools to Gemini functionDeclarations
         const openaiTools = openaiBody.tools || openaiBody.functions;
         if (openaiTools && Array.isArray(openaiTools) && openaiTools.length > 0) {
@@ -620,11 +621,9 @@ class FormatConverter {
                     }
 
                     if (funcDef.parameters) {
-                        // Convert parameter types from lowercase to uppercase
-                        // isResponseSchema = false for Tools
-                        declaration.parameters = convertParameterTypes(funcDef.parameters, false);
+                        // Use shared _convertSchemaToGemini
+                        declaration.parameters = this._convertSchemaToGemini(funcDef.parameters);
                     }
-
                     functionDeclarations.push(declaration);
                 }
             }
@@ -682,9 +681,9 @@ class FormatConverter {
                     try {
                         this.logger.debug(`[Adapter] Debug: Converting OpenAI JSON Schema: ${JSON.stringify(schema)}`);
 
-                        // Convert schema to Gemini format (reuse convertParameterTypes helper defined above)
+                        // Convert schema to Gemini format (reuse shared method)
                         // isResponseSchema = true for Structured Output
-                        const convertedSchema = convertParameterTypes(schema, true);
+                        const convertedSchema = this._convertSchemaToGemini(schema, true);
 
                         this.logger.debug(
                             `[Adapter] Debug: Converted Gemini JSON Schema: ${JSON.stringify(convertedSchema)}`
@@ -1125,9 +1124,7 @@ class FormatConverter {
         }
 
         // [DEBUG] Log incoming messages
-        this.logger.debug(
-            `[Adapter] Debug: incoming Claude messages = ${JSON.stringify(claudeBody.messages, null, 2)}`
-        );
+        this.logger.debug(`[Adapter] Debug: incoming Claude Body = ${JSON.stringify(claudeBody, null, 2)}`);
 
         let systemInstruction = null;
         const googleContents = [];
@@ -1395,6 +1392,46 @@ class FormatConverter {
             );
         }
 
+        // Handle Claude's structured output (output_format)
+        // Ref: https://docs.anthropic.com/en/docs/build-with-claude/structured-outputs
+        if (claudeBody.output_format) {
+            if (claudeBody.output_format.type === "json_schema") {
+                // Support both direct 'schema' (user example) and 'json_schema' wrapper (OpenAI style)
+                let schema = claudeBody.output_format.schema;
+                let schemaName = "structured_output";
+
+                if (!schema && claudeBody.output_format.json_schema) {
+                    schema = claudeBody.output_format.json_schema.schema;
+                    schemaName = claudeBody.output_format.json_schema.name || schemaName;
+                }
+
+                if (schema) {
+                    generationConfig.responseMimeType = "application/json";
+                    generationConfig.responseSchema = this._convertSchemaToGemini(schema, true);
+                    this.logger.info(
+                        `[Adapter] Converted Claude output_format to Gemini responseSchema. Name: ${schemaName}`
+                    );
+                }
+            } else if (claudeBody.output_format.type === "json_object") {
+                generationConfig.responseMimeType = "application/json";
+                this.logger.info(`[Adapter] Converted Claude output_format (json_object) to Gemini responseMimeType.`);
+            } else if (claudeBody.output_format.type === "text") {
+                generationConfig.responseMimeType = "text/plain";
+            }
+        }
+
+        // Handle Claude's output_config (new format)
+        if (claudeBody.output_config && claudeBody.output_config.format) {
+            const format = claudeBody.output_config.format;
+            if (format.type === "json_schema" && format.schema) {
+                generationConfig.responseMimeType = "application/json";
+                generationConfig.responseSchema = this._convertSchemaToGemini(format.schema, true);
+                this.logger.info(
+                    `[Adapter] Converted Claude output_config to Gemini responseSchema. Title: ${format.schema.title || "untitled"}`
+                );
+            }
+        }
+
         googleRequest.generationConfig = generationConfig;
 
         // Convert Claude tools to Gemini functionDeclarations
@@ -1427,7 +1464,7 @@ class FormatConverter {
                     const declaration = { name: tool.name };
                     if (tool.description) declaration.description = tool.description;
                     if (tool.input_schema) {
-                        declaration.parameters = this._convertClaudeSchemaToGemini(tool.input_schema);
+                        declaration.parameters = this._convertSchemaToGemini(tool.input_schema);
                     }
                     functionDeclarations.push(declaration);
                 }
@@ -1512,37 +1549,6 @@ class FormatConverter {
         }
 
         return { cleanModelName, googleRequest };
-    }
-
-    /**
-     * Convert Claude input_schema to Gemini parameters format
-     */
-    _convertClaudeSchemaToGemini(schema) {
-        if (!schema || typeof schema !== "object") return schema;
-
-        const result = Array.isArray(schema) ? [] : {};
-        const unsupportedKeys = [
-            "$schema",
-            "additionalProperties",
-            "ref",
-            "$ref",
-            "propertyNames",
-            "patternProperties",
-            "unevaluatedProperties",
-        ];
-
-        for (const key of Object.keys(schema)) {
-            if (unsupportedKeys.includes(key)) continue;
-
-            if (key === "type" && typeof schema[key] === "string") {
-                result[key] = schema[key].toUpperCase();
-            } else if (typeof schema[key] === "object" && schema[key] !== null) {
-                result[key] = this._convertClaudeSchemaToGemini(schema[key]);
-            } else {
-                result[key] = schema[key];
-            }
-        }
-        return result;
     }
 
     /**
