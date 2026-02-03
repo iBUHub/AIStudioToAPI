@@ -26,6 +26,7 @@ body:
       options:
         - OpenAI
         - Gemini
+        - Anthropic
     validations:
       required: true
 

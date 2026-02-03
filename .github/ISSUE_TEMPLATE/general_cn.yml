@@ -41,6 +41,17 @@ body:
     validations:
       required: false
 
+  - type: dropdown
+    id: api_endpoint
+    attributes:
+      label: 请求接口
+      options:
+        - OpenAI
+        - Gemini
+        - Anthropic
+    validations:
+      required: false
+
   - type: textarea
     id: description
     attributes:
