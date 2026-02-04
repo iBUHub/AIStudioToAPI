@@ -186,7 +186,7 @@ class FormatConverter {
      * @param {boolean} [isResponseSchema=false] - If true, applies stricter rules (e.g. anyOf for unions) for Structured Outputs
      * @returns {Object} The converted schema
      */
-    _convertSchemaToGemini(obj, isResponseSchema = false) {
+    _convertSchemaToGemini(obj, isResponseSchema = false, isProperties = false) {
         if (!obj || typeof obj !== "object") return obj;
 
         const result = Array.isArray(obj) ? [] : {};
@@ -211,8 +211,44 @@ class FormatConverter {
                 unsupportedKeys.push("title", "default", "examples", "$defs", "id");
             }
 
-            if (unsupportedKeys.includes(key)) {
+            // ONLY Filter if NOT a property name (isProperties is false)
+            if (!isProperties && unsupportedKeys.includes(key)) {
                 continue;
+            }
+
+            // Handle anyOf specially
+            if (key === "anyOf") {
+                if (Array.isArray(obj[key])) {
+                    const variants = obj[key];
+                    const hasNull = variants.some(v => v.type === "null");
+                    const nonNullVariants = variants.filter(v => v.type !== "null");
+
+                    if (hasNull) {
+                        result.nullable = true;
+                    }
+
+                    if (nonNullVariants.length === 1) {
+                        // Collapse single variant
+                        const converted = this._convertSchemaToGemini(
+                            nonNullVariants[0],
+                            isResponseSchema,
+                            isProperties
+                        );
+                        // Merge converted properties into result
+                        Object.assign(result, converted);
+                        continue; // Skip setting 'anyOf' explicitly
+                    } else if (nonNullVariants.length > 0) {
+                        // Keep anyOf for multiple variants
+                        result.anyOf = nonNullVariants.map(v =>
+                            this._convertSchemaToGemini(v, isResponseSchema, isProperties)
+                        );
+                        continue;
+                    } else if (hasNull) {
+                        // Only null type?
+                        result.type = "STRING"; // Default to string if only null
+                        continue;
+                    }
+                }
             }
 
             if (key === "type") {
@@ -247,7 +283,7 @@ class FormatConverter {
                     // Convert lowercase type to uppercase for Gemini
                     result[key] = obj[key].toUpperCase();
                 } else if (typeof obj[key] === "object" && obj[key] !== null) {
-                    result[key] = this._convertSchemaToGemini(obj[key], isResponseSchema);
+                    result[key] = this._convertSchemaToGemini(obj[key], isResponseSchema, isProperties);
                 } else {
                     result[key] = obj[key];
                 }
@@ -265,7 +301,9 @@ class FormatConverter {
                     result[key] = obj[key];
                 }
             } else if (typeof obj[key] === "object" && obj[key] !== null) {
-                result[key] = this._convertSchemaToGemini(obj[key], isResponseSchema);
+                // IMPORTANT: When descending into 'properties' object, set isProperties to true
+                const nextIsProperties = key === "properties";
+                result[key] = this._convertSchemaToGemini(obj[key], isResponseSchema, nextIsProperties);
             } else {
                 result[key] = obj[key];
             }
