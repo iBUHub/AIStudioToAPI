@@ -211,13 +211,13 @@ class FormatConverter {
                 unsupportedKeys.push("title", "default", "examples", "$defs", "id");
             }
 
-            // ONLY Filter if NOT a property name (isProperties is false)
+            // ONLY Filter metadata keywords if NOT a property name (isProperties is false)
             if (!isProperties && unsupportedKeys.includes(key)) {
                 continue;
             }
 
-            // Handle anyOf specially
-            if (key === "anyOf") {
+            // Handle anyOf specially (only when it is a schema keyword)
+            if (key === "anyOf" && !isProperties) {
                 if (Array.isArray(obj[key])) {
                     const variants = obj[key];
                     const hasNull = variants.some(v => v.type === "null");
@@ -247,7 +247,8 @@ class FormatConverter {
                 }
             }
 
-            if (key === "type") {
+            // Handle type specially (only when it is a schema keyword)
+            if (key === "type" && !isProperties) {
                 if (Array.isArray(obj[key])) {
                     // Handle nullable types like ["string", "null"]
                     const types = obj[key];
@@ -284,7 +285,7 @@ class FormatConverter {
                 } else {
                     result[key] = obj[key];
                 }
-            } else if (key === "enum") {
+            } else if (key === "enum" && !isProperties) {
                 // 2. Ensure all enum values are strings (Only for Response Schema)
                 if (isResponseSchema) {
                     if (Array.isArray(obj[key])) {
