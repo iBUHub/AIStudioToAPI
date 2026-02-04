@@ -184,6 +184,7 @@ class FormatConverter {
      *
      * @param {Object} obj - The schema object to convert
      * @param {boolean} [isResponseSchema=false] - If true, applies stricter rules (e.g. anyOf for unions) for Structured Outputs
+     * @param {boolean} [isProperties=false] - If true, the current object is a map of property definitions, so keys should not be filtered
      * @returns {Object} The converted schema
      */
     _convertSchemaToGemini(obj, isResponseSchema = false, isProperties = false) {
@@ -240,8 +241,7 @@ class FormatConverter {
                         );
                         continue;
                     } else if (hasNull) {
-                        // Only null type?
-                        result.type = "STRING"; // Default to string if only null
+                        // Only null type? Keep it as nullable without forcing a specific type.
                         continue;
                     }
                 }
