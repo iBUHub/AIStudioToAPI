@@ -233,6 +233,7 @@ class FormatConverter {
                         const converted = this._convertSchemaToGemini(nonNullVariants[0], isResponseSchema, false);
                         // Merge converted properties into result
                         Object.assign(result, converted);
+                        if (hasNull) result.nullable = true;
                         continue; // Skip setting 'anyOf' explicitly
                     } else if (nonNullVariants.length > 0) {
                         // Keep anyOf for multiple variants. Reset isProperties for sub-schemas.
