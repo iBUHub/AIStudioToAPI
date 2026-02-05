@@ -209,7 +209,7 @@ class FormatConverter {
 
             if (isResponseSchema) {
                 // For Structured Outputs: stricter filtering of metadata that causes 400 errors
-                unsupportedKeys.push("title", "default", "examples", "$defs", "id");
+                unsupportedKeys.push("default", "examples", "$defs", "id");
             }
 
             // ONLY Filter metadata keywords if NOT a property name (isProperties is false)
