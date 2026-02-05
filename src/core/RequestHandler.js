@@ -373,6 +373,7 @@ class RequestHandler {
                 });
                 this.needsSwitchingAfterRequest = false;
             }
+            if (!res.writableEnded) res.end();
         }
     }
 
@@ -439,6 +440,7 @@ class RequestHandler {
             this._handleRequestError(error, res);
         } finally {
             this.connectionRegistry.removeMessageQueue(requestId);
+            if (!res.writableEnded) res.end();
         }
     }
 
@@ -678,9 +680,8 @@ class RequestHandler {
                 });
                 this.needsSwitchingAfterRequest = false;
             }
+            if (!res.writableEnded) res.end();
         }
-
-        if (!res.writableEnded) res.end();
     }
 
     // Process Claude API format requests
@@ -917,9 +918,8 @@ class RequestHandler {
                 });
                 this.needsSwitchingAfterRequest = false;
             }
+            if (!res.writableEnded) res.end();
         }
-
-        if (!res.writableEnded) res.end();
     }
 
     // Process Claude count tokens request
@@ -1056,6 +1056,7 @@ class RequestHandler {
             this._handleClaudeRequestError(error, res);
         } finally {
             this.connectionRegistry.removeMessageQueue(requestId);
+            if (!res.writableEnded) res.end();
         }
     }
 
