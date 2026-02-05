@@ -212,6 +212,7 @@ sudo docker compose down
 
 - `GET /v1/models`: 列出模型。
 - `POST /v1/messages`: 聊天消息补全，支持非流式、真流式和假流式。
+- `POST /v1/messages/count_tokens`: 计算消息中的 token 数量。
 
 > 📖 详细的 API 使用示例请参阅：[API 使用示例文档](docs/zh/api-examples.md)
 

@@ -210,6 +210,7 @@ This endpoint forwards requests to the official Gemini API format endpoint.
 
 - `GET /v1/models`: List models.
 - `POST /v1/messages`: Chat message completions, supports non-streaming, real streaming, and fake streaming.
+- `POST /v1/messages/count_tokens`: Count tokens in the messages.
 
 > 📖 For detailed API usage examples, see: [API Usage Examples](docs/en/api-examples.md)
 
