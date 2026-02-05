@@ -922,6 +922,143 @@ class RequestHandler {
         if (!res.writableEnded) res.end();
     }
 
+    // Process Claude count tokens request
+    async processClaudeCountTokens(req, res) {
+        const requestId = this._generateRequestId();
+
+        // Check browser connection
+        if (!this.connectionRegistry.hasActiveConnections()) {
+            const recovered = await this._handleBrowserRecovery(res);
+            if (!recovered) return;
+        }
+
+        // Wait for system to become ready if it's busy
+        if (this.authSwitcher.isSystemBusy) {
+            const ready = await this._waitForSystemReady();
+            if (!ready) {
+                return this._sendClaudeErrorResponse(
+                    res,
+                    503,
+                    "overloaded_error",
+                    "Server undergoing internal maintenance, please try again later."
+                );
+            }
+            if (!this.connectionRegistry.hasActiveConnections()) {
+                const connectionReady = await this._waitForConnection(10000);
+                if (!connectionReady) {
+                    return this._sendClaudeErrorResponse(
+                        res,
+                        503,
+                        "overloaded_error",
+                        "Service temporarily unavailable: Connection not established."
+                    );
+                }
+            }
+        }
+
+        if (this.browserManager) {
+            this.browserManager.notifyUserActivity();
+        }
+
+        res.on("close", () => {
+            if (!res.writableEnded) {
+                this.logger.warn(`[Request] Client closed request #${requestId} connection prematurely.`);
+                this._cancelBrowserRequest(requestId);
+            }
+        });
+
+        // Translate Claude format to Google format
+        let googleBody, model;
+        try {
+            const result = await this.formatConverter.translateClaudeToGoogle(req.body);
+            googleBody = result.googleRequest;
+            model = result.cleanModelName;
+        } catch (error) {
+            this.logger.error(`[Adapter] Claude request translation failed: ${error.message}`);
+            return this._sendClaudeErrorResponse(res, 400, "invalid_request_error", "Invalid Claude request format.");
+        }
+
+        // Build countTokens request
+        // Per Gemini API docs, countTokens accepts:
+        // - contents[] (simple mode)
+        // - generateContentRequest (full request with model, contents, tools, systemInstruction, etc.)
+        const countTokensBody = {
+            generateContentRequest: {
+                model: `models/${model}`,
+                ...googleBody,
+            },
+        };
+
+        const proxyRequest = {
+            body: JSON.stringify(countTokensBody),
+            headers: { "Content-Type": "application/json" },
+            is_generative: false,
+            method: "POST",
+            path: `/v1beta/models/${model}:countTokens`,
+            query_params: {},
+            request_id: requestId,
+        };
+
+        const messageQueue = this.connectionRegistry.createMessageQueue(requestId);
+
+        try {
+            this._forwardRequest(proxyRequest);
+            const response = await messageQueue.dequeue();
+
+            if (response.event_type === "error") {
+                this.logger.error(
+                    `[Request] Received error from browser, will trigger switching logic. Status code: ${response.status}, message: ${response.message}`
+                );
+                this._sendClaudeErrorResponse(res, response.status || 500, "api_error", response.message);
+                if (!this._isConnectionResetError(response)) {
+                    await this.authSwitcher.handleRequestFailureAndSwitch(response, null);
+                }
+                return;
+            }
+
+            // For non-streaming requests, consume all chunks until STREAM_END
+            let fullBody = "";
+            if (response.type !== "STREAM_END") {
+                if (response.data) fullBody += response.data;
+                // eslint-disable-next-line no-constant-condition
+                while (true) {
+                    const message = await messageQueue.dequeue();
+                    if (message.type === "STREAM_END") {
+                        break;
+                    }
+                    if (message.event_type === "error") {
+                        this.logger.error(`[Request] Error received during count tokens: ${message.message}`);
+                        return this._sendClaudeErrorResponse(res, 500, "api_error", message.message);
+                    }
+                    if (message.data) fullBody += message.data;
+                }
+            }
+
+            // Parse Gemini response
+            const geminiResponse = JSON.parse(fullBody || response.body);
+            const totalTokens = geminiResponse.totalTokens || 0;
+
+            // Reset failure count on success
+            if (this.authSwitcher.failureCount > 0) {
+                this.logger.info(
+                    `✅ [Auth] Count tokens request successful - failure count reset from ${this.authSwitcher.failureCount} to 0`
+                );
+                this.authSwitcher.failureCount = 0;
+            }
+
+            // Return Claude-compatible response
+            res.status(200).json({
+                input_tokens: totalTokens,
+            });
+
+            this.logger.info(`[Request] Claude count tokens completed: ${totalTokens} input tokens`);
+        } catch (error) {
+            this._handleClaudeRequestError(error, res);
+        } finally {
+            this.connectionRegistry.removeMessageQueue(requestId);
+        }
+    }
+
     // === Response Handlers ===
 
     async _streamClaudeResponse(messageQueue, res, model) {
