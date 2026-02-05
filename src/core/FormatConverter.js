@@ -336,10 +336,6 @@ class FormatConverter {
 
         // [DEBUG] Log incoming messages for troubleshooting
         this.logger.debug(`[Adapter] Debug: incoming OpenAI Body = ${JSON.stringify(openaiBody, null, 2)}`);
-        // [DEBUG] Log original OpenAI tools
-        if (openaiBody.tools && openaiBody.tools.length > 0) {
-            this.logger.debug(`[Adapter] Debug: original OpenAI tools = ${JSON.stringify(openaiBody.tools, null, 2)}`);
-        }
 
         let systemInstruction = null;
         const googleContents = [];
@@ -1478,7 +1474,6 @@ class FormatConverter {
 
         // Convert Claude tools to Gemini functionDeclarations
         if (claudeBody.tools && Array.isArray(claudeBody.tools) && claudeBody.tools.length > 0) {
-            this.logger.debug(`[Adapter] Debug: original Claude tools = ${JSON.stringify(claudeBody.tools, null, 2)}`);
             let hasWebSearchTool = false;
             let hasUrlContextTool = false;
             const functionDeclarations = [];
