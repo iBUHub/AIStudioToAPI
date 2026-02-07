@@ -30,6 +30,52 @@ const browserExecutablePath = process.env.CAMOUFOX_EXECUTABLE_PATH || getDefault
 const VALIDATION_LINE_THRESHOLD = 200; // Validation line threshold
 const CONFIG_DIR = "configs/auth"; // Authentication files directory
 
+const parseProxyFromEnv = () => {
+    const serverRaw =
+        process.env.HTTPS_PROXY ||
+        process.env.https_proxy ||
+        process.env.HTTP_PROXY ||
+        process.env.http_proxy ||
+        process.env.ALL_PROXY ||
+        process.env.all_proxy;
+
+    if (!serverRaw) return null;
+
+    const bypassRaw = process.env.NO_PROXY || process.env.no_proxy;
+
+    // Playwright expects: { server, bypass?, username?, password? }
+    // server examples: "http://127.0.0.1:7890", "socks5://127.0.0.1:7890"
+    try {
+        const u = new URL(serverRaw);
+        const proxy = {
+            server: `${u.protocol}//${u.host}`,
+        };
+
+        if (u.username) proxy.username = decodeURIComponent(u.username);
+        if (u.password) proxy.password = decodeURIComponent(u.password);
+
+        if (bypassRaw) {
+            proxy.bypass = bypassRaw
+                .split(",")
+                .map(s => s.trim())
+                .filter(Boolean)
+                .join(",");
+        }
+
+        return proxy;
+    } catch {
+        const proxy = { server: serverRaw };
+        if (bypassRaw) {
+            proxy.bypass = bypassRaw
+                .split(",")
+                .map(s => s.trim())
+                .filter(Boolean)
+                .join(",");
+        }
+        return proxy;
+    }
+};
+
 /**
  * Ensures that the specified directory exists, creating it if it doesn't.
  * @param {string} dirPath - The path of the directory to check and create.
@@ -105,12 +151,31 @@ const getNextAuthIndex = () => {
         process.exit(1);
     }
 
+    const proxyConfig = parseProxyFromEnv();
+    if (proxyConfig) {
+        const bypassText = proxyConfig.bypass ? `, bypass=${proxyConfig.bypass}` : "";
+        console.log(
+            getText(
+                `🌐 使用代理: ${proxyConfig.server}${bypassText}`,
+                `🌐 Using proxy: ${proxyConfig.server}${bypassText}`
+            )
+        );
+    } else {
+        console.log(
+            getText(
+                "🌐 未检测到代理环境变量 (HTTPS_PROXY/HTTP_PROXY/ALL_PROXY)。如需代理请在运行前设置。",
+                "🌐 No proxy env detected (HTTPS_PROXY/HTTP_PROXY/ALL_PROXY). Set it before running if needed."
+            )
+        );
+    }
+
     const browser = await firefox.launch({
         executablePath: browserExecutablePath,
         headless: false,
+        ...(proxyConfig ? { proxy: proxyConfig } : {}),
     });
 
-    const context = await browser.newContext();
+    const context = await browser.newContext(proxyConfig ? { proxy: proxyConfig } : {});
     const page = await context.newPage();
 
     console.log("");

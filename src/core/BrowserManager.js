@@ -10,6 +10,52 @@ const path = require("path");
 const { firefox, devices } = require("playwright");
 const os = require("os");
 
+const parseProxyFromEnv = () => {
+    const serverRaw =
+        process.env.HTTPS_PROXY ||
+        process.env.https_proxy ||
+        process.env.HTTP_PROXY ||
+        process.env.http_proxy ||
+        process.env.ALL_PROXY ||
+        process.env.all_proxy;
+
+    if (!serverRaw) return null;
+
+    const bypassRaw = process.env.NO_PROXY || process.env.no_proxy;
+
+    try {
+        const u = new URL(serverRaw);
+        const proxy = {
+            server: `${u.protocol}//${u.host}`,
+        };
+
+        if (u.username) proxy.username = decodeURIComponent(u.username);
+        if (u.password) proxy.password = decodeURIComponent(u.password);
+
+        if (bypassRaw) {
+            proxy.bypass = bypassRaw
+                .split(",")
+                .map(s => s.trim())
+                .filter(Boolean)
+                .join(",");
+        }
+
+        return proxy;
+    } catch {
+        const proxy = { server: serverRaw };
+
+        if (bypassRaw) {
+            proxy.bypass = bypassRaw
+                .split(",")
+                .map(s => s.trim())
+                .filter(Boolean)
+                .join(",");
+        }
+
+        return proxy;
+    }
+};
+
 /**
  * Browser Manager Module
  * Responsible for launching, managing, and switching browser contexts
@@ -976,6 +1022,11 @@ class BrowserManager {
             throw new Error(`Browser executable not found at path: ${this.browserExecutablePath}`);
         }
 
+        const proxyConfig = parseProxyFromEnv();
+        if (proxyConfig) {
+            this.logger.info(`[VNC] 🌐 Using proxy: ${proxyConfig.server}`);
+        }
+
         // This browser instance is temporary and specific to the VNC session.
         // It does NOT affect the main `this.browser` used for the API proxy.
         const vncBrowser = await firefox.launch({
@@ -988,6 +1039,7 @@ class BrowserManager {
             executablePath: this.browserExecutablePath,
             firefoxUserPrefs: this.firefoxUserPrefs,
             headless: false,
+            ...(proxyConfig ? { proxy: proxyConfig } : {}),
         });
 
         vncBrowser.on("disconnected", () => {
@@ -1007,7 +1059,9 @@ class BrowserManager {
             };
         }
 
-        const context = await vncBrowser.newContext(contextOptions);
+        const context = await vncBrowser.newContext(
+            proxyConfig ? { ...contextOptions, proxy: proxyConfig } : contextOptions
+        );
         this.logger.info("✅ [VNC] VNC browser context successfully created.");
 
         // Return both the browser and context so the caller can manage their lifecycle.
@@ -1030,6 +1084,11 @@ class BrowserManager {
             }
         }
 
+        const proxyConfig = parseProxyFromEnv();
+        if (proxyConfig) {
+            this.logger.info(`[Browser] 🌐 Using proxy: ${proxyConfig.server}`);
+        }
+
         if (!this.browser) {
             this.logger.info("🚀 [Browser] Main browser instance not running, performing first-time launch...");
             if (!fs.existsSync(this.browserExecutablePath)) {
@@ -1041,6 +1100,7 @@ class BrowserManager {
                 executablePath: this.browserExecutablePath,
                 firefoxUserPrefs: this.firefoxUserPrefs,
                 headless: true, // Main browser is always headless
+                ...(proxyConfig ? { proxy: proxyConfig } : {}),
             });
             this.browser.on("disconnected", () => {
                 this.logger.error("❌ [Browser] Main browser unexpectedly disconnected!");
@@ -1091,6 +1151,7 @@ class BrowserManager {
                 deviceScaleFactor: 1,
                 storageState: storageStateObject,
                 viewport: { height: randomHeight, width: randomWidth },
+                ...(proxyConfig ? { proxy: proxyConfig } : {}),
             });
 
             // Inject Privacy Script immediately after context creation
