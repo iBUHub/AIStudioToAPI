@@ -45,6 +45,7 @@ body:
     id: api_endpoint
     attributes:
       label: API Endpoint
+      description: The API type you are requesting when the issue occurs
       options:
         - OpenAI
         - Gemini
@@ -66,7 +67,7 @@ body:
     attributes:
       label: Logs (Optional)
       description: |
-        If reporting an issue, it's recommended to enable Debug Mode and provide relevant logs to help us diagnose the problem.
+        If reporting an issue, it's recommended to change Log Level to Debug and provide relevant logs to help us diagnose the problem.
         > ⚠️ **Note**: Please remove sensitive information (such as API Keys) from the logs. You can replace them with `******`.
       render: text
       placeholder: Paste relevant logs here (if any)...

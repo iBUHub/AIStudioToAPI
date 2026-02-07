@@ -8,7 +8,7 @@ body:
       value: |
         If you encounter errors related to **Tool Calls** or **Structured Output (JSON Schema)**, please submit a new issue using the format below so that we can quickly identify and resolve the problem.
 
-        **Note:** To troubleshoot such issues, we need detailed context logs. Please enable debug mode when reproducing the issue and provide full request and response logs.
+        **Note:** To troubleshoot such issues, we need detailed context logs. Please change Log Level to Debug when reproducing the issue and provide full request and response logs.
 
   - type: input
     id: version
@@ -23,6 +23,7 @@ body:
     id: api_endpoint
     attributes:
       label: API Endpoint
+      description: The API type you are requesting when the issue occurs
       options:
         - OpenAI
         - Gemini
@@ -60,7 +61,7 @@ body:
     attributes:
       label: Log Information (Critical)
       description: |
-        **Please make sure to enable Debug Mode and resend the request to capture full logs.** Please provide **all logs related to this specific request** (you can determine the range by date/time).
+        **Please make sure to change Log Level to Debug and resend the request to capture full logs.** Please provide **all logs related to this specific request** (you can determine the range by date/time).
         > ⚠️ **Attention**: Please remove sensitive information (such as API Keys) from the logs, but **please preserve the overall structure and format of the logs** (especially JSON structure, spacing, and newlines). This is crucial for debugging parsing errors. You can replace sensitive content with `******`.
       render: text
       placeholder: Paste detailed logs here...
