@@ -543,6 +543,7 @@
                                 type="file"
                                 style="display: none"
                                 accept=".json"
+                                multiple
                                 @change="handleFileUpload"
                             />
                             <div class="icon-buttons">
@@ -1812,43 +1813,101 @@ const triggerFileUpload = () => {
 };
 
 const handleFileUpload = async event => {
-    const file = event.target.files[0];
-    if (!file) return;
+    const files = Array.from(event.target.files);
+    if (!files.length) return;
 
-    // Reset input so same file can be selected again
+    // Reset input so same files can be selected again
     event.target.value = "";
 
-    const reader = new FileReader();
-    reader.onload = async e => {
-        try {
-            const content = e.target.result;
-            // Validate JSON
-            JSON.parse(content);
+    // Helper function to read a single file
+    const readFile = file =>
+        new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = e => resolve({ content: e.target.result, name: file.name });
+            reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
+            reader.readAsText(file);
+        });
 
+    // Helper function to upload a single file
+    const uploadFile = async fileData => {
+        try {
+            const parsed = JSON.parse(fileData.content);
             const res = await fetch("/api/files", {
-                body: JSON.stringify({
-                    content: JSON.parse(content), // Send as object to let backend stringify formatted
-                }),
-                headers: {
-                    "Content-Type": "application/json",
-                },
+                body: JSON.stringify({ content: parsed }),
+                headers: { "Content-Type": "application/json" },
                 method: "POST",
             });
-
             if (res.ok) {
                 const data = await res.json();
-                ElMessage.success(t("fileUploadSuccess") + ` (${data.filename || ""})`);
-                // Immediately update status to reflect new account
-                updateContent();
-            } else {
-                const data = await res.json();
-                ElMessage.error(t("fileUploadFailed", { error: data.error || "Unknown error" }));
+                return { filename: data.filename || fileData.name, success: true };
             }
+            const data = await res.json();
+            return { error: data.error || "Unknown error", filename: fileData.name, success: false };
         } catch (err) {
-            ElMessage.error(t("fileUploadFailed", { error: "Invalid JSON file" }));
+            return { error: "Invalid JSON", filename: fileData.name, success: false };
         }
     };
-    reader.readAsText(file);
+
+    // Upload all files (single or batch, same logic)
+    const successFiles = [];
+    const failedFiles = [];
+
+    for (const file of files) {
+        try {
+            const fileData = await readFile(file);
+            const result = await uploadFile(fileData);
+            if (result.success) {
+                successFiles.push({ local: file.name, saved: result.filename });
+            } else {
+                failedFiles.push({ local: file.name, reason: result.error });
+            }
+        } catch (err) {
+            failedFiles.push({ local: file.name, reason: err.message || "Read failed" });
+        }
+    }
+
+    // Build notification message with file details
+    let messageHtml = "";
+
+    if (successFiles.length > 0) {
+        messageHtml += `<div style="margin-bottom: 8px;"><strong style="color: var(--el-color-success);">${t("fileUploadBatchSuccess")} (${successFiles.length}):</strong></div>`;
+        messageHtml += '<ul style="margin: 0 0 12px 16px; padding: 0;">';
+        for (const f of successFiles) {
+            messageHtml += `<li style="word-break: break-all;">${f.local} → ${f.saved}</li>`;
+        }
+        messageHtml += "</ul>";
+    }
+
+    if (failedFiles.length > 0) {
+        messageHtml += `<div style="margin-bottom: 8px;"><strong style="color: var(--el-color-danger);">${t("fileUploadBatchFailed")} (${failedFiles.length}):</strong></div>`;
+        messageHtml += '<ul style="margin: 0 0 0 16px; padding: 0;">';
+        for (const f of failedFiles) {
+            messageHtml += `<li style="word-break: break-all;">${f.local}: ${f.reason}</li>`;
+        }
+        messageHtml += "</ul>";
+    }
+
+    // Determine notification type
+    let notifyType = "success";
+    if (failedFiles.length > 0 && successFiles.length === 0) {
+        notifyType = "error";
+    } else if (failedFiles.length > 0) {
+        notifyType = "warning";
+    }
+
+    // Show notification in top-right, no auto close
+    // Use different title for single vs batch upload
+    const notifyTitle = files.length === 1 ? t("fileUploadComplete") : t("fileUploadBatchResult");
+    ElNotification({
+        dangerouslyUseHTMLString: true,
+        duration: 0,
+        message: messageHtml,
+        position: "top-right",
+        title: notifyTitle,
+        type: notifyType,
+    });
+
+    updateContent();
 };
 
 // Download account by index
