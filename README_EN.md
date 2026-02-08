@@ -158,7 +158,7 @@ After deployment, you need to add Google accounts using one of these methods:
 
 **Method 2: Upload Auth Files**
 
-- Run `npm run setup-auth` on your local machine to generate auth files
+- Run `npm run setup-auth` on your local machine to generate auth files (refer to steps 1 and 2 of [Run Directly](#-run-directly-windows--macos--linux)), the auth files are in `/configs/auth`
 - In the web console, click "Upload Auth" to upload the auth JSON file, or manually upload to the mounted `/path/to/auth` directory
 
 > 💡 **Tip**: You can also download auth files from an existing container and upload them to a new container. Click the "Download Auth" button for the corresponding account in the web console to download the auth file.
