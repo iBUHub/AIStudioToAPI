@@ -159,7 +159,10 @@ class FormatConverter {
 
         // Process each tool
         for (const tool of geminiBody.tools) {
-            const declarations = tool.functionDeclarations || tool.function_declarations;
+            const declarations =
+                Array.isArray(tool.functionDeclarations) && tool.functionDeclarations.length > 0
+                    ? tool.functionDeclarations
+                    : tool.function_declarations;
             if (declarations && Array.isArray(declarations)) {
                 for (const funcDecl of declarations) {
                     if (funcDecl.parameters) {
