@@ -395,6 +395,12 @@ class StatusRoutes {
                 // Pipe archive to response
                 archive.pipe(res);
 
+                // Handle client disconnect to prevent wasted resources
+                res.on("close", () => {
+                    this.logger.warn("[WebUI] Client disconnected during batch download. Aborting archive.");
+                    archive.abort();
+                });
+
                 // Add files to archive
                 for (const file of filesToArchive) {
                     archive.file(file.filePath, { name: file.name });
