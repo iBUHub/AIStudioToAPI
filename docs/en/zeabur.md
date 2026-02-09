@@ -20,7 +20,7 @@ This guide will help you deploy the `aistudio-to-api` service on [Zeabur](https:
    **Environment Variables**:
    - Click the **Add Environment Variable** button.
    - **Do NOT click "Expose"**.
-   - You must set the `API_KEYS` variable. Other variables are optional (refer to the [Configuration](../../README.md#-configuration) section in the main README).
+   - You must set the `API_KEYS` variable. Other variables are optional (refer to the [Configuration](../../README_EN.md#-configuration) section in the main README).
 
    | Name       | Value                 | Description                                |
    | :--------- | :-------------------- | :----------------------------------------- |
@@ -53,7 +53,7 @@ After deployment, you need to add Google accounts. There are two methods:
 
 **Method 2: Upload Auth Files**
 
-- Run `npm run setup-auth` on your local machine to generate auth files
+- Run `npm run setup-auth` on your local machine to generate auth files (refer to steps 1 and 2 of [Run Directly](../../README_EN.md#-run-directly-windows--macos--linux) in the main README), the auth files are in `/configs/auth`
 - In the web console, click "Upload Auth" to upload the auth JSON file
 
 > 💡 **Tip**: You can also download auth files from an existing server and upload them to a new server. Click the "Download Auth" button for the corresponding account in the web console to download the auth file.
@@ -65,7 +65,7 @@ After deployment, you can access the API using the public domain combined with t
 - **OpenAI Compatible Base URL**: `https://<your-public-domain>/v1`
 - **Gemini Compatible Base URL**: `https://<your-public-domain>/v1beta`
 
-> For more details, please refer to the [API Usage](../../README.md#-api-usage) section in the main README.
+> For more details, please refer to the [API Usage](../../README_EN.md#-api-usage) section in the main README.
 
 ## ⏸️ Pausing and Starting the Service
 

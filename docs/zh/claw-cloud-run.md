@@ -27,7 +27,7 @@
 
    **环境变量（Environment Variables）**:
 
-   必填参数 `API_KEYS`。其他参数选填（参考主 README 中的 [配置](../../README_CN.md#-相关配置) 部分）。
+   必填参数 `API_KEYS`。其他参数选填（参考主 README 中的 [配置](../../README.md#-相关配置) 部分）。
 
    | Name       | Value                 | Description                                        |
    | :--------- | :-------------------- | :------------------------------------------------- |
@@ -53,7 +53,7 @@
 
 **方法 2：上传认证文件**
 
-- 在本地机器上运行 `npm run setup-auth` 生成认证文件
+- 在本地机器上运行 `npm run setup-auth` 生成认证文件（参考主 README 中的 [直接运行](../../README.md#-直接运行windows--macos--linux) 的 1 和 2），认证文件在 `/configs/auth`
 - 在网页控制台，点击「上传 Auth」，上传 auth 的 JSON 文件
 
 > 💡 **提示**：您也可以从已有的服务器下载 auth 文件，然后上传到新的服务器。在网页控制台点击对应账号的「下载 Auth」按钮即可下载 auth 文件。
@@ -65,7 +65,7 @@
 - **OpenAI 兼容 Base URL**: `https://<your-public-address>/v1`
 - **Gemini 兼容 Base URL**: `https://<your-public-address>/v1beta`
 
-> 更多详细信息，请参考主 README 中的 [使用 API](../../README_CN.md#-使用-api) 章节。
+> 更多详细信息，请参考主 README 中的 [使用 API](../../README.md#-使用-api) 章节。
 
 ## 🔄 版本更新
 
