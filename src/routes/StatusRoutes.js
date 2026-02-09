@@ -7,6 +7,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const archiver = require("archiver");
 const VersionChecker = require("../utils/VersionChecker");
 const LoggingService = require("../utils/LoggingService");
 
@@ -310,6 +311,66 @@ class StatusRoutes {
                 successCount: successIndices.length,
                 successIndices,
             });
+        });
+
+        // Batch download accounts as ZIP
+        app.post("/api/accounts/batch/download", isAuthenticated, async (req, res) => {
+            const { indices } = req.body;
+
+            // Validate parameters
+            if (!Array.isArray(indices) || indices.length === 0) {
+                return res.status(400).json({ message: "errorInvalidIndex" });
+            }
+
+            const { authSource } = this.serverSystem;
+            const validIndices = indices.filter(
+                idx => Number.isInteger(idx) && authSource.initialIndices.includes(idx)
+            );
+
+            if (validIndices.length === 0) {
+                return res.status(404).json({ message: "errorAccountNotFound" });
+            }
+
+            const configDir = path.join(process.cwd(), "configs", "auth");
+
+            try {
+                // Set response headers for ZIP download
+                const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+                const filename = `auth_batch_${timestamp}.zip`;
+                res.setHeader("Content-Type", "application/zip");
+                res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+
+                // Create zip archive
+                const archive = archiver("zip", { zlib: { level: 0 } });
+
+                // Handle archive errors
+                archive.on("error", err => {
+                    this.logger.error(`[WebUI] Batch download archive error: ${err.message}`);
+                    if (!res.headersSent) {
+                        res.status(500).json({ error: err.message, message: "batchDownloadFailed" });
+                    }
+                });
+
+                // Pipe archive to response
+                archive.pipe(res);
+
+                // Add files to archive
+                for (const idx of validIndices) {
+                    const filePath = path.join(configDir, `auth-${idx}.json`);
+                    if (fs.existsSync(filePath)) {
+                        archive.file(filePath, { name: `auth-${idx}.json` });
+                    }
+                }
+
+                // Finalize archive
+                await archive.finalize();
+                this.logger.info(`[WebUI] Batch downloaded ${validIndices.length} auth files as ZIP.`);
+            } catch (error) {
+                this.logger.error(`[WebUI] Batch download failed: ${error.message}`);
+                if (!res.headersSent) {
+                    res.status(500).json({ error: error.message, message: "batchDownloadFailed" });
+                }
+            }
         });
 
         app.delete("/api/accounts/:index", isAuthenticated, (req, res) => {
