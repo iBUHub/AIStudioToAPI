@@ -142,6 +142,7 @@
     "noAccountSelected": "未选择任何账号。",
     "noActiveAccount": "无活动账号",
     "normal": "标准",
+    "noSupportedFiles": "未选择支持的文件（仅支持 .json 或 .zip）。",
     "notImplemented": "尚未实现",
     "ok": "确定",
     "onlyAppliesWhenStreamingEnabled": "仅在启用流式传输时适用",

@@ -142,6 +142,7 @@
     "noAccountSelected": "No account selected.",
     "noActiveAccount": "No active account",
     "normal": "Normal",
+    "noSupportedFiles": "No supported files selected (only .json or .zip).",
     "notImplemented": "Not implemented yet",
     "ok": "OK",
     "onlyAppliesWhenStreamingEnabled": "only applies when streaming is enabled",

@@ -2216,6 +2216,12 @@ const handleFileUpload = async event => {
         }
     }
 
+    // Check if we have anything to process
+    if (jsonFilesToUpload.length === 0 && extractErrors.length === 0) {
+        ElMessage.warning(t("noSupportedFiles"));
+        return;
+    }
+
     // Upload all collected JSON files
     const successFiles = [];
     const failedFiles = [...extractErrors];
