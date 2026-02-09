@@ -349,6 +349,9 @@ class StatusRoutes {
                     this.logger.error(`[WebUI] Batch download archive error: ${err.message}`);
                     if (!res.headersSent) {
                         res.status(500).json({ error: err.message, message: "batchDownloadFailed" });
+                    } else {
+                        archive.abort();
+                        res.destroy(err);
                     }
                 });
 
