@@ -2099,21 +2099,41 @@ const handleFileUpload = async event => {
 
     // Helper function to upload a single file
     const uploadFile = async fileData => {
+        let parsed;
         try {
-            const parsed = JSON.parse(fileData.content);
+            parsed = JSON.parse(fileData.content);
+        } catch (err) {
+            return { error: t("invalidJson"), filename: fileData.name, success: false };
+        }
+
+        try {
             const res = await fetch("/api/files", {
                 body: JSON.stringify({ content: parsed }),
                 headers: { "Content-Type": "application/json" },
                 method: "POST",
             });
+
             if (res.ok) {
                 const data = await res.json();
                 return { filename: data.filename || fileData.name, success: true };
             }
-            const data = await res.json();
-            return { error: data.error || t("unknownError"), filename: fileData.name, success: false };
+
+            let errorMsg = t("unknownError");
+            try {
+                const data = await res.json();
+                if (data.error) errorMsg = data.error;
+            } catch (e) {
+                // Response is not JSON or cannot be parsed, fallback to status text or unknown error
+                if (res.statusText) {
+                    errorMsg = `HTTP Error ${res.status}: ${res.statusText}`;
+                } else {
+                    errorMsg = `HTTP Error ${res.status}`;
+                }
+            }
+            return { error: errorMsg, filename: fileData.name, success: false };
         } catch (err) {
-            return { error: t("invalidJson"), filename: fileData.name, success: false };
+            // Network or other fetch errors
+            return { error: err.message || t("networkError"), filename: fileData.name, success: false };
         }
     };
 
