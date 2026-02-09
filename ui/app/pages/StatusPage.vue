@@ -2002,6 +2002,13 @@ const updateStatus = data => {
     state.debugModeEnabled = isEnabled(data.status.debugMode);
     state.currentAuthIndex = data.status.currentAuthIndex;
     state.accountDetails = data.status.accountDetails || [];
+
+    const validIndices = new Set(state.accountDetails.map(acc => acc.index));
+    for (const idx of state.selectedAccounts) {
+        if (!validIndices.has(idx)) {
+            state.selectedAccounts.delete(idx);
+        }
+    }
     state.browserConnected = data.status.browserConnected;
     state.apiKeySource = data.status.apiKeySource;
     state.usageCount = data.status.usageCount;
