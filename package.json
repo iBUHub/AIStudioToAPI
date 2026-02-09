@@ -33,6 +33,7 @@
         "dotenv": "^16.4.5",
         "express": "^4.19.2",
         "express-session": "^1.18.0",
+        "jszip": "^3.10.1",
         "mime-types": "^3.0.2",
         "playwright": "^1.53.1",
         "ws": "^8.17.0"
@@ -51,7 +52,6 @@
         "eslint-plugin-sort-keys-fix": "^1.1.2",
         "eslint-plugin-vue": "^9.33.0",
         "husky": "^8.0.3",
-        "jszip": "^3.10.1",
         "less": "^4.4.2",
         "less-plugin-clean-css": "^1.6.0",
         "lint-staged": "^14.0.0",
