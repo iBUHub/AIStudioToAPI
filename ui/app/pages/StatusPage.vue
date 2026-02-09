@@ -2104,7 +2104,7 @@ const handleFileUpload = async event => {
         new Promise((resolve, reject) => {
             const reader = new FileReader();
             reader.onload = e => resolve(e.target.result);
-            reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
+            reader.onerror = () => reject(new Error(t("fileReadFailed")));
             reader.readAsArrayBuffer(file);
         });
 
@@ -2113,7 +2113,7 @@ const handleFileUpload = async event => {
         new Promise((resolve, reject) => {
             const reader = new FileReader();
             reader.onload = e => resolve({ content: e.target.result, name: file.name });
-            reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
+            reader.onerror = () => reject(new Error(t("fileReadFailed")));
             reader.readAsText(file);
         });
 
@@ -2167,7 +2167,14 @@ const handleFileUpload = async event => {
         if (lowerName.endsWith(".zip")) {
             // Extract JSON files from zip
             try {
-                const arrayBuffer = await readFileAsArrayBuffer(file);
+                let arrayBuffer;
+                try {
+                    arrayBuffer = await readFileAsArrayBuffer(file);
+                } catch (readErr) {
+                    extractErrors.push({ local: file.name, reason: readErr.message || t("fileReadFailed") });
+                    continue; // Skip zip processing if read failed
+                }
+
                 const zip = await JSZip.loadAsync(arrayBuffer);
                 const zipEntries = Object.keys(zip.files);
 
@@ -2186,7 +2193,7 @@ const handleFileUpload = async event => {
                     } catch (err) {
                         extractErrors.push({
                             local: `${file.name}/${entryName}`,
-                            reason: err.message || t("zipExtractFailed"),
+                            reason: t("zipExtractFailed"), // Prefer localized generic error for extraction issues
                         });
                     }
                 }
@@ -2195,6 +2202,7 @@ const handleFileUpload = async event => {
                     extractErrors.push({ local: file.name, reason: t("zipNoJsonFiles") });
                 }
             } catch (err) {
+                // Catch any other errors during zip processing (e.g. invalid zip format)
                 extractErrors.push({ local: file.name, reason: t("zipExtractFailed") });
             }
         } else if (lowerName.endsWith(".json")) {

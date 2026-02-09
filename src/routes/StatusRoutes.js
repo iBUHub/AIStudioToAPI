@@ -351,11 +351,24 @@ class StatusRoutes {
             const configDir = path.join(process.cwd(), "configs", "auth");
 
             try {
+                // Pre-calculate valid files to archive
+                const filesToArchive = [];
+                for (const idx of validIndices) {
+                    const filePath = path.join(configDir, `auth-${idx}.json`);
+                    if (fs.existsSync(filePath)) {
+                        filesToArchive.push({ filePath, name: `auth-${idx}.json` });
+                    }
+                }
+
+                const actualFileCount = filesToArchive.length;
+
                 // Set response headers for ZIP download
                 const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
                 const filename = `auth_batch_${timestamp}.zip`;
                 res.setHeader("Content-Type", "application/zip");
                 res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+                // Set header with actual file count before piping
+                res.setHeader("X-File-Count", actualFileCount.toString());
 
                 // Create zip archive
                 const archive = archiver("zip", { zlib: { level: 0 } });
@@ -374,18 +387,10 @@ class StatusRoutes {
                 // Pipe archive to response
                 archive.pipe(res);
 
-                // Add files to archive and count actual files added
-                let actualFileCount = 0;
-                for (const idx of validIndices) {
-                    const filePath = path.join(configDir, `auth-${idx}.json`);
-                    if (fs.existsSync(filePath)) {
-                        archive.file(filePath, { name: `auth-${idx}.json` });
-                        actualFileCount++;
-                    }
+                // Add files to archive
+                for (const file of filesToArchive) {
+                    archive.file(file.filePath, { name: file.name });
                 }
-
-                // Set header with actual file count for frontend to use
-                res.setHeader("X-File-Count", actualFileCount.toString());
 
                 // Finalize archive
                 await archive.finalize();
