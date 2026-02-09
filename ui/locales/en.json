@@ -97,7 +97,7 @@
     "enabled": "Enabled",
     "entries": "entries",
     "errorAccountNotFound": "Selected accounts not found or already removed.",
-    "errorAccountsNotFound": "Account #{index} not found or already removed.",
+    "errorAccountsNotFound": "Account(s) {index} not found or already removed.",
     "errorDeleteCurrentAccount": "Cannot delete the currently running account.",
     "errorInvalidIndex": "Invalid account index.",
     "errorInvalidMode": "Invalid mode. Use 'fake' or 'real'.",

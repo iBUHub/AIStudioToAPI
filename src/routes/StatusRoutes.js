@@ -259,8 +259,15 @@ class StatusRoutes {
                 idx => Number.isInteger(idx) && authSource.initialIndices.includes(idx)
             );
 
+            const invalidIndices = uniqueIndices.filter(
+                idx => !Number.isInteger(idx) || !authSource.initialIndices.includes(idx)
+            );
+
             if (validIndices.length === 0) {
-                return res.status(404).json({ message: "errorAccountNotFound" });
+                return res.status(404).json({
+                    index: invalidIndices.join(", "),
+                    message: "errorAccountsNotFound",
+                });
             }
 
             // Check if current active account is included
@@ -395,7 +402,7 @@ class StatusRoutes {
             const { authSource } = this.serverSystem;
 
             if (!authSource.initialIndices.includes(targetIndex)) {
-                return res.status(404).json({ index: targetIndex, message: "errorAccountNotFound" });
+                return res.status(404).json({ index: targetIndex, message: "errorAccountsNotFound" });
             }
 
             // If deleting current account without confirmation, return warning
