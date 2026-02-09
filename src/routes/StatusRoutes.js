@@ -242,6 +242,76 @@ class StatusRoutes {
             }
         });
 
+        // Batch delete accounts - Must be defined before /api/accounts/:index to avoid index matching "batch"
+        app.delete("/api/accounts/batch", isAuthenticated, async (req, res) => {
+            const { indices, force } = req.body;
+            const currentAuthIndex = this.serverSystem.requestHandler.currentAuthIndex;
+
+            // Validate parameters
+            if (!Array.isArray(indices) || indices.length === 0) {
+                return res.status(400).json({ message: "errorInvalidIndex" });
+            }
+
+            const { authSource } = this.serverSystem;
+            const validIndices = indices.filter(
+                idx => Number.isInteger(idx) && authSource.initialIndices.includes(idx)
+            );
+
+            if (validIndices.length === 0) {
+                return res.status(404).json({ message: "errorAccountNotFound" });
+            }
+
+            // Check if current active account is included
+            const includesCurrent = validIndices.includes(currentAuthIndex);
+            if (includesCurrent && !force) {
+                return res.status(409).json({
+                    includesCurrent: true,
+                    message: "warningDeleteCurrentAccount",
+                    requiresConfirmation: true,
+                });
+            }
+
+            const successIndices = [];
+            const failedIndices = [];
+
+            for (const targetIndex of validIndices) {
+                try {
+                    authSource.removeAuth(targetIndex);
+                    successIndices.push(targetIndex);
+                    this.logger.warn(`[WebUI] Account #${targetIndex} deleted via batch delete.`);
+                } catch (error) {
+                    failedIndices.push({ error: error.message, index: targetIndex });
+                    this.logger.error(`[WebUI] Failed to delete account #${targetIndex}: ${error.message}`);
+                }
+            }
+
+            // If current active account was deleted, close browser connection
+            if (includesCurrent && successIndices.includes(currentAuthIndex)) {
+                this.logger.warn(
+                    `[WebUI] Current active account #${currentAuthIndex} was deleted. Closing browser connection...`
+                );
+                this.serverSystem.browserManager.closeBrowser().catch(err => {
+                    this.logger.error(`[WebUI] Error closing browser after batch deletion: ${err.message}`);
+                });
+                this.serverSystem.browserManager.currentAuthIndex = -1;
+            }
+
+            if (failedIndices.length > 0) {
+                return res.status(207).json({
+                    failedIndices,
+                    message: "batchDeletePartial",
+                    successCount: successIndices.length,
+                    successIndices,
+                });
+            }
+
+            return res.status(200).json({
+                message: "batchDeleteSuccess",
+                successCount: successIndices.length,
+                successIndices,
+            });
+        });
+
         app.delete("/api/accounts/:index", isAuthenticated, (req, res) => {
             const rawIndex = req.params.index;
             const targetIndex = Number(rawIndex);
