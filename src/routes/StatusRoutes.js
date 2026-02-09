@@ -254,7 +254,8 @@ class StatusRoutes {
             }
 
             const { authSource } = this.serverSystem;
-            const validIndices = indices.filter(
+            const uniqueIndices = Array.from(new Set(indices));
+            const validIndices = uniqueIndices.filter(
                 idx => Number.isInteger(idx) && authSource.initialIndices.includes(idx)
             );
 
