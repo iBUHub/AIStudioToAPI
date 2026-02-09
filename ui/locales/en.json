@@ -161,5 +161,7 @@
     "usageCount": "Usage Count",
     "versionInfo": "Version Info",
     "warningDeleteCurrentAccount": "You are about to delete the currently active account. The browser connection will be closed and you will need to switch to another account. Continue?",
-    "warningTitle": "Warning"
+    "warningTitle": "Warning",
+    "zipExtractFailed": "Extract failed",
+    "zipNoJsonFiles": "No JSON files in archive"
 }
