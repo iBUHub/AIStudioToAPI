@@ -2102,9 +2102,9 @@ const handleFileUpload = async event => {
                 return { filename: data.filename || fileData.name, success: true };
             }
             const data = await res.json();
-            return { error: data.error || "Unknown error", filename: fileData.name, success: false };
+            return { error: data.error || t("unknownError"), filename: fileData.name, success: false };
         } catch (err) {
-            return { error: "Invalid JSON", filename: fileData.name, success: false };
+            return { error: t("invalidJson"), filename: fileData.name, success: false };
         }
     };
 
@@ -2137,7 +2137,7 @@ const handleFileUpload = async event => {
                     } catch (err) {
                         extractErrors.push({
                             local: `${file.name}/${entryName}`,
-                            reason: err.message || "Extract failed",
+                            reason: err.message || t("zipExtractFailed"),
                         });
                     }
                 }
@@ -2154,7 +2154,7 @@ const handleFileUpload = async event => {
                 const fileData = await readFileAsText(file);
                 jsonFilesToUpload.push(fileData);
             } catch (err) {
-                extractErrors.push({ local: file.name, reason: err.message || "Read failed" });
+                extractErrors.push({ local: file.name, reason: err.message || t("fileReadFailed") });
             }
         }
     }
