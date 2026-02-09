@@ -245,6 +245,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
+import escapeHtml from "../utils/escapeHtml";
 import I18n from "../utils/i18n";
 import { useTheme } from "../utils/useTheme";
 
@@ -316,19 +317,6 @@ const ensureConnected = () => {
     }
     return true;
 };
-
-const escapeHtml = value =>
-    String(value).replace(
-        /[&<>"']/g,
-        char =>
-            ({
-                '"': "&quot;",
-                "&": "&amp;",
-                "'": "&#x27;",
-                "<": "&lt;",
-                ">": "&gt;",
-            })[char]
-    );
 
 const goBack = () => {
     if (window.history.length > 1) {

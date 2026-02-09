@@ -1354,6 +1354,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watchEff
 import { useRouter } from "vue-router";
 import { ElMessage, ElMessageBox, ElNotification } from "element-plus";
 import JSZip from "jszip";
+import escapeHtml from "../utils/escapeHtml";
 import I18n from "../utils/i18n";
 import { useTheme } from "../utils/useTheme";
 
@@ -2178,7 +2179,7 @@ const handleFileUpload = async event => {
         messageHtml += `<div style="margin-bottom: 8px;"><strong style="color: var(--el-color-success);">${t("fileUploadBatchSuccess")} (${successFiles.length}):</strong></div>`;
         messageHtml += '<ul style="margin: 0 0 12px 16px; padding: 0;">';
         for (const f of successFiles) {
-            messageHtml += `<li style="word-break: break-all;">${f.local} → ${f.saved}</li>`;
+            messageHtml += `<li style="word-break: break-all;">${escapeHtml(f.local)} → ${escapeHtml(f.saved)}</li>`;
         }
         messageHtml += "</ul>";
     }
@@ -2187,7 +2188,7 @@ const handleFileUpload = async event => {
         messageHtml += `<div style="margin-bottom: 8px;"><strong style="color: var(--el-color-danger);">${t("fileUploadBatchFailed")} (${failedFiles.length}):</strong></div>`;
         messageHtml += '<ul style="margin: 0 0 0 16px; padding: 0;">';
         for (const f of failedFiles) {
-            messageHtml += `<li style="word-break: break-all;">${f.local}: ${f.reason}</li>`;
+            messageHtml += `<li style="word-break: break-all;">${escapeHtml(f.local)}: ${escapeHtml(f.reason)}</li>`;
         }
         messageHtml += "</ul>";
     }
