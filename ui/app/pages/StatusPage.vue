@@ -1572,8 +1572,23 @@ const batchDownloadAccounts = async () => {
         });
 
         if (!res.ok) {
-            const data = await res.json();
-            ElMessage.error(t(data.message || "batchDownloadFailed", data));
+            let errorMsg = t("batchDownloadFailed");
+            try {
+                const contentType = res.headers.get("content-type");
+                if (contentType && contentType.includes("application/json")) {
+                    const data = await res.json();
+                    if (data.message) errorMsg = data.message;
+                    else if (data.error) {
+                        if (typeof data.error === "string") errorMsg = data.error;
+                        else if (data.error.message) errorMsg = data.error.message;
+                    }
+                } else {
+                    errorMsg = `HTTP Error ${res.status}: ${res.statusText}`;
+                }
+            } catch (e) {
+                // Parsing failed, keep default errorMsg
+            }
+            ElMessage.error(errorMsg);
             return;
         }
 
