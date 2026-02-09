@@ -546,6 +546,46 @@
                                 multiple
                                 @change="handleFileUpload"
                             />
+                            <!-- Left: Select all and batch delete -->
+                            <div class="batch-actions">
+                                <el-checkbox
+                                    :model-value="isAllSelected"
+                                    :indeterminate="hasSelection && !isAllSelected"
+                                    :disabled="state.accountDetails.length === 0"
+                                    @change="toggleSelectAll"
+                                >
+                                    {{ t("selectAll") }}
+                                </el-checkbox>
+                                <span v-if="hasSelection" class="selected-count">
+                                    {{ t("selectedCount", { count: selectedCount }) }}
+                                </span>
+                                <button
+                                    v-if="hasSelection"
+                                    class="btn-batch-delete"
+                                    :disabled="isBusy"
+                                    :title="t('batchDelete')"
+                                    @click="batchDeleteAccounts"
+                                >
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="16"
+                                        height="16"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                    >
+                                        <polyline points="3 6 5 6 21 6"></polyline>
+                                        <path
+                                            d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
+                                        ></path>
+                                    </svg>
+                                    {{ t("batchDelete") }}
+                                </button>
+                            </div>
+                            <!-- Right: Add, upload, and deduplicate -->
                             <div class="icon-buttons">
                                 <button :disabled="isBusy" :title="t('btnAddUser')" @click="addUser">
                                     <svg
@@ -610,15 +650,26 @@
                                 v-for="item in state.accountDetails"
                                 :key="item.index"
                                 class="account-list-item"
-                                :class="{ 'is-current': item.index === state.currentAuthIndex }"
+                                style="cursor: pointer"
+                                :class="{
+                                    'is-current': item.index === state.currentAuthIndex,
+                                    'is-selected': isAccountSelected(item.index),
+                                }"
+                                @click="toggleSelectAccount(item.index)"
                             >
+                                <el-checkbox
+                                    :model-value="isAccountSelected(item.index)"
+                                    class="account-checkbox"
+                                    @change="toggleSelectAccount(item.index)"
+                                    @click.stop
+                                />
                                 <el-tooltip
                                     :content="getAccountDisplayName(item)"
                                     placement="top"
                                     effect="dark"
                                     :hide-after="0"
                                 >
-                                    <div class="account-info" style="cursor: pointer">
+                                    <div class="account-info">
                                         <span class="account-index">#{{ item.index }}</span>
                                         <span
                                             class="account-email"
@@ -1336,9 +1387,11 @@ const state = reactive({
     isUpdating: false,
     latestVersion: null,
     logCount: 0,
+    logMaxCount: 100,
     logs: t("loading"),
     logScrollTop: 0,
     releaseUrl: null,
+    selectedAccounts: new Set(), // Selected account indices
     serviceConnected: false,
     streamingModeReal: false,
     // theme: handled by useTheme
@@ -1368,6 +1421,115 @@ const dedupedAvailableCount = computed(() => {
 });
 
 const isBusy = computed(() => state.isSwitchingAccount || state.isSystemBusy);
+
+// Computed properties for batch selection
+const selectedCount = computed(() => state.selectedAccounts.size);
+const hasSelection = computed(() => state.selectedAccounts.size > 0);
+const isAllSelected = computed(() => {
+    if (state.accountDetails.length === 0) return false;
+    return state.accountDetails.every(acc => state.selectedAccounts.has(acc.index));
+});
+const isAccountSelected = index => state.selectedAccounts.has(index);
+
+// Toggle selection for a single account
+const toggleSelectAccount = index => {
+    if (state.selectedAccounts.has(index)) {
+        state.selectedAccounts.delete(index);
+    } else {
+        state.selectedAccounts.add(index);
+    }
+};
+
+// Toggle selection for all accounts
+const toggleSelectAll = () => {
+    if (isAllSelected.value) {
+        state.selectedAccounts.clear();
+    } else {
+        state.accountDetails.forEach(acc => {
+            state.selectedAccounts.add(acc.index);
+        });
+    }
+};
+
+// Clear selection
+const clearSelection = () => {
+    state.selectedAccounts.clear();
+};
+
+// Batch delete accounts
+const batchDeleteAccounts = async () => {
+    if (state.selectedAccounts.size === 0) {
+        ElMessage.warning(t("noAccountSelected"));
+        return;
+    }
+
+    const indices = Array.from(state.selectedAccounts);
+    const count = indices.length;
+
+    // Helper to perform batch delete
+    const performBatchDelete = async (forceDelete = false) => {
+        state.isSwitchingAccount = true;
+        try {
+            const res = await fetch("/api/accounts/batch", {
+                body: JSON.stringify({ force: forceDelete, indices }),
+                headers: { "Content-Type": "application/json" },
+                method: "DELETE",
+            });
+            const data = await res.json();
+
+            if (res.status === 409 && data.requiresConfirmation) {
+                state.isSwitchingAccount = false;
+                ElMessageBox.confirm(t("warningDeleteCurrentAccount"), t("warningTitle"), {
+                    cancelButtonText: t("cancel"),
+                    confirmButtonText: t("ok"),
+                    lockScroll: false,
+                    type: "error",
+                })
+                    .then(() => performBatchDelete(true))
+                    .catch(e => {
+                        if (e !== "cancel") {
+                            console.error(e);
+                        }
+                    });
+                return;
+            }
+
+            if (res.ok) {
+                ElMessage.success(t("batchDeleteSuccess", { count: data.successCount }));
+                clearSelection();
+            } else if (res.status === 207) {
+                ElMessage.warning(
+                    t("batchDeletePartial", {
+                        failedCount: data.failedIndices?.length || 0,
+                        successCount: data.successCount,
+                    })
+                );
+                // Remove deleted items from selection
+                data.successIndices?.forEach(idx => state.selectedAccounts.delete(idx));
+            } else {
+                ElMessage.error(t(data.message, data));
+            }
+        } catch (err) {
+            ElMessage.error(t("batchDeleteFailed", { error: err.message || err }));
+        } finally {
+            state.isSwitchingAccount = false;
+            updateContent();
+        }
+    };
+
+    ElMessageBox.confirm(t("confirmBatchDelete", { count }), t("warningTitle"), {
+        cancelButtonText: t("cancel"),
+        confirmButtonText: t("ok"),
+        lockScroll: false,
+        type: "warning",
+    })
+        .then(() => performBatchDelete(false))
+        .catch(e => {
+            if (e !== "cancel") {
+                console.error(e);
+            }
+        });
+};
 
 const currentAccountName = computed(() => {
     if (state.currentAuthIndex < 0) {
@@ -2408,6 +2570,43 @@ watchEffect(() => {
 /* Account list styles */
 .account-top-actions {
     margin-bottom: 16px;
+    justify-content: space-between;
+}
+
+.batch-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.selected-count {
+    font-size: 0.85rem;
+    color: @primary-color;
+    font-weight: 500;
+}
+
+.btn-batch-delete {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border: 1px solid @error-color;
+    border-radius: 6px;
+    background: transparent;
+    color: @error-color;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.2s;
+
+    &:hover:not(:disabled) {
+        background: rgba(var(--color-error-rgb), 0.1);
+    }
+
+    &:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
 }
 
 .account-list {
@@ -2436,6 +2635,19 @@ watchEffect(() => {
         border-color: @primary-color;
         background: rgba(var(--color-primary-rgb), 0.08);
     }
+
+    &.is-selected {
+        background: rgba(var(--color-primary-rgb), 0.12);
+    }
+
+    &.is-current.is-selected {
+        background: rgba(var(--color-primary-rgb), 0.15);
+    }
+}
+
+.account-checkbox {
+    flex-shrink: 0;
+    margin-right: 8px;
 }
 
 .account-info {
