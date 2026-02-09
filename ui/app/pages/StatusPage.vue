@@ -568,8 +568,8 @@
                                 >
                                     <svg
                                         xmlns="http://www.w3.org/2000/svg"
-                                        width="16"
-                                        height="16"
+                                        width="20"
+                                        height="20"
                                         viewBox="0 0 24 24"
                                         fill="none"
                                         stroke="currentColor"
@@ -577,12 +577,12 @@
                                         stroke-linecap="round"
                                         stroke-linejoin="round"
                                     >
-                                        <polyline points="3 6 5 6 21 6"></polyline>
                                         <path
-                                            d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
-                                        ></path>
+                                            d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"
+                                        />
+                                        <path d="m9.5 10 5 5" />
+                                        <path d="m14.5 10-5 5" />
                                     </svg>
-                                    {{ t("batchDelete") }}
                                 </button>
                                 <button
                                     v-if="hasSelection"
@@ -592,8 +592,8 @@
                                 >
                                     <svg
                                         xmlns="http://www.w3.org/2000/svg"
-                                        width="16"
-                                        height="16"
+                                        width="20"
+                                        height="20"
                                         viewBox="0 0 24 24"
                                         fill="none"
                                         stroke="currentColor"
@@ -601,11 +601,12 @@
                                         stroke-linecap="round"
                                         stroke-linejoin="round"
                                     >
-                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                                        <polyline points="7 10 12 15 17 10"></polyline>
-                                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                                        <path
+                                            d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"
+                                        />
+                                        <path d="M12 10v6" />
+                                        <path d="m9 13 3 3 3-3" />
                                     </svg>
-                                    {{ t("batchDownload") }}
                                 </button>
                             </div>
                             <!-- Right: Add, upload, and deduplicate -->
@@ -2727,28 +2728,42 @@ watchEffect(() => {
     align-items: center;
     gap: 12px;
     flex-wrap: wrap;
+    height: 36px; // Force height to match buttons
+
+    .el-checkbox {
+        height: 100%;
+        margin-right: 0;
+        display: flex;
+        align-items: center;
+    }
 }
 
 .selected-count {
     font-size: 0.85rem;
     color: @primary-color;
     font-weight: 500;
+    display: flex;
+    align-items: center;
+    height: 100%;
 }
 
 .btn-batch-delete {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 6px 12px;
-    border: 1px solid @error-color;
-    border-radius: 6px;
-    background: transparent;
-    color: @error-color;
-    font-size: 0.85rem;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 1px solid @border-color;
+    border-radius: 8px;
+    background: @background-white;
+    color: @text-secondary;
     cursor: pointer;
     transition: all 0.2s;
 
     &:hover:not(:disabled) {
+        border-color: @error-color;
+        color: @error-color;
         background: rgba(var(--color-error-rgb), 0.1);
     }
 
@@ -2761,17 +2776,20 @@ watchEffect(() => {
 .btn-batch-download {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 6px 12px;
-    border: 1px solid @primary-color;
-    border-radius: 6px;
-    background: transparent;
-    color: @primary-color;
-    font-size: 0.85rem;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 1px solid @border-color;
+    border-radius: 8px;
+    background: @background-white;
+    color: @text-secondary;
     cursor: pointer;
     transition: all 0.2s;
 
     &:hover:not(:disabled) {
+        border-color: @primary-color;
+        color: @primary-color;
         background: rgba(var(--color-primary-rgb), 0.1);
     }
 
@@ -2804,16 +2822,17 @@ watchEffect(() => {
     }
 
     &.is-current {
-        border-color: @primary-color;
-        background: rgba(var(--color-primary-rgb), 0.08);
+        border-color: @success-color;
+        background: rgba(var(--color-success-rgb), 0.25);
     }
 
     &.is-selected {
-        background: rgba(var(--color-primary-rgb), 0.12);
+        background: rgba(var(--color-primary-rgb), 0.25); // Darker blue background for selected
     }
 
     &.is-current.is-selected {
-        background: rgba(var(--color-primary-rgb), 0.15);
+        background: rgba(var(--color-primary-rgb), 0.25); // Use blue background like selected
+        border: 1px solid @success-color;
     }
 }
 
@@ -2857,7 +2876,7 @@ watchEffect(() => {
 .current-badge {
     font-size: 0.75rem;
     padding: 2px 8px;
-    background: @primary-color;
+    background: @success-color;
     color: @text-on-primary;
     border-radius: 12px;
     flex-shrink: 0;
