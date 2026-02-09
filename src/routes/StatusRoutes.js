@@ -265,7 +265,7 @@ class StatusRoutes {
 
             if (validIndices.length === 0) {
                 return res.status(404).json({
-                    index: invalidIndices.join(", "),
+                    indices: invalidIndices.join(", "),
                     message: "errorAccountsNotFound",
                 });
             }
@@ -331,12 +331,21 @@ class StatusRoutes {
             }
 
             const { authSource } = this.serverSystem;
-            const validIndices = indices.filter(
+            const uniqueIndices = Array.from(new Set(indices));
+
+            const invalidIndices = uniqueIndices.filter(
+                idx => !Number.isInteger(idx) || !authSource.initialIndices.includes(idx)
+            );
+
+            const validIndices = uniqueIndices.filter(
                 idx => Number.isInteger(idx) && authSource.initialIndices.includes(idx)
             );
 
             if (validIndices.length === 0) {
-                return res.status(404).json({ message: "errorAccountNotFound" });
+                return res.status(404).json({
+                    indices: invalidIndices.join(", "),
+                    message: "errorAccountsNotFound",
+                });
             }
 
             const configDir = path.join(process.cwd(), "configs", "auth");
@@ -402,7 +411,7 @@ class StatusRoutes {
             const { authSource } = this.serverSystem;
 
             if (!authSource.initialIndices.includes(targetIndex)) {
-                return res.status(404).json({ index: targetIndex, message: "errorAccountsNotFound" });
+                return res.status(404).json({ index: targetIndex, message: "errorAccountNotFound" });
             }
 
             // If deleting current account without confirmation, return warning

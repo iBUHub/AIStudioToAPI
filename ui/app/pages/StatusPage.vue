@@ -683,6 +683,7 @@
                                 <el-checkbox
                                     :model-value="isAccountSelected(item.index)"
                                     class="account-checkbox"
+                                    :aria-label="`Select account #${item.index}`"
                                     @change="toggleSelectAccount(item.index)"
                                     @click.stop
                                 />
@@ -1572,23 +1573,27 @@ const batchDownloadAccounts = async () => {
         });
 
         if (!res.ok) {
-            let errorMsg = t("batchDownloadFailed");
+            let errorKey = "batchDownloadFailed";
+            let errorParams = { error: res.statusText || `HTTP ${res.status}` };
+
             try {
                 const contentType = res.headers.get("content-type");
                 if (contentType && contentType.includes("application/json")) {
                     const data = await res.json();
-                    if (data.message) errorMsg = data.message;
-                    else if (data.error) {
-                        if (typeof data.error === "string") errorMsg = data.error;
-                        else if (data.error.message) errorMsg = data.error.message;
+                    if (data.message) {
+                        errorKey = data.message;
+                        errorParams = data;
+                    } else if (data.error) {
+                        const errorDetail = typeof data.error === "string" ? data.error : data.error.message;
+                        errorParams = { error: errorDetail };
                     }
                 } else {
-                    errorMsg = `HTTP Error ${res.status}: ${res.statusText}`;
+                    errorParams = { error: `HTTP Error ${res.status}: ${res.statusText}` };
                 }
             } catch (e) {
-                // Parsing failed, keep default errorMsg
+                // Parsing failed, keep default errorParams
             }
-            ElMessage.error(errorMsg);
+            ElMessage.error(t(errorKey, errorParams));
             return;
         }
 
