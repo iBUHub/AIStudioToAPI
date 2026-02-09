@@ -584,6 +584,29 @@
                                     </svg>
                                     {{ t("batchDelete") }}
                                 </button>
+                                <button
+                                    v-if="hasSelection"
+                                    class="btn-batch-download"
+                                    :title="t('batchDownload')"
+                                    @click="batchDownloadAccounts"
+                                >
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="16"
+                                        height="16"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                    >
+                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                        <polyline points="7 10 12 15 17 10"></polyline>
+                                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                                    </svg>
+                                    {{ t("batchDownload") }}
+                                </button>
                             </div>
                             <!-- Right: Add, upload, and deduplicate -->
                             <div class="icon-buttons">
@@ -1529,6 +1552,54 @@ const batchDeleteAccounts = async () => {
                 console.error(e);
             }
         });
+};
+
+// Batch download accounts as ZIP
+const batchDownloadAccounts = async () => {
+    if (state.selectedAccounts.size === 0) {
+        ElMessage.warning(t("noAccountSelected"));
+        return;
+    }
+
+    const indices = Array.from(state.selectedAccounts);
+
+    try {
+        const res = await fetch("/api/accounts/batch/download", {
+            body: JSON.stringify({ indices }),
+            headers: { "Content-Type": "application/json" },
+            method: "POST",
+        });
+
+        if (!res.ok) {
+            const data = await res.json();
+            ElMessage.error(t(data.message || "batchDownloadFailed", data));
+            return;
+        }
+
+        // Get the blob and trigger download
+        const blob = await res.blob();
+        const contentDisposition = res.headers.get("Content-Disposition");
+        let filename = "auth_batch.zip";
+        if (contentDisposition) {
+            const match = contentDisposition.match(/filename="?([^"]+)"?/);
+            if (match) {
+                filename = match[1];
+            }
+        }
+
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        ElMessage.success(t("batchDownloadSuccess", { count: indices.length }));
+    } catch (err) {
+        ElMessage.error(t("batchDownloadFailed", { error: err.message || err }));
+    }
 };
 
 const currentAccountName = computed(() => {
@@ -2601,6 +2672,29 @@ watchEffect(() => {
 
     &:hover:not(:disabled) {
         background: rgba(var(--color-error-rgb), 0.1);
+    }
+
+    &:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+}
+
+.btn-batch-download {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border: 1px solid @primary-color;
+    border-radius: 6px;
+    background: transparent;
+    color: @primary-color;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.2s;
+
+    &:hover:not(:disabled) {
+        background: rgba(var(--color-primary-rgb), 0.1);
     }
 
     &:disabled {
