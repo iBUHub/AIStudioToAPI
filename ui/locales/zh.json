@@ -97,6 +97,7 @@
     "enabled": "已启用",
     "entries": "条",
     "errorAccountNotFound": "账号 {index} 未找到或已被移除。",
+    "errorAccountsNotFound": "未找到指定账号或已被移除。",
     "errorDeleteCurrentAccount": "无法删除当前正在运行的账号。",
     "errorInvalidIndex": "无效的账号索引。",
     "errorInvalidMode": "无效的模式。请使用 'fake' 或 'real'。",
