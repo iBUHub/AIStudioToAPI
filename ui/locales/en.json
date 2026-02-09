@@ -64,6 +64,7 @@
     "batchDeleteSuccess": "Successfully deleted {count} accounts",
     "batchDownload": "Batch Download",
     "batchDownloadFailed": "Batch download failed: {error}",
+    "batchDownloadPartial": "Batch download partial: {successCount} successful, {failedCount} failed",
     "batchDownloadSuccess": "Successfully downloaded {count} auth files",
     "browserConnection": "Browser Connection",
     "btnAddUser": "Add User",

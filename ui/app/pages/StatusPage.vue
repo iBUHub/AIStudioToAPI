@@ -1519,10 +1519,8 @@ const batchDeleteAccounts = async () => {
                 return;
             }
 
-            if (res.ok) {
-                ElMessage.success(t("batchDeleteSuccess", { count: data.successCount }));
-                clearSelection();
-            } else if (res.status === 207) {
+            if (res.status === 207) {
+                // Handle partial success (Multi-Status) first, as res.ok is true for 2xx
                 ElMessage.warning(
                     t("batchDeletePartial", {
                         failedCount: data.failedIndices?.length || 0,
@@ -1531,6 +1529,10 @@ const batchDeleteAccounts = async () => {
                 );
                 // Remove deleted items from selection
                 data.successIndices?.forEach(idx => state.selectedAccounts.delete(idx));
+            } else if (res.ok) {
+                // Handle full success (200 OK)
+                ElMessage.success(t("batchDeleteSuccess", { count: data.successCount }));
+                clearSelection();
             } else {
                 ElMessage.error(t(data.message, data));
             }
@@ -1618,8 +1620,20 @@ const batchDownloadAccounts = async () => {
         URL.revokeObjectURL(url);
 
         // Use actual file count from response header, fallback to indices length
-        const actualCount = parseInt(res.headers.get("X-File-Count"), 10) || indices.length;
-        ElMessage.success(t("batchDownloadSuccess", { count: actualCount }));
+        const actualCount = parseInt(res.headers.get("X-File-Count"), 10);
+        const requestCount = indices.length;
+        const failedCount = requestCount - (isNaN(actualCount) ? requestCount : actualCount);
+
+        if (!isNaN(actualCount) && failedCount > 0) {
+            ElMessage.warning(
+                t("batchDownloadPartial", {
+                    failedCount,
+                    successCount: actualCount,
+                })
+            );
+        } else {
+            ElMessage.success(t("batchDownloadSuccess", { count: !isNaN(actualCount) ? actualCount : requestCount }));
+        }
     } catch (err) {
         ElMessage.error(t("batchDownloadFailed", { error: err.message || err }));
     }

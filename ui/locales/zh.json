@@ -64,6 +64,7 @@
     "batchDeleteSuccess": "成功删除 {count} 个账号",
     "batchDownload": "批量下载",
     "batchDownloadFailed": "批量下载失败：{error}",
+    "batchDownloadPartial": "批量下载部分成功：成功 {successCount}，失败 {failedCount}",
     "batchDownloadSuccess": "成功下载 {count} 个 Auth 文件",
     "browserConnection": "浏览器连接",
     "btnAddUser": "添加账号",
