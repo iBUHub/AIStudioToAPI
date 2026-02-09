@@ -542,7 +542,7 @@
                                 ref="fileInput"
                                 type="file"
                                 style="display: none"
-                                accept=".json"
+                                accept=".json,.zip"
                                 multiple
                                 @change="handleFileUpload"
                             />
@@ -1273,6 +1273,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watchEffect } from "vue";
 import { useRouter } from "vue-router";
 import { ElMessage, ElMessageBox, ElNotification } from "element-plus";
+import JSZip from "jszip";
 import I18n from "../utils/i18n";
 import { useTheme } from "../utils/useTheme";
 
@@ -1819,8 +1820,17 @@ const handleFileUpload = async event => {
     // Reset input so same files can be selected again
     event.target.value = "";
 
-    // Helper function to read a single file
-    const readFile = file =>
+    // Helper function to read file as ArrayBuffer (for zip)
+    const readFileAsArrayBuffer = file =>
+        new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = e => resolve(e.target.result);
+            reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
+            reader.readAsArrayBuffer(file);
+        });
+
+    // Helper function to read file as text (for json)
+    const readFileAsText = file =>
         new Promise((resolve, reject) => {
             const reader = new FileReader();
             reader.onload = e => resolve({ content: e.target.result, name: file.name });
@@ -1848,26 +1858,72 @@ const handleFileUpload = async event => {
         }
     };
 
-    // Upload all files (single or batch, same logic)
-    const successFiles = [];
-    const failedFiles = [];
+    // Collect all JSON files to upload (including extracted from zip)
+    const jsonFilesToUpload = [];
+    const extractErrors = [];
 
     for (const file of files) {
-        try {
-            const fileData = await readFile(file);
-            const result = await uploadFile(fileData);
-            if (result.success) {
-                successFiles.push({ local: file.name, saved: result.filename });
-            } else {
-                failedFiles.push({ local: file.name, reason: result.error });
+        const lowerName = file.name.toLowerCase();
+
+        if (lowerName.endsWith(".zip")) {
+            // Extract JSON files from zip
+            try {
+                const arrayBuffer = await readFileAsArrayBuffer(file);
+                const zip = await JSZip.loadAsync(arrayBuffer);
+                const zipEntries = Object.keys(zip.files);
+
+                let foundJsonInZip = false;
+                for (const entryName of zipEntries) {
+                    const entry = zip.files[entryName];
+                    // Skip directories and non-json files
+                    if (entry.dir || !entryName.toLowerCase().endsWith(".json")) continue;
+
+                    foundJsonInZip = true;
+                    try {
+                        const content = await entry.async("string");
+                        // Use format: zipName/entryName for display
+                        const displayName = `${file.name}/${entryName}`;
+                        jsonFilesToUpload.push({ content, name: displayName });
+                    } catch (err) {
+                        extractErrors.push({
+                            local: `${file.name}/${entryName}`,
+                            reason: err.message || "Extract failed",
+                        });
+                    }
+                }
+
+                if (!foundJsonInZip) {
+                    extractErrors.push({ local: file.name, reason: t("zipNoJsonFiles") });
+                }
+            } catch (err) {
+                extractErrors.push({ local: file.name, reason: t("zipExtractFailed") });
             }
-        } catch (err) {
-            failedFiles.push({ local: file.name, reason: err.message || "Read failed" });
+        } else if (lowerName.endsWith(".json")) {
+            // Regular JSON file
+            try {
+                const fileData = await readFileAsText(file);
+                jsonFilesToUpload.push(fileData);
+            } catch (err) {
+                extractErrors.push({ local: file.name, reason: err.message || "Read failed" });
+            }
         }
     }
 
-    // Build notification message with file details
-    let messageHtml = "";
+    // Upload all collected JSON files
+    const successFiles = [];
+    const failedFiles = [...extractErrors];
+
+    for (const fileData of jsonFilesToUpload) {
+        const result = await uploadFile(fileData);
+        if (result.success) {
+            successFiles.push({ local: fileData.name, saved: result.filename });
+        } else {
+            failedFiles.push({ local: fileData.name, reason: result.error });
+        }
+    }
+
+    // Build notification message with file details (scrollable container)
+    let messageHtml = '<div style="max-height: 50vh; overflow-y: auto;">';
 
     if (successFiles.length > 0) {
         messageHtml += `<div style="margin-bottom: 8px;"><strong style="color: var(--el-color-success);">${t("fileUploadBatchSuccess")} (${successFiles.length}):</strong></div>`;
@@ -1887,6 +1943,8 @@ const handleFileUpload = async event => {
         messageHtml += "</ul>";
     }
 
+    messageHtml += "</div>";
+
     // Determine notification type
     let notifyType = "success";
     if (failedFiles.length > 0 && successFiles.length === 0) {
@@ -1895,9 +1953,15 @@ const handleFileUpload = async event => {
         notifyType = "warning";
     }
 
-    // Show notification in top-right, no auto close
-    // Use different title for single vs batch upload
-    const notifyTitle = files.length === 1 ? t("fileUploadComplete") : t("fileUploadBatchResult");
+    // Build title with counts
+    const totalProcessed = successFiles.length + failedFiles.length;
+    let notifyTitle;
+    if (totalProcessed === 1) {
+        notifyTitle = t("fileUploadComplete");
+    } else {
+        notifyTitle = `${t("fileUploadBatchResult")} (✓${successFiles.length} ✗${failedFiles.length})`;
+    }
+
     ElNotification({
         dangerouslyUseHTMLString: true,
         duration: 0,

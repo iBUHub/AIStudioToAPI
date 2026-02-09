@@ -158,5 +158,7 @@
     "usageCount": "使用次数",
     "versionInfo": "版本信息",
     "warningDeleteCurrentAccount": "您即将删除当前正在使用的账号。浏览器连接将被关闭，您需要切换到其他账号。是否继续？",
-    "warningTitle": "警告"
+    "warningTitle": "警告",
+    "zipExtractFailed": "解压失败",
+    "zipNoJsonFiles": "压缩包内无 JSON 文件"
 }
