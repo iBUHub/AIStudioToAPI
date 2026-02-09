@@ -270,7 +270,18 @@ class StatusRoutes {
                 });
             }
 
-            // Check if current active account is included
+            const successIndices = [];
+            const failedIndices = [];
+
+            // Add invalid indices to failed list immediately
+            for (const idx of invalidIndices) {
+                failedIndices.push({
+                    error: "Account not found or invalid",
+                    index: idx,
+                });
+            }
+
+            // Check if current active account is included in VALID indices
             const includesCurrent = validIndices.includes(currentAuthIndex);
             if (includesCurrent && !force) {
                 return res.status(409).json({
@@ -279,9 +290,6 @@ class StatusRoutes {
                     requiresConfirmation: true,
                 });
             }
-
-            const successIndices = [];
-            const failedIndices = [];
 
             for (const targetIndex of validIndices) {
                 try {
