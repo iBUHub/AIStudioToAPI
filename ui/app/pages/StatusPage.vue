@@ -1597,7 +1597,9 @@ const batchDownloadAccounts = async () => {
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
 
-        ElMessage.success(t("batchDownloadSuccess", { count: indices.length }));
+        // Use actual file count from response header, fallback to indices length
+        const actualCount = parseInt(res.headers.get("X-File-Count"), 10) || indices.length;
+        ElMessage.success(t("batchDownloadSuccess", { count: actualCount }));
     } catch (err) {
         ElMessage.error(t("batchDownloadFailed", { error: err.message || err }));
     }

@@ -354,17 +354,22 @@ class StatusRoutes {
                 // Pipe archive to response
                 archive.pipe(res);
 
-                // Add files to archive
+                // Add files to archive and count actual files added
+                let actualFileCount = 0;
                 for (const idx of validIndices) {
                     const filePath = path.join(configDir, `auth-${idx}.json`);
                     if (fs.existsSync(filePath)) {
                         archive.file(filePath, { name: `auth-${idx}.json` });
+                        actualFileCount++;
                     }
                 }
 
+                // Set header with actual file count for frontend to use
+                res.setHeader("X-File-Count", actualFileCount.toString());
+
                 // Finalize archive
                 await archive.finalize();
-                this.logger.info(`[WebUI] Batch downloaded ${validIndices.length} auth files as ZIP.`);
+                this.logger.info(`[WebUI] Batch downloaded ${actualFileCount} auth files as ZIP.`);
             } catch (error) {
                 this.logger.error(`[WebUI] Batch download failed: ${error.message}`);
                 if (!res.headersSent) {
