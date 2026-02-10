@@ -397,8 +397,10 @@ class StatusRoutes {
 
                 // Handle client disconnect to prevent wasted resources
                 res.on("close", () => {
-                    this.logger.warn("[WebUI] Client disconnected during batch download. Aborting archive.");
-                    archive.abort();
+                    if (!res.writableEnded) {
+                        this.logger.warn("[WebUI] Client disconnected during batch download. Aborting archive.");
+                        archive.abort();
+                    }
                 });
 
                 // Add files to archive
