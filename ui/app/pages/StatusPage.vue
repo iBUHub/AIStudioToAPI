@@ -2764,7 +2764,7 @@ watchEffect(() => {
     &:hover:not(:disabled) {
         border-color: @error-color;
         color: @error-color;
-        background: rgba(var(--color-error-rgb), 0.1);
+        background: transparent;
     }
 
     &:disabled {
@@ -2790,7 +2790,7 @@ watchEffect(() => {
     &:hover:not(:disabled) {
         border-color: @primary-color;
         color: @primary-color;
-        background: rgba(var(--color-primary-rgb), 0.1);
+        background: transparent;
     }
 
     &:disabled {
