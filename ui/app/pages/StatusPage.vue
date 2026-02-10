@@ -866,11 +866,27 @@
                                     {{ t("currentVersion") }}
                                 </span>
                                 <span class="value">
-                                    <el-tooltip :content="t('copy')" placement="top">
-                                        <span class="clickable-version" @click="copyAppVersion">
-                                            {{ appVersion }}
+                                    <span class="clickable-version" :title="t('copy')" @click="copyAppVersion">
+                                        {{ appVersion }}
+                                        <span class="copy-icon">
+                                            <svg
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                width="14"
+                                                height="14"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                stroke-width="2"
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                            >
+                                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                                <path
+                                                    d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+                                                ></path>
+                                            </svg>
                                         </span>
-                                    </el-tooltip>
+                                    </span>
                                 </span>
                             </div>
                             <div class="status-item">
@@ -895,23 +911,80 @@
                                     {{ t("latestVersion") }}
                                 </span>
                                 <span class="value">
-                                    <a
+                                    <span
                                         v-if="state.hasUpdate"
-                                        :href="state.releaseUrl || 'https://github.com/iBUHub/AIStudioToAPI/releases'"
-                                        target="_blank"
-                                        class="update-link"
+                                        class="clickable-version"
                                         :title="t('newVersionAvailable')"
                                     >
-                                        {{ latestVersionFormatted }}
-                                    </a>
-                                    <a
-                                        v-else
-                                        href="https://github.com/iBUHub/AIStudioToAPI/releases"
-                                        target="_blank"
-                                        style="color: inherit; text-decoration: none"
-                                    >
-                                        {{ latestVersionFormatted }}
-                                    </a>
+                                        <a
+                                            :href="
+                                                state.releaseUrl || 'https://github.com/iBUHub/AIStudioToAPI/releases'
+                                            "
+                                            target="_blank"
+                                            class="update-link"
+                                        >
+                                            {{ latestVersionFormatted }}
+                                        </a>
+                                        <a
+                                            class="copy-icon"
+                                            :href="
+                                                state.releaseUrl || 'https://github.com/iBUHub/AIStudioToAPI/releases'
+                                            "
+                                            target="_blank"
+                                            style="color: inherit; display: inline-flex"
+                                        >
+                                            <svg
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                width="14"
+                                                height="14"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                stroke-width="2"
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                            >
+                                                <path
+                                                    d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"
+                                                ></path>
+                                                <polyline points="15 3 21 3 21 9"></polyline>
+                                                <line x1="10" y1="14" x2="21" y2="3"></line>
+                                            </svg>
+                                        </a>
+                                    </span>
+                                    <span v-else class="clickable-version" :title="t('viewRelease')">
+                                        <a
+                                            href="https://github.com/iBUHub/AIStudioToAPI/releases"
+                                            target="_blank"
+                                            style="color: inherit; text-decoration: none"
+                                        >
+                                            {{ latestVersionFormatted }}
+                                        </a>
+                                        <a
+                                            class="copy-icon"
+                                            href="https://github.com/iBUHub/AIStudioToAPI/releases"
+                                            target="_blank"
+                                            style="color: inherit; display: inline-flex"
+                                        >
+                                            <svg
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                width="14"
+                                                height="14"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                stroke-width="2"
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                            >
+                                                <path
+                                                    d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"
+                                                ></path>
+                                                <polyline points="15 3 21 3 21 9"></polyline>
+                                                <line x1="10" y1="14" x2="21" y2="3"></line>
+                                            </svg>
+                                        </a>
+                                    </span>
                                 </span>
                             </div>
                         </div>
@@ -2011,15 +2084,17 @@ const switchAccountByIndex = targetIndex => {
         });
 };
 
-const copyAppVersion = async () => {
+const copyText = async text => {
     try {
-        await navigator.clipboard.writeText(appVersion.value);
+        await navigator.clipboard.writeText(text);
         ElMessage.success(t("copySuccess"));
     } catch (err) {
         ElMessage.error(t("copyFailed"));
-        console.error("Failed to copy version:", err);
+        console.error("Failed to copy:", err);
     }
 };
+
+const copyAppVersion = () => copyText(appVersion.value);
 
 const updateStatus = data => {
     state.serviceConnected = true;
@@ -3236,5 +3311,34 @@ watchEffect(() => {
     .mobile-only {
         display: none !important;
     }
+}
+
+.clickable-version,
+.version-align {
+    display: inline-flex;
+    align-items: center;
+    gap: 0;
+}
+
+.clickable-version {
+    cursor: pointer;
+    transition: color 0.2s;
+
+    &:hover {
+        color: @primary-color;
+
+        .copy-icon {
+            opacity: 1;
+        }
+    }
+}
+
+.copy-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 4px;
 }
 </style>
