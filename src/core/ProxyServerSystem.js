@@ -481,13 +481,25 @@ class ProxyServerSystem extends EventEmitter {
     }
 
     async _startWebSocketServer() {
-        this.wsServer = new WebSocket.Server({
-            host: this.config.host,
-            port: this.config.wsPort,
-        });
-        this.wsServer.on("connection", (ws, req) => {
-            this.connectionRegistry.addConnection(ws, {
-                address: req.socket.remoteAddress,
+        return new Promise((resolve, reject) => {
+            this.wsServer = new WebSocket.Server({
+                host: this.config.host,
+                port: this.config.wsPort,
+            });
+            this.wsServer.on("listening", () => {
+                this.logger.info(
+                    `[System] WebSocket server is listening on ws://${this.config.host}:${this.config.wsPort}`
+                );
+                resolve();
+            });
+            this.wsServer.on("error", err => {
+                this.logger.error(`[System] WebSocket server failed to start: ${err.message}`);
+                reject(err);
+            });
+            this.wsServer.on("connection", (ws, req) => {
+                this.connectionRegistry.addConnection(ws, {
+                    address: req.socket.remoteAddress,
+                });
             });
         });
     }
