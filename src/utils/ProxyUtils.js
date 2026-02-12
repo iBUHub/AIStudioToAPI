@@ -38,11 +38,7 @@ const parseProxyFromEnv = () => {
             .map(s => s.trim())
             .filter(Boolean);
         finalBypass = [...new Set([...defaultBypass, ...userBypass])];
-    } else {
-        // If user didn't specify NO_PROXY, we should at least bypass local addresses
-        // to prevent WebSocket connection failures when proxy is set.
     }
-
     const bypassString = finalBypass.join(",");
 
     // Playwright expects: { server, bypass?, username?, password? }
