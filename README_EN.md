@@ -232,23 +232,18 @@ This endpoint forwards requests to the official Gemini API format endpoint.
 
 #### 🌐 Proxy Configuration
 
-| Variable                        | Description                                                                                                                                                                                               | Default   |
-| :------------------------------ | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :-------- |
-| `INITIAL_AUTH_INDEX`            | Initial authentication index to use on startup.                                                                                                                                                           | `0`       |
-| `ENABLE_AUTH_UPDATE`            | Whether to enable automatic auth credential updates. Defaults to enabled. The auth file will be automatically updated upon successful login/account switch and every 24 hours. Set to `false` to disable. | `true`    |
-| `MAX_RETRIES`                   | Maximum number of retries for failed requests (only effective for fake streaming and non-streaming).                                                                                                      | `3`       |
-| `RETRY_DELAY`                   | Delay between retries in milliseconds.                                                                                                                                                                    | `2000`    |
-| `SWITCH_ON_USES`                | Number of requests before automatically switching accounts (`0` to disable).                                                                                                                              | `40`      |
-| `FAILURE_THRESHOLD`             | Number of consecutive failures before switching accounts (`0` to disable).                                                                                                                                | `3`       |
-| `IMMEDIATE_SWITCH_STATUS_CODES` | HTTP status codes that trigger immediate account switching (comma-separated, set to empty to disable).                                                                                                    | `429,503` |
-
-#### 🌐 Network Configuration
-
-| Variable      | Description                                                                                                                                                                                                     | Default |
-| :------------ | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------ |
-| `HTTP_PROXY`  | HTTP proxy address for accessing Google services.                                                                                                                                                               | None    |
-| `HTTPS_PROXY` | HTTPS proxy address for accessing Google services.                                                                                                                                                              | None    |
-| `NO_PROXY`    | Comma-separated list of addresses to bypass the proxy. **The project automatically bypasses local addresses (localhost, 127.0.0.1 and 0.0.0.0), so manual local bypass configuration is usually not required.** | None    |
+| Variable                        | Description                                                                                                                                                                                                 | Default   |
+| :------------------------------ | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :-------- |
+| `INITIAL_AUTH_INDEX`            | Initial authentication index to use on startup.                                                                                                                                                             | `0`       |
+| `ENABLE_AUTH_UPDATE`            | Whether to enable automatic auth credential updates. Defaults to enabled. The auth file will be automatically updated upon successful login/account switch and every 24 hours. Set to `false` to disable.   | `true`    |
+| `MAX_RETRIES`                   | Maximum number of retries for failed requests (only effective for fake streaming and non-streaming).                                                                                                        | `3`       |
+| `RETRY_DELAY`                   | Delay between retries in milliseconds.                                                                                                                                                                      | `2000`    |
+| `SWITCH_ON_USES`                | Number of requests before automatically switching accounts (`0` to disable).                                                                                                                                | `40`      |
+| `FAILURE_THRESHOLD`             | Number of consecutive failures before switching accounts (`0` to disable).                                                                                                                                  | `3`       |
+| `IMMEDIATE_SWITCH_STATUS_CODES` | HTTP status codes that trigger immediate account switching (comma-separated, set to empty to disable).                                                                                                      | `429,503` |
+| `HTTP_PROXY`                    | HTTP proxy address for accessing Google services.                                                                                                                                                           | None      |
+| `HTTPS_PROXY`                   | HTTPS proxy address for accessing Google services.                                                                                                                                                          | None      |
+| `NO_PROXY`                      | Comma-separated list of addresses to bypass the proxy. The project automatically bypasses local addresses (localhost, 127.0.0.1 and 0.0.0.0), so manual local bypass configuration is usually not required. | None      |
 
 #### 🗒️ Other Configuration
 
