@@ -44,34 +44,53 @@ class ProxyServerSystem extends EventEmitter {
         // Create ConnectionRegistry with lightweight reconnect callback
         // When WebSocket connection is lost but browser is still running,
         // this callback attempts to refresh the page and re-inject the script
-        this.connectionRegistry = new ConnectionRegistry(this.logger, async () => {
-            // Skip if browser is being intentionally closed (not an unexpected disconnect)
-            if (this.browserManager.isClosingIntentionally) {
-                this.logger.info("[System] Browser is closing intentionally, skipping reconnect attempt.");
-                return;
-            }
-            // Skip if the system is busy switching/recovering to avoid conflicting refreshes
-            if (this.requestHandler?.isSystemBusy) {
-                this.logger.info(
-                    "[System] System is busy (switching/recovering), skipping lightweight reconnect attempt."
-                );
-                return;
-            }
-
-            if (this.browserManager.browser && this.browserManager.page && !this.browserManager.page.isClosed()) {
-                this.logger.error(
-                    "[System] WebSocket lost but browser still running, attempting lightweight reconnect..."
-                );
-                const success = await this.browserManager.attemptLightweightReconnect();
-                if (!success) {
-                    this.logger.warn(
-                        "[System] Lightweight reconnect failed. Will attempt full recovery on next request."
-                    );
+        this.connectionRegistry = new ConnectionRegistry(
+            this.logger,
+            async authIndex => {
+                // Skip if browser is being intentionally closed (not an unexpected disconnect)
+                if (this.browserManager.isClosingIntentionally) {
+                    this.logger.info("[System] Browser is closing intentionally, skipping reconnect attempt.");
+                    return;
                 }
-            } else {
-                this.logger.info("[System] Browser not available, skipping lightweight reconnect.");
-            }
-        });
+
+                // Check if this is the current account
+                const currentAuthIndex = this.browserManager.currentAuthIndex;
+                const isCurrentAccount = authIndex === currentAuthIndex;
+
+                // Only check isSystemBusy if this is the current account
+                if (isCurrentAccount && this.requestHandler?.isSystemBusy) {
+                    this.logger.info(
+                        `[System] Current account #${authIndex} is busy (switching/recovering), skipping lightweight reconnect attempt.`
+                    );
+                    return;
+                }
+
+                // Get the context and page for this specific account
+                const contextData = this.browserManager.contexts.get(authIndex);
+                if (!contextData || !contextData.page || contextData.page.isClosed()) {
+                    this.logger.info(
+                        `[System] Account #${authIndex} page not available or closed, skipping lightweight reconnect.`
+                    );
+                    return;
+                }
+
+                if (this.browserManager.browser) {
+                    this.logger.error(
+                        `[System] WebSocket lost for account #${authIndex} but browser still running, attempting lightweight reconnect...`
+                    );
+                    const success = await this.browserManager.attemptLightweightReconnect(authIndex);
+                    if (!success) {
+                        this.logger.warn(
+                            `[System] Lightweight reconnect failed for account #${authIndex}. Will attempt full recovery on next request.`
+                        );
+                    }
+                } else {
+                    this.logger.info("[System] Browser not available, skipping lightweight reconnect.");
+                }
+            },
+            () => this.browserManager.currentAuthIndex,
+            this.browserManager
+        );
         this.requestHandler = new RequestHandler(
             this,
             this.connectionRegistry,
@@ -101,6 +120,7 @@ class ProxyServerSystem extends EventEmitter {
             return; // Exit early
         }
 
+        // Determine startup order
         let startupOrder = allRotationIndices.length > 0 ? [...allRotationIndices] : [...allAvailableIndices];
         const hasInitialAuthIndex = Number.isInteger(initialAuthIndex);
         if (hasInitialAuthIndex) {
@@ -108,7 +128,7 @@ class ProxyServerSystem extends EventEmitter {
             if (canonicalInitialIndex !== null && startupOrder.includes(canonicalInitialIndex)) {
                 if (canonicalInitialIndex !== initialAuthIndex) {
                     this.logger.warn(
-                        `[System] Specified startup index #${initialAuthIndex} is a duplicate for the same email, using latest auth index #${canonicalInitialIndex} instead.`
+                        `[System] Specified startup index #${initialAuthIndex} is a duplicate, using latest auth index #${canonicalInitialIndex} instead.`
                     );
                 } else {
                     this.logger.info(
@@ -123,32 +143,31 @@ class ProxyServerSystem extends EventEmitter {
             }
         } else {
             this.logger.info(
-                `[System] No valid startup index specified, will try in default order [${startupOrder.join(", ")}].`
+                `[System] No valid startup index specified, will activate first available context [${startupOrder[0]}].`
             );
         }
 
-        let isStarted = false;
-        for (const index of startupOrder) {
-            try {
-                this.logger.info(`[System] Attempting to start service with account #${index}...`);
-                this.requestHandler.authSwitcher.isSystemBusy = true;
-                await this.browserManager.launchOrSwitchContext(index);
+        // Context pool startup
+        const maxContexts = this.config.maxContexts;
+        this.logger.info(`[System] Starting context pool (maxContexts=${maxContexts})...`);
 
-                isStarted = true;
-                this.logger.info(`[System] ✅ Successfully started with account #${index}!`);
-                break;
-            } catch (error) {
-                this.logger.error(`[System] ❌ Failed to start with account #${index}. Reason: ${error.message}`);
-            } finally {
-                this.requestHandler.authSwitcher.isSystemBusy = false;
+        try {
+            this.requestHandler.authSwitcher.isSystemBusy = true;
+            const { firstReady } = await this.browserManager.preloadContextPool(startupOrder, maxContexts);
+
+            if (firstReady === null) {
+                this.logger.error("[System] Failed to initialize any context!");
+                this.emit("started");
+                return;
             }
-        }
 
-        if (!isStarted) {
-            this.logger.warn(
-                "[System] All authentication sources failed to initialize. Starting in account binding mode without an active account."
-            );
-            // Don't throw an error, just proceed to start servers
+            // Activate first ready context (fast switch since already preloaded)
+            await this.browserManager.launchOrSwitchContext(firstReady);
+            this.logger.info(`[System] ✅ Successfully activated account #${firstReady}!`);
+        } catch (error) {
+            this.logger.error(`[System] ❌ Startup failed: ${error.message}`);
+        } finally {
+            this.requestHandler.authSwitcher.isSystemBusy = false;
         }
 
         this.emit("started");
@@ -506,11 +525,54 @@ class ProxyServerSystem extends EventEmitter {
                 }
             });
             this.wsServer.on("connection", (ws, req) => {
+                // Parse authIndex from query parameter
+                const url = new URL(req.url, `http://${req.headers.host}`);
+                const authIndexParam = url.searchParams.get("authIndex");
+                const authIndex = authIndexParam !== null ? parseInt(authIndexParam, 10) : -1;
+
+                // Validate authIndex: must be a valid non-negative integer
+                if (Number.isNaN(authIndex) || authIndex < 0) {
+                    this.logger.error(
+                        `[System] Rejecting WebSocket connection with invalid authIndex: ${authIndexParam} (parsed as ${authIndex})`
+                    );
+                    this._safeCloseWebSocket(ws, 1008, "Invalid authIndex: must be a non-negative integer");
+                    return;
+                }
+
                 this.connectionRegistry.addConnection(ws, {
                     address: req.socket.remoteAddress,
+                    authIndex,
                 });
             });
         });
+    }
+
+    /**
+     * Safely close a WebSocket connection with readyState check
+     * @param {WebSocket} ws - The WebSocket to close
+     * @param {number} code - Close code (e.g., 1000, 1008)
+     * @param {string} reason - Close reason
+     */
+    _safeCloseWebSocket(ws, code, reason) {
+        if (!ws) {
+            return;
+        }
+
+        // WebSocket readyState: 0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED
+        // Only attempt to close if not already closing or closed
+        if (ws.readyState === 0 || ws.readyState === 1) {
+            try {
+                ws.close(code, reason);
+            } catch (error) {
+                this.logger.warn(
+                    `[System] Failed to close WebSocket (code=${code}, reason="${reason}"): ${error.message}`
+                );
+            }
+        } else {
+            this.logger.debug(
+                `[System] WebSocket already closing/closed (readyState=${ws.readyState}), skipping close()`
+            );
+        }
     }
 }
 

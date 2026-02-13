@@ -101,6 +101,11 @@ class ConnectionManager extends EventTarget {
     // WebSocket endpoint is now fixed at ws://127.0.0.1:9998 and cannot be customized.
     constructor(endpoint = "ws://127.0.0.1:9998") {
         super();
+
+        // Defer authIndex reading until establish() is called
+        // This ensures window.chrome._contextId is available (set by postMessage from parent page)
+        this.authIndex = null; // Will be set in establish()
+
         this.endpoint = endpoint;
         this.socket = null;
         this.isConnected = false;
@@ -108,12 +113,37 @@ class ConnectionManager extends EventTarget {
         this.reconnectAttempts = 0;
     }
 
+    _readAuthIndex() {
+        // Read from window.chrome._contextId (set by index.html via postMessage from parent page)
+        const contextId = window.chrome?._contextId;
+        const authIndex = contextId !== undefined ? contextId : -1;
+
+        // Validate authIndex: must be >= 0 and not NaN for multi-context architecture
+        if (Number.isNaN(authIndex) || !Number.isInteger(authIndex) || authIndex < 0) {
+            const errorMsg = `❌ FATAL: Invalid authIndex (${authIndex}). window.chrome._contextId not set.`;
+            console.error(errorMsg);
+            throw new Error(errorMsg);
+        }
+
+        Logger.debug(`✅ Read authIndex from window.chrome._contextId: ${authIndex}`);
+        return authIndex;
+    }
+
     async establish() {
         if (this.isConnected) return Promise.resolve();
-        Logger.output("Connecting to server:", this.endpoint);
+
+        // Read authIndex on first connection attempt (deferred from constructor)
+        if (this.authIndex === null) {
+            this.authIndex = this._readAuthIndex();
+            Logger.debug(`Detected authIndex: ${this.authIndex}`);
+        }
+
+        // Add authIndex to WebSocket URL for server-side identification
+        const wsUrl = this.authIndex >= 0 ? `${this.endpoint}?authIndex=${this.authIndex}` : this.endpoint;
+        Logger.output("Connecting to server:", wsUrl);
         return new Promise((resolve, reject) => {
             try {
-                this.socket = new WebSocket(this.endpoint);
+                this.socket = new WebSocket(wsUrl);
                 this.socket.addEventListener("open", () => {
                     this.isConnected = true;
                     this.reconnectAttempts = 0;
@@ -199,7 +229,7 @@ class RequestProcessor {
 
         const attemptPromise = (async () => {
             try {
-                Logger.output(`Executing request:`, requestSpec.method, requestSpec.path);
+                Logger.debug(`Executing request:`, requestSpec.method, requestSpec.path);
 
                 const requestUrl = this._constructUrl(requestSpec);
                 const requestConfig = this._buildRequestConfig(requestSpec, abortController.signal);
@@ -567,12 +597,10 @@ class ProxySystem extends EventTarget {
         }
     }
 
-    // In v3.4-black-browser.js
-    // [Final Weapon - Canvas Soul Extraction] Replace entire _processProxyRequest function
     async _processProxyRequest(requestSpec) {
         const operationId = requestSpec.request_id;
         const mode = requestSpec.streaming_mode || "fake";
-        Logger.output(`Browser received request`);
+        Logger.debug(`Browser received request`);
         let cancelTimeout;
 
         try {
@@ -700,8 +728,24 @@ class ProxySystem extends EventTarget {
 const initializeProxySystem = async () => {
     // Clean up old logs
     document.body.innerHTML = "";
-    const proxySystem = new ProxySystem();
+
+    // Wait for authIndex from parent via postMessage (promise set up in index.html)
+    // Timeout fallback: if parent doesn't respond within 10s, throw fatal error
+    if (window.__authIndexReady) {
+        const timeout = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error("authIndex postMessage timeout (10s)")), 10000)
+        );
+        try {
+            const authIndex = await Promise.race([window.__authIndexReady, timeout]);
+            Logger.output(`✅ authIndex received from parent: ${authIndex}`);
+        } catch (error) {
+            Logger.error(`❌ Failed to get authIndex: ${error.message}`);
+            throw error;
+        }
+    }
+
     try {
+        const proxySystem = new ProxySystem();
         await proxySystem.initialize();
     } catch (error) {
         console.error("Proxy system startup failed:", error);

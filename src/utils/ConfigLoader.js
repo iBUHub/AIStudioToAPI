@@ -30,6 +30,7 @@ class ConfigLoader {
             host: "0.0.0.0",
             httpPort: 7860,
             immediateSwitchStatusCodes: [429, 503],
+            maxContexts: 1,
             maxRetries: 3,
             retryDelay: 2000,
             streamingMode: "real",
@@ -38,18 +39,28 @@ class ConfigLoader {
         };
 
         // Environment variable overrides
-        if (process.env.PORT) config.httpPort = parseInt(process.env.PORT, 10) || config.httpPort;
+        if (process.env.PORT) {
+            const parsed = parseInt(process.env.PORT, 10);
+            config.httpPort = Number.isFinite(parsed) ? parsed : config.httpPort;
+        }
         if (process.env.HOST) config.host = process.env.HOST;
         if (process.env.STREAMING_MODE) config.streamingMode = process.env.STREAMING_MODE;
-        if (process.env.FAILURE_THRESHOLD)
-            config.failureThreshold =
-                Math.max(0, parseInt(process.env.FAILURE_THRESHOLD, 10)) ?? config.failureThreshold;
-        if (process.env.SWITCH_ON_USES)
-            config.switchOnUses = Math.max(0, parseInt(process.env.SWITCH_ON_USES, 10)) ?? config.switchOnUses;
-        if (process.env.MAX_RETRIES)
-            config.maxRetries = Math.max(1, parseInt(process.env.MAX_RETRIES, 10)) || config.maxRetries;
-        if (process.env.RETRY_DELAY)
-            config.retryDelay = Math.max(50, parseInt(process.env.RETRY_DELAY, 10)) || config.retryDelay;
+        if (process.env.FAILURE_THRESHOLD) {
+            const parsed = parseInt(process.env.FAILURE_THRESHOLD, 10);
+            config.failureThreshold = Number.isFinite(parsed) ? Math.max(0, parsed) : config.failureThreshold;
+        }
+        if (process.env.SWITCH_ON_USES) {
+            const parsed = parseInt(process.env.SWITCH_ON_USES, 10);
+            config.switchOnUses = Number.isFinite(parsed) ? Math.max(0, parsed) : config.switchOnUses;
+        }
+        if (process.env.MAX_RETRIES) {
+            const parsed = parseInt(process.env.MAX_RETRIES, 10);
+            config.maxRetries = Number.isFinite(parsed) ? Math.max(1, parsed) : config.maxRetries;
+        }
+        if (process.env.RETRY_DELAY) {
+            const parsed = parseInt(process.env.RETRY_DELAY, 10);
+            config.retryDelay = Number.isFinite(parsed) ? Math.max(50, parsed) : config.retryDelay;
+        }
         if (process.env.WS_PORT) {
             // WS_PORT environment variable is no longer supported
             this.logger.error(
@@ -57,6 +68,10 @@ class ConfigLoader {
                     `The WebSocket port is now fixed at 9998. Please remove WS_PORT from your .env file.`
             );
             // Do not modify config.wsPort - keep it at default 9998
+        }
+        if (process.env.MAX_CONTEXTS) {
+            const parsed = parseInt(process.env.MAX_CONTEXTS, 10);
+            config.maxContexts = Number.isFinite(parsed) ? Math.max(0, parsed) : config.maxContexts;
         }
         if (process.env.CAMOUFOX_EXECUTABLE_PATH) config.browserExecutablePath = process.env.CAMOUFOX_EXECUTABLE_PATH;
         if (process.env.API_KEYS) {
@@ -145,6 +160,7 @@ class ConfigLoader {
         this.logger.info(`  Force Web Search: ${config.forceWebSearch}`);
         this.logger.info(`  Force URL Context: ${config.forceUrlContext}`);
         this.logger.info(`  Auto Update Auth: ${config.enableAuthUpdate}`);
+        this.logger.info(`  Max Contexts: ${config.maxContexts === 0 ? "Unlimited" : config.maxContexts}`);
         this.logger.info(
             `  Usage-based Switch Threshold: ${
                 config.switchOnUses > 0 ? `Switch after every ${config.switchOnUses} requests` : "Disabled"
