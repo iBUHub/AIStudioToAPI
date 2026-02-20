@@ -52,8 +52,7 @@ class ConfigLoader {
             config.retryDelay = Math.max(50, parseInt(process.env.RETRY_DELAY, 10)) || config.retryDelay;
         if (process.env.WS_PORT) {
             // WS_PORT environment variable is no longer supported
-            const logger = require("./LoggingService");
-            logger.error(
+            this.logger.error(
                 `[Config] ❌ WS_PORT environment variable is deprecated and no longer supported. ` +
                     `The WebSocket port is now fixed at 9998. Please remove WS_PORT from your .env file.`
             );
