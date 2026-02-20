@@ -35,6 +35,11 @@ class BrowserManager {
         // Added for background wakeup logic from new core
         this.noButtonCount = 0;
 
+        // WebSocket initialization flags - track browser-side initialization status
+        this._wsInitSuccess = false;
+        this._wsInitFailed = false;
+        this._consoleListenerRegistered = false;
+
         // Firefox/Camoufox does not use Chromium-style command line args.
         // We keep this empty; Camoufox has its own anti-fingerprinting optimizations built-in.
         this.launchArgs = [];
@@ -1158,7 +1163,13 @@ class BrowserManager {
             await Promise.race([closePromise, timeoutPromise]);
             this.context = null;
             this.page = null;
-            this.logger.info("[Browser] Old API context closed.");
+
+            // Reset flags when closing context, as page object is no longer valid
+            this._consoleListenerRegistered = false;
+            this._wsInitSuccess = false;
+            this._wsInitFailed = false;
+
+            this.logger.info("[Browser] Old API context closed, flags reset.");
         }
 
         const sourceDescription = `File auth-${authIndex}.json`;
@@ -1208,27 +1219,31 @@ class BrowserManager {
                 this.logger.warn(`[Browser] Wakeup minor error: ${e.message}`);
             }
 
-            this.page.on("console", msg => {
-                const msgText = msg.text();
-                if (msgText.includes("Content-Security-Policy")) {
-                    return;
-                }
+            // Register console listener only once to avoid duplicate registrations
+            if (!this._consoleListenerRegistered) {
+                this.page.on("console", msg => {
+                    const msgText = msg.text();
+                    if (msgText.includes("Content-Security-Policy")) {
+                        return;
+                    }
 
-                if (msgText.includes("[ProxyClient]")) {
-                    this.logger.info(`[Browser] ${msgText.replace("[ProxyClient] ", "")}`);
-                } else if (msg.type() === "error") {
-                    this.logger.error(`[Browser Page Error] ${msgText}`);
-                }
+                    if (msgText.includes("[ProxyClient]")) {
+                        this.logger.info(`[Browser] ${msgText.replace("[ProxyClient] ", "")}`);
+                    } else if (msg.type() === "error") {
+                        this.logger.error(`[Browser Page Error] ${msgText}`);
+                    }
 
-                // Check for WebSocket initialization status
-                if (msgText.includes("System initialization complete, waiting for server instructions")) {
-                    this.logger.info(`[Browser] ✅ Detected successful initialization message from browser`);
-                    this._wsInitSuccess = true;
-                } else if (msgText.includes("System initialization failed")) {
-                    this.logger.warn(`[Browser] ❌ Detected initialization failure message from browser`);
-                    this._wsInitFailed = true;
-                }
-            });
+                    // Check for WebSocket initialization status
+                    if (msgText.includes("System initialization complete, waiting for server instructions")) {
+                        this.logger.info(`[Browser] ✅ Detected successful initialization message from browser`);
+                        this._wsInitSuccess = true;
+                    } else if (msgText.includes("System initialization failed")) {
+                        this.logger.warn(`[Browser] ❌ Detected initialization failure message from browser`);
+                        this._wsInitFailed = true;
+                    }
+                });
+                this._consoleListenerRegistered = true;
+            }
 
             await this._navigateAndWakeUpPage("[Browser]");
 
@@ -1240,21 +1255,25 @@ class BrowserManager {
             let retryCount = 0;
             let initSuccess = false;
 
+            // Reset flags before starting retry loop
+            this._wsInitSuccess = false;
+            this._wsInitFailed = false;
+
             while (retryCount < maxRetries && !initSuccess) {
                 if (retryCount > 0) {
                     this.logger.info(`[Browser] 🔄 Retry attempt ${retryCount}/${maxRetries - 1}...`);
+
+                    // Reset flags before page refresh to ensure clean state
+                    this._wsInitSuccess = false;
+                    this._wsInitFailed = false;
+
                     // Refresh the page and re-handle popups
                     await this.page.reload({ waitUntil: "domcontentloaded" });
                     await this.page.waitForTimeout(2000);
                 }
 
-                // Reset flags before each attempt (before handling popups)
-                this._wsInitSuccess = false;
-                this._wsInitFailed = false;
-
                 // Handle various popups (Cookie consent, Got it, Onboarding, etc.)
-                // After clicking "Continue to the app", WebSocket will auto-connect
-                // Note: WebSocket might already be connected before clicking the button
+                // Always handle popups to ensure they don't block initialization
                 await this._handlePopups("[Browser]");
 
                 // Wait for WebSocket initialization (60 second timeout)
@@ -1347,21 +1366,25 @@ class BrowserManager {
             let retryCount = 0;
             let initSuccess = false;
 
+            // Reset flags before starting retry loop
+            this._wsInitSuccess = false;
+            this._wsInitFailed = false;
+
             while (retryCount < maxRetries && !initSuccess) {
                 if (retryCount > 0) {
                     this.logger.info(`[Reconnect] 🔄 Retry attempt ${retryCount}/${maxRetries - 1}...`);
+
+                    // Reset flags before page refresh to ensure clean state
+                    this._wsInitSuccess = false;
+                    this._wsInitFailed = false;
+
                     // Refresh the page and re-handle popups
                     await this.page.reload({ waitUntil: "domcontentloaded" });
                     await this.page.waitForTimeout(2000);
                 }
 
-                // Reset flags before each attempt (before handling popups)
-                this._wsInitSuccess = false;
-                this._wsInitFailed = false;
-
                 // Handle various popups (Cookie consent, Got it, Onboarding, etc.)
-                // After clicking "Continue to the app", WebSocket will auto-connect
-                // Note: WebSocket might already be connected before clicking the button
+                // Always handle popups to ensure they don't block initialization
                 await this._handlePopups("[Reconnect]");
 
                 // Wait for WebSocket initialization (60 second timeout)
@@ -1422,12 +1445,18 @@ class BrowserManager {
                 this.logger.warn(`[Browser] Error during close (ignored): ${e.message}`);
             }
 
-            // Reset all references
+            // Reset all references and flags
             this.browser = null;
             this.context = null;
             this.page = null;
             this._currentAuthIndex = -1;
-            this.logger.info("[Browser] Main browser instance closed, currentAuthIndex reset to -1.");
+
+            // Reset WebSocket initialization flags
+            this._consoleListenerRegistered = false;
+            this._wsInitSuccess = false;
+            this._wsInitFailed = false;
+
+            this.logger.info("[Browser] Main browser instance closed, all references and flags reset.");
         }
 
         // Reset flag after close is complete
