@@ -1965,7 +1965,7 @@ class BrowserManager {
                 args: this.launchArgs,
                 executablePath: this.browserExecutablePath,
                 firefoxUserPrefs: this.firefoxUserPrefs,
-                headless: false, // Main browser is always headless
+                headless: true, // Main browser is always headless
                 ...(proxyConfig ? { proxy: proxyConfig } : {}),
             });
             this.browser.on("disconnected", () => {
