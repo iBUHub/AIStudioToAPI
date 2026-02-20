@@ -583,6 +583,35 @@ class BrowserManager {
         });
         this.logger.info(`${logPrefix} Page loaded.`);
 
+        // Check if we were redirected to the wrong page
+        const currentUrl = this.page.url();
+        const expectedAppId = "0400c62c-9bcb-48c1-b056-9b5cf4cb5603";
+
+        if (!currentUrl.includes(expectedAppId)) {
+            this.logger.warn(`${logPrefix} ⚠️ Page redirected to: ${currentUrl}`);
+            this.logger.info(`${logPrefix} Expected app ID: ${expectedAppId}`);
+            this.logger.info(`${logPrefix} Attempting to navigate again...`);
+
+            // Wait a bit before retrying
+            await this.page.waitForTimeout(2000);
+
+            // Try navigating again
+            await this.page.goto(targetUrl, {
+                timeout: 180000,
+                waitUntil: "domcontentloaded",
+            });
+
+            const retryUrl = this.page.url();
+            if (!retryUrl.includes(expectedAppId)) {
+                this.logger.error(`${logPrefix} ❌ Still on wrong page after retry: ${retryUrl}`);
+                this.logger.warn(`${logPrefix} This may cause initialization issues, but continuing...`);
+            } else {
+                this.logger.info(`${logPrefix} ✅ Successfully navigated to correct page on retry`);
+            }
+        } else {
+            this.logger.info(`${logPrefix} ✅ Confirmed on correct page: ${currentUrl}`);
+        }
+
         // Wake up window using JS and Human Movement
         try {
             await this.page.bringToFront();
@@ -678,9 +707,39 @@ class BrowserManager {
                 selector: 'div.dialog button:text("Got it")',
             },
             {
+                logFound: `${logPrefix} ✅ Found "Got it" button (generic), clicking...`,
+                name: "Got it button",
+                selector: 'button:text("Got it")',
+            },
+            {
                 logFound: `${logPrefix} ✅ Found onboarding tutorial popup, clicking close button...`,
                 name: "Onboarding tutorial",
                 selector: 'button[aria-label="Close"]',
+            },
+            {
+                logFound: `${logPrefix} ✅ Found "Dismiss" button, clicking...`,
+                name: "Dismiss button",
+                selector: 'button:text("Dismiss")',
+            },
+            {
+                logFound: `${logPrefix} ✅ Found "Not now" button, clicking...`,
+                name: "Not now button",
+                selector: 'button:text("Not now")',
+            },
+            {
+                logFound: `${logPrefix} ✅ Found "Maybe later" button, clicking...`,
+                name: "Maybe later button",
+                selector: 'button:text("Maybe later")',
+            },
+            {
+                logFound: `${logPrefix} ✅ Found "Skip" button, clicking...`,
+                name: "Skip button",
+                selector: 'button:text("Skip")',
+            },
+            {
+                logFound: `${logPrefix} ✅ Found update notification, clicking close...`,
+                name: "Update notification",
+                selector: 'button[aria-label="Close notification"]',
             },
         ];
 
@@ -753,6 +812,15 @@ class BrowserManager {
             if (i < maxIterations - 1) {
                 await this.page.waitForTimeout(pollInterval);
             }
+        }
+
+        // Log final summary
+        if (handledPopups.size === 0) {
+            this.logger.info(`${logPrefix} ℹ️ No popups detected during scan`);
+        } else {
+            this.logger.info(
+                `${logPrefix} ✅ Successfully handled ${handledPopups.size} popup(s): ${Array.from(handledPopups).join(", ")}`
+            );
         }
     }
 
