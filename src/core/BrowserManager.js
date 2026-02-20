@@ -1280,8 +1280,9 @@ class BrowserManager {
                 );
             }
 
-            // Start background wakeup service - only started here during initial browser launch
+            // Start background services - only started here during initial browser launch
             this._startBackgroundWakeup();
+            this._startHealthMonitor();
 
             this._currentAuthIndex = authIndex;
 
@@ -1380,6 +1381,11 @@ class BrowserManager {
                 this.logger.error("[Reconnect] WebSocket initialization failed after multiple retries.");
                 return false;
             }
+
+            // Restart health monitor after successful reconnect
+            // Note: _startBackgroundWakeup is not restarted because it's a continuous loop
+            // that checks this.page === currentPage, and will continue running after page reload
+            this._startHealthMonitor();
 
             // [Auth Update] Save the refreshed cookies to the auth file immediately
             await this._updateAuthFile(authIndex);
