@@ -101,6 +101,98 @@ class BrowserManager {
     }
 
     /**
+     * Helper: Check for page errors that require refresh
+     * @returns {Object} Object with error flags
+     */
+    async _checkPageErrors() {
+        try {
+            const hasError = await this.page.evaluate(() => {
+                // eslint-disable-next-line no-undef
+                const bodyText = document.body.innerText || "";
+                return {
+                    appletFailed: bodyText.includes("Failed to initialize applet"),
+                    concurrentUpdates:
+                        bodyText.includes("There are concurrent updates") || bodyText.includes("concurrent updates"),
+                    snapshotFailed:
+                        bodyText.includes("Failed to create snapshot") || bodyText.includes("Please try again"),
+                };
+            });
+            return hasError;
+        } catch (e) {
+            return { appletFailed: false, concurrentUpdates: false, snapshotFailed: false };
+        }
+    }
+
+    /**
+     * Helper: Wait for WebSocket initialization with log monitoring
+     * @param {string} logPrefix - Log prefix for messages
+     * @param {number} timeout - Timeout in milliseconds (default 60000)
+     * @returns {Promise<boolean>} true if initialization succeeded, false if failed
+     */
+    async _waitForWebSocketInit(logPrefix = "[Browser]", timeout = 60000) {
+        this.logger.info(`${logPrefix} ⏳ Waiting for WebSocket initialization (timeout: ${timeout / 1000}s)...`);
+
+        let initSuccess = false;
+        let initFailed = false;
+
+        // Set up console message listener
+        const consoleListener = msg => {
+            const msgText = msg.text();
+            if (msgText.includes("System initialization complete, waiting for server instructions")) {
+                this.logger.info(`${logPrefix} ✅ Detected successful initialization message from browser`);
+                initSuccess = true;
+            } else if (msgText.includes("System initialization failed")) {
+                this.logger.warn(`${logPrefix} ❌ Detected initialization failure message from browser`);
+                initFailed = true;
+            }
+        };
+
+        this.page.on("console", consoleListener);
+
+        const startTime = Date.now();
+        const checkInterval = 1000; // Check every 1 second
+
+        try {
+            while (Date.now() - startTime < timeout) {
+                // Check if initialization succeeded
+                if (initSuccess) {
+                    this.page.off("console", consoleListener);
+                    return true;
+                }
+
+                // Check if initialization failed
+                if (initFailed) {
+                    this.page.off("console", consoleListener);
+                    this.logger.warn(`${logPrefix} Initialization failed, will attempt refresh...`);
+                    return false;
+                }
+
+                // Check for page errors
+                const errors = await this._checkPageErrors();
+                if (errors.appletFailed || errors.concurrentUpdates || errors.snapshotFailed) {
+                    this.logger.warn(
+                        `${logPrefix} Detected page error: ${JSON.stringify(errors)}, will attempt refresh...`
+                    );
+                    this.page.off("console", consoleListener);
+                    return false;
+                }
+
+                // Wait before next check
+                await this.page.waitForTimeout(checkInterval);
+            }
+
+            // Timeout reached
+            this.page.off("console", consoleListener);
+            this.logger.error(`${logPrefix} ⏱️ WebSocket initialization timeout after ${timeout / 1000}s`);
+            return false;
+        } catch (error) {
+            this.page.off("console", consoleListener);
+            this.logger.error(`${logPrefix} Error during WebSocket initialization wait: ${error.message}`);
+            return false;
+        }
+    }
+
+    /**
      * Feature: Update authentication file
      * Writes the current storageState back to the auth file, effectively extending session validity.
      * @param {number} authIndex - The auth index to update
@@ -1157,9 +1249,36 @@ class BrowserManager {
             // After clicking "Continue to the app", WebSocket will auto-connect
             await this._handlePopups("[Browser]");
 
-            this.logger.info("[Browser] ✅ Waiting for WebSocket auto-connection after clicking button...");
-            // Wait a bit for the WebSocket connection to establish
-            await this.page.waitForTimeout(3000);
+            // Wait for WebSocket initialization with error checking and retry logic
+            const maxRetries = 3;
+            let retryCount = 0;
+            let initSuccess = false;
+
+            while (retryCount < maxRetries && !initSuccess) {
+                if (retryCount > 0) {
+                    this.logger.info(`[Browser] 🔄 Retry attempt ${retryCount}/${maxRetries - 1}...`);
+                    // Refresh the page and re-handle popups
+                    await this.page.reload({ waitUntil: "domcontentloaded" });
+                    await this.page.waitForTimeout(2000);
+                    await this._handlePopups("[Browser]");
+                }
+
+                // Wait for WebSocket initialization (60 second timeout)
+                initSuccess = await this._waitForWebSocketInit("[Browser]", 60000);
+
+                if (!initSuccess) {
+                    retryCount++;
+                    if (retryCount < maxRetries) {
+                        this.logger.warn(`[Browser] Initialization failed, refreshing page...`);
+                    }
+                }
+            }
+
+            if (!initSuccess) {
+                throw new Error(
+                    "WebSocket initialization failed after multiple retries. Please check browser logs and page errors."
+                );
+            }
 
             // Start background wakeup service - only started here during initial browser launch
             this._startBackgroundWakeup();
@@ -1232,9 +1351,35 @@ class BrowserManager {
             // After clicking "Continue to the app", WebSocket will auto-connect
             await this._handlePopups("[Reconnect]");
 
-            this.logger.info("[Reconnect] ✅ Waiting for WebSocket auto-connection after clicking button...");
-            // Wait a bit for the WebSocket connection to establish
-            await this.page.waitForTimeout(3000);
+            // Wait for WebSocket initialization with error checking and retry logic
+            const maxRetries = 3;
+            let retryCount = 0;
+            let initSuccess = false;
+
+            while (retryCount < maxRetries && !initSuccess) {
+                if (retryCount > 0) {
+                    this.logger.info(`[Reconnect] 🔄 Retry attempt ${retryCount}/${maxRetries - 1}...`);
+                    // Refresh the page and re-handle popups
+                    await this.page.reload({ waitUntil: "domcontentloaded" });
+                    await this.page.waitForTimeout(2000);
+                    await this._handlePopups("[Reconnect]");
+                }
+
+                // Wait for WebSocket initialization (60 second timeout)
+                initSuccess = await this._waitForWebSocketInit("[Reconnect]", 60000);
+
+                if (!initSuccess) {
+                    retryCount++;
+                    if (retryCount < maxRetries) {
+                        this.logger.warn(`[Reconnect] Initialization failed, refreshing page...`);
+                    }
+                }
+            }
+
+            if (!initSuccess) {
+                this.logger.error("[Reconnect] WebSocket initialization failed after multiple retries.");
+                return false;
+            }
 
             // [Auth Update] Save the refreshed cookies to the auth file immediately
             await this._updateAuthFile(authIndex);
