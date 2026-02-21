@@ -484,13 +484,16 @@ class BrowserManager {
     /**
      * Helper: Send active trigger and start health monitor
      * Sends a trigger request to wake up Google backend and starts the health monitoring service
+     * This is a fire-and-forget operation - we don't wait for the trigger request to complete
      * @param {string} logPrefix - Log prefix for step messages (e.g., "[Browser]" or "[Reconnect]")
      */
-    async _sendActiveTriggerAndStartMonitor(logPrefix = "[Browser]") {
+    _sendActiveTriggerAndStartMonitor(logPrefix = "[Browser]") {
         // Active Trigger (Hack to wake up Google Backend)
         this.logger.info(`${logPrefix} ⚡ Sending active trigger request to Launch flow...`);
-        try {
-            await this.page.evaluate(async () => {
+
+        // Fire-and-forget: send trigger request in background without waiting
+        this.page
+            .evaluate(async () => {
                 try {
                     await fetch("https://generativelanguage.googleapis.com/v1beta/models?key=ActiveTrigger", {
                         headers: { "Content-Type": "application/json" },
@@ -499,10 +502,10 @@ class BrowserManager {
                 } catch (e) {
                     console.log("[ProxyClient] Active trigger sent");
                 }
+            })
+            .catch(() => {
+                // Silently ignore errors - this is a best-effort trigger
             });
-        } catch (e) {
-            /* empty */
-        }
 
         this._startHealthMonitor();
     }
@@ -899,7 +902,6 @@ class BrowserManager {
                     // Click active buttons if visible
                     // eslint-disable-next-line no-undef
                     document.querySelectorAll("button").forEach(btn => {
-                        // 检查元素是否占据空间（简单的可见性检查）
                         const rect = btn.getBoundingClientRect();
                         const isVisible = rect.width > 0 && rect.height > 0;
 
@@ -907,7 +909,6 @@ class BrowserManager {
                             const text = (btn.innerText || "").trim();
                             const ariaLabel = btn.getAttribute("aria-label");
 
-                            // 匹配文本 或 aria-label
                             if (targetTexts.includes(text) || ariaLabel === "Close") {
                                 console.log(`[ProxyClient] HealthMonitor clicking: ${text || "Close Button"}`);
                                 btn.click();
