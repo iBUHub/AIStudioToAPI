@@ -721,14 +721,15 @@ class BrowserManager {
 
         const popupConfigs = [
             {
-                logFound: `${logPrefix} ✅ Found "Continue to the app" button, clicking...`,
-                name: "Continue to the app",
-                selector: 'button:text("Continue to the app")',
-            },
-            {
                 logFound: `${logPrefix} ✅ Found Cookie consent banner, clicking "Agree"...`,
                 name: "Cookie consent",
                 selector: 'button:text("Agree")',
+            },
+            {
+                exitAfterClick: true,
+                logFound: `${logPrefix} ✅ Found "Continue to the app" button, clicking...`,
+                name: "Continue to the app",
+                selector: 'button:text("Continue to the app")', // Special flag to exit loop after clicking
             },
             {
                 logFound: `${logPrefix} ✅ Found "Got it" popup, clicking...`,
@@ -789,15 +790,40 @@ class BrowserManager {
                 if (handledPopups.has(popup.name)) continue;
 
                 try {
-                    const element = this.page.locator(popup.selector).first();
-                    // Quick visibility check with very short timeout
-                    if (await element.isVisible({ timeout: 200 })) {
-                        this.logger.info(popup.logFound);
-                        await element.click({ force: true });
-                        handledPopups.add(popup.name);
-                        foundAny = true;
-                        // Short pause after clicking to let next popup appear
-                        await this.page.waitForTimeout(800);
+                    // Special handling for "Continue to the app" button using page.evaluate()
+                    if (popup.name === "Continue to the app") {
+                        const clicked = await this.page.evaluate(() => {
+                            // eslint-disable-next-line no-undef
+                            const btns = Array.from(document.querySelectorAll("button"));
+                            const target = btns.find(b => b.innerText && b.innerText.includes("Continue to the app"));
+                            if (target) {
+                                target.click();
+                                return true;
+                            }
+                            return false;
+                        });
+
+                        if (clicked) {
+                            this.logger.info(popup.logFound);
+                            this.logger.info(
+                                `${logPrefix} ⚡ Confirmed entry to app, exiting popup detection loop early.`
+                            );
+                            handledPopups.add(popup.name);
+                            // Exit immediately after clicking Continue button
+                            return;
+                        }
+                    } else {
+                        // Normal handling for other popups
+                        const element = this.page.locator(popup.selector).first();
+                        // Quick visibility check with very short timeout
+                        if (await element.isVisible({ timeout: 200 })) {
+                            this.logger.info(popup.logFound);
+                            await element.click({ force: true });
+                            handledPopups.add(popup.name);
+                            foundAny = true;
+                            // Short pause after clicking to let next popup appear
+                            await this.page.waitForTimeout(800);
+                        }
                     }
                 } catch (error) {
                     // Element not visible or doesn't exist is expected here,
