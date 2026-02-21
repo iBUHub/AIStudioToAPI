@@ -667,7 +667,6 @@ class BrowserManager {
                 selector: 'button:text-is("Skip")',
             },
             {
-                exitAfterClick: true,
                 logFound: `${logPrefix} ✅ Found "Continue to the app" button, clicking...`,
                 name: "Continue to the app",
                 selector: 'button:text("Continue to the app")',
