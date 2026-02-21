@@ -40,6 +40,10 @@ class BrowserManager {
         this._wsInitFailed = false;
         this._consoleListenerRegistered = false;
 
+        // Target URL for AI Studio app
+        this.targetUrl = "https://ai.studio/apps/0400c62c-9bcb-48c1-b056-9b5cf4cb5603";
+        this.expectedAppId = "0400c62c-9bcb-48c1-b056-9b5cf4cb5603";
+
         // Firefox/Camoufox does not use Chromium-style command line args.
         // We keep this empty; Camoufox has its own anti-fingerprinting optimizations built-in.
         this.launchArgs = [];
@@ -588,8 +592,7 @@ class BrowserManager {
      */
     async _navigateAndWakeUpPage(logPrefix = "[Browser]") {
         this.logger.info(`${logPrefix} Navigating to target page...`);
-        const targetUrl = "https://ai.studio/apps/0400c62c-9bcb-48c1-b056-9b5cf4cb5603";
-        await this.page.goto(targetUrl, {
+        await this.page.goto(this.targetUrl, {
             timeout: 180000,
             waitUntil: "domcontentloaded",
         });
@@ -618,6 +621,49 @@ class BrowserManager {
             this.logger.warn(`${logPrefix} Wakeup minor error: ${e.message}`);
         }
         await this.page.waitForTimeout(2000 + Math.random() * 2000);
+    }
+
+    /**
+     * Helper: Verify navigation to correct page and retry if needed
+     * Throws error on failure, which will be caught by the caller's try-catch block
+     * @param {string} logPrefix - Log prefix for messages (e.g., "[Browser]" or "[Reconnect]")
+     * @throws {Error} If navigation fails after retry
+     */
+    async _verifyAndRetryNavigation(logPrefix = "[Browser]") {
+        let currentUrl = this.page.url();
+
+        if (!currentUrl.includes(this.expectedAppId)) {
+            this.logger.warn(`${logPrefix} ⚠️ Page redirected to: ${currentUrl}`);
+            this.logger.info(`${logPrefix} Expected app ID: ${this.expectedAppId}`);
+            this.logger.info(`${logPrefix} Attempting to navigate again...`);
+
+            // Reset WebSocket initialization flags before re-navigation
+            this._wsInitSuccess = false;
+            this._wsInitFailed = false;
+
+            // Wait a bit before retrying
+            await this.page.waitForTimeout(2000);
+
+            // Try navigating again
+            await this.page.goto(this.targetUrl, {
+                timeout: 180000,
+                waitUntil: "domcontentloaded",
+            });
+            await this.page.waitForTimeout(2000);
+
+            // Check URL again
+            currentUrl = this.page.url();
+            if (!currentUrl.includes(this.expectedAppId)) {
+                this.logger.error(`${logPrefix} ❌ Still on wrong page after retry: ${currentUrl}`);
+                throw new Error(
+                    `Failed to navigate to correct page. Current URL: ${currentUrl}, Expected app ID: ${this.expectedAppId}`
+                );
+            } else {
+                this.logger.info(`${logPrefix} ✅ Successfully navigated to correct page on retry: ${currentUrl}`);
+            }
+        } else {
+            this.logger.info(`${logPrefix} ✅ Confirmed on correct page: ${currentUrl}`);
+        }
     }
 
     /**
@@ -786,9 +832,6 @@ class BrowserManager {
             // 1. Must have completed minimum iterations (ensure slow popups have time to load)
             // 2. Consecutive idle count exceeds threshold (no new popups appearing)
             if (i >= minIterations - 1 && consecutiveIdleCount >= idleThreshold) {
-                this.logger.info(
-                    `${logPrefix} ✅ Popup detection complete (${i + 1} iterations, ${handledPopups.size} popups handled)`
-                );
                 break;
             }
 
@@ -802,7 +845,7 @@ class BrowserManager {
             this.logger.info(`${logPrefix} ℹ️ No popups detected during scan`);
         } else {
             this.logger.info(
-                `${logPrefix} ✅ Successfully handled ${handledPopups.size} popup(s): ${Array.from(handledPopups).join(", ")}`
+                `${logPrefix} ✅ Popup detection complete: handled ${handledPopups.size} popup(s) - ${Array.from(handledPopups).join(", ")}`
             );
         }
     }
@@ -1340,42 +1383,7 @@ class BrowserManager {
             await this._checkPageStatusAndErrors("[Browser]");
 
             // Check if we were redirected to the wrong page BEFORE handling popups
-            const targetUrl = "https://ai.studio/apps/0400c62c-9bcb-48c1-b056-9b5cf4cb5603";
-            const expectedAppId = "0400c62c-9bcb-48c1-b056-9b5cf4cb5603";
-            let currentUrl = this.page.url();
-
-            if (!currentUrl.includes(expectedAppId)) {
-                this.logger.warn(`[Browser] ⚠️ Page redirected to: ${currentUrl}`);
-                this.logger.info(`[Browser] Expected app ID: ${expectedAppId}`);
-                this.logger.info(`[Browser] Attempting to navigate again...`);
-
-                // Reset WebSocket initialization flags before re-navigation
-                this._wsInitSuccess = false;
-                this._wsInitFailed = false;
-
-                // Wait a bit before retrying
-                await this.page.waitForTimeout(2000);
-
-                // Try navigating again
-                await this.page.goto(targetUrl, {
-                    timeout: 180000,
-                    waitUntil: "domcontentloaded",
-                });
-                await this.page.waitForTimeout(2000);
-
-                // Check URL again
-                currentUrl = this.page.url();
-                if (!currentUrl.includes(expectedAppId)) {
-                    this.logger.error(`[Browser] ❌ Still on wrong page after retry: ${currentUrl}`);
-                    throw new Error(
-                        `Failed to navigate to correct page. Current URL: ${currentUrl}, Expected app ID: ${expectedAppId}`
-                    );
-                } else {
-                    this.logger.info(`[Browser] ✅ Successfully navigated to correct page on retry: ${currentUrl}`);
-                }
-            } else {
-                this.logger.info(`[Browser] ✅ Confirmed on correct page: ${currentUrl}`);
-            }
+            await this._verifyAndRetryNavigation("[Browser]");
 
             // Handle various popups AFTER URL check (Cookie consent, Got it, Onboarding, etc.)
             await this._handlePopups("[Browser]");
@@ -1403,7 +1411,7 @@ class BrowserManager {
                     this._wsInitFailed = false;
 
                     // Navigate to target page again
-                    await this.page.goto(targetUrl, {
+                    await this.page.goto(this.targetUrl, {
                         timeout: 180000,
                         waitUntil: "domcontentloaded",
                     });
@@ -1502,40 +1510,7 @@ class BrowserManager {
             await this._checkPageStatusAndErrors("[Reconnect]");
 
             // Check if we were redirected to the wrong page BEFORE handling popups
-            const targetUrl = "https://ai.studio/apps/0400c62c-9bcb-48c1-b056-9b5cf4cb5603";
-            const expectedAppId = "0400c62c-9bcb-48c1-b056-9b5cf4cb5603";
-            let currentUrl = this.page.url();
-
-            if (!currentUrl.includes(expectedAppId)) {
-                this.logger.warn(`[Reconnect] ⚠️ Page redirected to: ${currentUrl}`);
-                this.logger.info(`[Reconnect] Expected app ID: ${expectedAppId}`);
-                this.logger.info(`[Reconnect] Attempting to navigate again...`);
-
-                // Reset WebSocket initialization flags before re-navigation
-                this._wsInitSuccess = false;
-                this._wsInitFailed = false;
-
-                // Wait a bit before retrying
-                await this.page.waitForTimeout(2000);
-
-                // Try navigating again
-                await this.page.goto(targetUrl, {
-                    timeout: 180000,
-                    waitUntil: "domcontentloaded",
-                });
-                await this.page.waitForTimeout(2000);
-
-                // Check URL again
-                currentUrl = this.page.url();
-                if (!currentUrl.includes(expectedAppId)) {
-                    this.logger.error(`[Reconnect] ❌ Still on wrong page after retry: ${currentUrl}`);
-                    return false;
-                } else {
-                    this.logger.info(`[Reconnect] ✅ Successfully navigated to correct page on retry: ${currentUrl}`);
-                }
-            } else {
-                this.logger.info(`[Reconnect] ✅ Confirmed on correct page: ${currentUrl}`);
-            }
+            await this._verifyAndRetryNavigation("[Reconnect]");
 
             // Handle various popups AFTER URL check (Cookie consent, Got it, Onboarding, etc.)
             await this._handlePopups("[Reconnect]");
@@ -1563,7 +1538,7 @@ class BrowserManager {
                     this._wsInitFailed = false;
 
                     // Navigate to target page again
-                    await this.page.goto(targetUrl, {
+                    await this.page.goto(this.targetUrl, {
                         timeout: 180000,
                         waitUntil: "domcontentloaded",
                     });
