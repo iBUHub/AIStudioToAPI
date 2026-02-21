@@ -484,87 +484,11 @@ class BrowserManager {
     }
 
     /**
-     * Helper: Inject script into editor and activate
-     * Contains the common UI interaction logic for both launchOrSwitchContext and attemptLightweightReconnect
-     * @param {string} buildScriptContent - The script content to inject
+     * Helper: Send active trigger and start health monitor
+     * Sends a trigger request to wake up Google backend and starts the health monitoring service
      * @param {string} logPrefix - Log prefix for step messages (e.g., "[Browser]" or "[Reconnect]")
      */
-    async _injectScriptToEditor(buildScriptContent, logPrefix = "[Browser]") {
-        this.logger.info(`${logPrefix} Preparing UI interaction, forcefully removing all possible overlay layers...`);
-        /* eslint-disable no-undef */
-        await this.page.evaluate(() => {
-            const overlays = document.querySelectorAll("div.cdk-overlay-backdrop");
-            if (overlays.length > 0) {
-                console.log(`[ProxyClient] (Internal JS) Found and removed ${overlays.length} overlay layers.`);
-                overlays.forEach(el => el.remove());
-            }
-        });
-        /* eslint-enable no-undef */
-
-        this.logger.info(`${logPrefix} (Step 1/5) Preparing to click "Code" button...`);
-        const maxTimes = 15;
-        for (let i = 1; i <= maxTimes; i++) {
-            try {
-                this.logger.info(`  [Attempt ${i}/${maxTimes}] Cleaning overlay layers and clicking...`);
-                /* eslint-disable no-undef */
-                await this.page.evaluate(() => {
-                    document.querySelectorAll("div.cdk-overlay-backdrop").forEach(el => el.remove());
-                });
-                /* eslint-enable no-undef */
-                await this.page.waitForTimeout(500);
-
-                // Use Smart Click instead of hardcoded locator
-                await this._smartClickCode(this.page);
-
-                this.logger.info("  ✅ Click successful!");
-                break;
-            } catch (error) {
-                this.logger.warn(`  [Attempt ${i}/${maxTimes}] Click failed: ${error.message.split("\n")[0]}`);
-                if (i === maxTimes) {
-                    throw new Error(`Unable to click "Code" button after multiple attempts, initialization failed.`);
-                }
-            }
-        }
-
-        this.logger.info(
-            `${logPrefix} (Step 2/5) "Code" button clicked successfully, waiting for editor to become visible...`
-        );
-        const editorContainerLocator = this.page.locator("div.monaco-editor").first();
-        await editorContainerLocator.waitFor({
-            state: "visible",
-            timeout: 60000,
-        });
-
-        this.logger.info(
-            `${logPrefix} (Cleanup #2) Preparing to click editor, forcefully removing all possible overlay layers again...`
-        );
-        /* eslint-disable no-undef */
-        await this.page.evaluate(() => {
-            const overlays = document.querySelectorAll("div.cdk-overlay-backdrop");
-            if (overlays.length > 0) {
-                console.log(
-                    `[ProxyClient] (Internal JS) Found and removed ${overlays.length} newly appeared overlay layers.`
-                );
-                overlays.forEach(el => el.remove());
-            }
-        });
-        /* eslint-enable no-undef */
-        await this.page.waitForTimeout(250);
-
-        this.logger.info(`${logPrefix} (Step 3/5) Editor displayed, focusing and pasting script...`);
-        await editorContainerLocator.click({ timeout: 30000 });
-
-        /* eslint-disable no-undef */
-        await this.page.evaluate(text => navigator.clipboard.writeText(text), buildScriptContent);
-        /* eslint-enable no-undef */
-        const isMac = os.platform() === "darwin";
-        const pasteKey = isMac ? "Meta+V" : "Control+V";
-        await this.page.keyboard.press(pasteKey);
-        this.logger.info(`${logPrefix} (Step 4/5) Script pasted.`);
-        this.logger.info(`${logPrefix} (Step 5/5) Clicking "Preview" button to activate script...`);
-        await this.page.locator('button:text("Preview")').click();
-        this.logger.info(`${logPrefix} ✅ UI interaction complete, script is now running.`);
-
+    async _sendActiveTriggerAndStartMonitor(logPrefix = "[Browser]") {
         // Active Trigger (Hack to wake up Google Backend)
         this.logger.info(`${logPrefix} ⚡ Sending active trigger request to Launch flow...`);
         try {
@@ -1437,7 +1361,7 @@ class BrowserManager {
 
             // Start background services - only started here during initial browser launch
             this._startBackgroundWakeup();
-            this._startHealthMonitor();
+            this._sendActiveTriggerAndStartMonitor();
 
             this._currentAuthIndex = authIndex;
 
@@ -1566,7 +1490,7 @@ class BrowserManager {
             // Restart health monitor after successful reconnect
             // Note: _startBackgroundWakeup is not restarted because it's a continuous loop
             // that checks this.page === currentPage, and will continue running after page reload
-            this._startHealthMonitor();
+            this._sendActiveTriggerAndStartMonitor();
 
             // [Auth Update] Save the refreshed cookies to the auth file immediately
             await this._updateAuthFile(authIndex);
