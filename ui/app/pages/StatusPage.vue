@@ -2409,12 +2409,11 @@ const handleFileUpload = async event => {
             const parsedFiles = [];
             const parseErrors = [];
 
-            // Parse all files first and track original indices
-            for (let i = 0; i < jsonFilesToUpload.length; i++) {
-                const fileData = jsonFilesToUpload[i];
+            // Parse all files first
+            for (const fileData of jsonFilesToUpload) {
                 try {
                     const parsed = JSON.parse(fileData.content);
-                    parsedFiles.push({ content: parsed, name: fileData.name, originalIndex: i });
+                    parsedFiles.push({ content: parsed, name: fileData.name });
                 } catch (err) {
                     parseErrors.push({ local: fileData.name, reason: t("invalidJson") });
                 }
