@@ -1390,8 +1390,11 @@ class BrowserManager {
                     this._wsInitSuccess = false;
                     this._wsInitFailed = false;
 
-                    // Refresh the page and re-handle popups
-                    await this.page.reload({ waitUntil: "domcontentloaded" });
+                    // Navigate to target page again
+                    await this.page.goto(targetUrl, {
+                        timeout: 180000,
+                        waitUntil: "domcontentloaded",
+                    });
                     await this.page.waitForTimeout(2000);
 
                     // Handle various popups (Cookie consent, Got it, Onboarding, etc.)
@@ -1547,8 +1550,11 @@ class BrowserManager {
                     this._wsInitSuccess = false;
                     this._wsInitFailed = false;
 
-                    // Refresh the page and re-handle popups
-                    await this.page.reload({ waitUntil: "domcontentloaded" });
+                    // Navigate to target page again
+                    await this.page.goto(targetUrl, {
+                        timeout: 180000,
+                        waitUntil: "domcontentloaded",
+                    });
                     await this.page.waitForTimeout(2000);
 
                     // Handle various popups (Cookie consent, Got it, Onboarding, etc.)
