@@ -598,29 +598,8 @@ class BrowserManager {
         });
         this.logger.info(`${logPrefix} Page loaded.`);
 
-        // Wake up window using JS and Human Movement
-        try {
-            await this.page.bringToFront();
-
-            // Get viewport size for realistic movement range
-            const vp = this.page.viewportSize() || { height: 1080, width: 1920 };
-
-            // 1. Move to a random point to simulate activity
-            const randomX = Math.floor(Math.random() * (vp.width * 0.7));
-            const randomY = Math.floor(Math.random() * (vp.height * 0.7));
-            await this._simulateHumanMovement(this.page, randomX, randomY);
-
-            // 2. Move to (1,1) specifically for a safe click, using human simulation
-            await this._simulateHumanMovement(this.page, 1, 1);
-            await this.page.mouse.down();
-            await this.page.waitForTimeout(50 + Math.random() * 100);
-            await this.page.mouse.up();
-
-            this.logger.info(`${logPrefix} ✅ Executed realistic page activation (Random -> 1,1 Click).`);
-        } catch (e) {
-            this.logger.warn(`${logPrefix} Wakeup minor error: ${e.message}`);
-        }
-        await this.page.waitForTimeout(2000 + Math.random() * 2000);
+        // Wait for page to stabilize (similar to reference implementation)
+        await this.page.waitForTimeout(3000);
     }
 
     /**
