@@ -57,7 +57,7 @@ class LoggingService {
      */
     setDisplayLimit(limit) {
         const newLimit = parseInt(limit, 10);
-        if (!isNaN(newLimit) && newLimit > 0) {
+        if (Number.isFinite(newLimit) && newLimit > 0) {
             this.displayLimit = newLimit;
         }
     }

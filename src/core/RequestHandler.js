@@ -65,7 +65,7 @@ class RequestHandler {
             }
             await new Promise(resolve => setTimeout(resolve, 100));
         }
-        return this.connectionRegistry.hasActiveConnections();
+        return !!this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex);
     }
 
     _isConnectionResetError(error) {
@@ -78,7 +78,7 @@ class RequestHandler {
     }
 
     /**
-     * Wait for WebSocket connection to be established
+     * Wait for WebSocket connection to be established for current account
      * @param {number} timeoutMs - Maximum time to wait in milliseconds
      * @returns {Promise<boolean>} true if connection established, false if timeout
      */
@@ -87,12 +87,27 @@ class RequestHandler {
         const checkInterval = 200; // Check every 200ms
 
         while (Date.now() - startTime < timeoutMs) {
-            if (this.connectionRegistry.hasActiveConnections()) {
+            const connection = this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex);
+            // Check both existence and readyState (1 = OPEN)
+            if (connection && connection.readyState === 1) {
                 return true;
             }
             await new Promise(resolve => setTimeout(resolve, checkInterval));
         }
 
+        this.logger.warn(
+            `[Request] Timeout waiting for WebSocket connection for account #${this.currentAuthIndex}. Closing unresponsive context...`
+        );
+        // Proactively close the unresponsive context so subsequent attempts re-initialize it
+        if (this.browserManager) {
+            try {
+                await this.browserManager.closeContext(this.currentAuthIndex);
+            } catch (e) {
+                this.logger.warn(
+                    `[System] Failed to close unresponsive context for account #${this.currentAuthIndex}: ${e.message}`
+                );
+            }
+        }
         return false;
     }
 
@@ -158,13 +173,13 @@ class RequestHandler {
                 );
                 return false;
             }
-            // After waiting, also wait for WebSocket connection to be established
-            if (!this.connectionRegistry.hasActiveConnections()) {
+            // After waiting, also wait for WebSocket connection to be established for current account
+            if (!this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex)) {
                 const connectionReady = await this._waitForConnection(10000);
                 if (!connectionReady) {
                     // The other process failed to establish connection, return error
                     this.logger.error(
-                        "[System] WebSocket connection not established after system ready, browser startup may have failed."
+                        `[System] WebSocket connection not established for account #${this.currentAuthIndex} after system ready, browser startup may have failed.`
                     );
                     await this._sendErrorResponse(
                         res,
@@ -177,11 +192,20 @@ class RequestHandler {
             return true;
         }
 
-        this.logger.error(
-            "❌ [System] Browser WebSocket connection disconnected! Possible process crash. Attempting recovery..."
-        );
-
+        // Determine if this is first-time startup or actual crash recovery
         const recoveryAuthIndex = this.currentAuthIndex;
+        const isFirstTimeStartup = recoveryAuthIndex < 0 && !this.browserManager.browser;
+
+        if (isFirstTimeStartup) {
+            this.logger.info(
+                "🚀 [System] Browser not yet started. Initializing browser with first available account..."
+            );
+        } else {
+            this.logger.error(
+                "❌ [System] Browser WebSocket connection disconnected! Possible process crash. Attempting recovery..."
+            );
+        }
+
         let wasDirectRecovery = false;
         let recoverySuccess = false;
 
@@ -204,7 +228,6 @@ class RequestHandler {
                 this.logger.info("✅ [System] WebSocket connection is ready!");
                 recoverySuccess = true;
             } else if (this.authSource.getRotationIndices().length > 0) {
-                this.logger.warn("⚠️ [System] No current account, attempting to switch to first available account...");
                 // Don't set isSystemBusy here - let switchToNextAuth manage it
                 const result = await this.authSwitcher.switchToNextAuth();
                 if (!result.success) {
@@ -233,6 +256,9 @@ class RequestHandler {
 
             if (wasDirectRecovery && this.authSource.getRotationIndices().length > 1) {
                 this.logger.warn("⚠️ [System] Attempting to switch to alternative account...");
+                // Reset isSystemBusy before calling switchToNextAuth to avoid "already in progress" rejection
+                this.authSwitcher.isSystemBusy = false;
+                wasDirectRecovery = false; // Prevent finally block from resetting again
                 try {
                     const result = await this.authSwitcher.switchToNextAuth();
                     if (!result.success) {
@@ -281,8 +307,9 @@ class RequestHandler {
     async processRequest(req, res) {
         const requestId = this._generateRequestId();
 
-        // Check browser connection
-        if (!this.connectionRegistry.hasActiveConnections()) {
+        // Check current account's browser connection
+        if (!this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex)) {
+            this.logger.warn(`[Request] No WebSocket connection for current account #${this.currentAuthIndex}`);
             const recovered = await this._handleBrowserRecovery(res);
             if (!recovered) return;
         }
@@ -297,8 +324,8 @@ class RequestHandler {
                     "Server undergoing internal maintenance (account switching/recovery), please try again later."
                 );
             }
-            // After system ready, ensure connection is available
-            if (!this.connectionRegistry.hasActiveConnections()) {
+            // After system ready, ensure connection is available for current account
+            if (!this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex)) {
                 const connectionReady = await this._waitForConnection(10000);
                 if (!connectionReady) {
                     return this._sendErrorResponse(
@@ -382,8 +409,9 @@ class RequestHandler {
         const requestId = this._generateRequestId();
         this.logger.info(`[Upload] Processing upload request ${req.method} ${req.path} (ID: ${requestId})`);
 
-        // Check browser connection
-        if (!this.connectionRegistry.hasActiveConnections()) {
+        // Check current account's browser connection
+        if (!this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex)) {
+            this.logger.warn(`[Upload] No WebSocket connection for current account #${this.currentAuthIndex}`);
             const recovered = await this._handleBrowserRecovery(res);
             if (!recovered) return;
         }
@@ -398,7 +426,7 @@ class RequestHandler {
                     "Server undergoing internal maintenance (account switching/recovery), please try again later."
                 );
             }
-            if (!this.connectionRegistry.hasActiveConnections()) {
+            if (!this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex)) {
                 const connectionReady = await this._waitForConnection(10000);
                 if (!connectionReady) {
                     return this._sendErrorResponse(
@@ -448,8 +476,9 @@ class RequestHandler {
     async processOpenAIRequest(req, res) {
         const requestId = this._generateRequestId();
 
-        // Check browser connection
-        if (!this.connectionRegistry.hasActiveConnections()) {
+        // Check current account's browser connection
+        if (!this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex)) {
+            this.logger.warn(`[Request] No WebSocket connection for current account #${this.currentAuthIndex}`);
             const recovered = await this._handleBrowserRecovery(res);
             if (!recovered) return;
         }
@@ -464,8 +493,8 @@ class RequestHandler {
                     "Server undergoing internal maintenance (account switching/recovery), please try again later."
                 );
             }
-            // After system ready, ensure connection is available
-            if (!this.connectionRegistry.hasActiveConnections()) {
+            // After system ready, ensure connection is available for current account
+            if (!this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex)) {
                 const connectionReady = await this._waitForConnection(10000);
                 if (!connectionReady) {
                     return this._sendErrorResponse(
@@ -673,7 +702,7 @@ class RequestHandler {
             this.connectionRegistry.removeMessageQueue(requestId);
             if (this.needsSwitchingAfterRequest) {
                 this.logger.info(
-                    `[Auth] Rotation count reached switching threshold, will automatically switch account in background...`
+                    `[Auth] Rotation count reached switching threshold (${this.authSwitcher.usageCount}/${this.config.switchOnUses}), will automatically switch account in background...`
                 );
                 this.authSwitcher.switchToNextAuth().catch(err => {
                     this.logger.error(`[Auth] Background account switching task failed: ${err.message}`);
@@ -688,8 +717,9 @@ class RequestHandler {
     async processClaudeRequest(req, res) {
         const requestId = this._generateRequestId();
 
-        // Check browser connection
-        if (!this.connectionRegistry.hasActiveConnections()) {
+        // Check current account's browser connection
+        if (!this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex)) {
+            this.logger.warn(`[Request] No WebSocket connection for current account #${this.currentAuthIndex}`);
             const recovered = await this._handleBrowserRecovery(res);
             if (!recovered) return;
         }
@@ -705,7 +735,7 @@ class RequestHandler {
                     "Server undergoing internal maintenance, please try again later."
                 );
             }
-            if (!this.connectionRegistry.hasActiveConnections()) {
+            if (!this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex)) {
                 const connectionReady = await this._waitForConnection(10000);
                 if (!connectionReady) {
                     return this._sendClaudeErrorResponse(
@@ -911,7 +941,7 @@ class RequestHandler {
             this.connectionRegistry.removeMessageQueue(requestId);
             if (this.needsSwitchingAfterRequest) {
                 this.logger.info(
-                    `[Auth] Rotation count reached switching threshold, will automatically switch account in background...`
+                    `[Auth] Rotation count reached switching threshold (${this.authSwitcher.usageCount}/${this.config.switchOnUses}), will automatically switch account in background...`
                 );
                 this.authSwitcher.switchToNextAuth().catch(err => {
                     this.logger.error(`[Auth] Background account switching task failed: ${err.message}`);
@@ -926,8 +956,9 @@ class RequestHandler {
     async processClaudeCountTokens(req, res) {
         const requestId = this._generateRequestId();
 
-        // Check browser connection
-        if (!this.connectionRegistry.hasActiveConnections()) {
+        // Check current account's browser connection
+        if (!this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex)) {
+            this.logger.warn(`[Request] No WebSocket connection for current account #${this.currentAuthIndex}`);
             const recovered = await this._handleBrowserRecovery(res);
             if (!recovered) return;
         }
@@ -943,7 +974,7 @@ class RequestHandler {
                     "Server undergoing internal maintenance, please try again later."
                 );
             }
-            if (!this.connectionRegistry.hasActiveConnections()) {
+            if (!this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex)) {
                 const connectionReady = await this._waitForConnection(10000);
                 if (!connectionReady) {
                     return this._sendClaudeErrorResponse(
@@ -1807,7 +1838,7 @@ class RequestHandler {
     }
 
     _cancelBrowserRequest(requestId) {
-        const connection = this.connectionRegistry.getFirstConnection();
+        const connection = this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex);
         if (connection) {
             this.logger.info(`[Request] Cancelling request #${requestId}`);
             connection.send(
@@ -1834,7 +1865,7 @@ class RequestHandler {
             return false;
         }
 
-        const connection = this.connectionRegistry.getFirstConnection();
+        const connection = this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex);
         if (connection) {
             connection.send(
                 JSON.stringify({
@@ -2001,8 +2032,11 @@ class RequestHandler {
     }
 
     _forwardRequest(proxyRequest) {
-        const connection = this.connectionRegistry.getFirstConnection();
+        const connection = this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex);
         if (connection) {
+            this.logger.debug(
+                `[Request] Forwarding request #${proxyRequest.request_id} via connection for authIndex=${this.currentAuthIndex}`
+            );
             connection.send(
                 JSON.stringify({
                     event_type: "proxy_request",
@@ -2010,7 +2044,9 @@ class RequestHandler {
                 })
             );
         } else {
-            throw new Error("Unable to forward request: No available WebSocket connection.");
+            throw new Error(
+                `Unable to forward request: No WebSocket connection found for authIndex=${this.currentAuthIndex}`
+            );
         }
     }
 

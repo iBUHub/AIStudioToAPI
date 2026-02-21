@@ -99,9 +99,18 @@ const Logger = {
 class ConnectionManager extends EventTarget {
     // [BrowserManager Injection Point] Do not modify the line below.
     // This line is dynamically replaced by BrowserManager.js based on WS_PORT environment variable.
-    constructor(endpoint = "ws://127.0.0.1:9998") {
+    constructor(endpoint = "ws://127.0.0.1:9998", authIndex = -1) {
         super();
+
+        // Validate authIndex: must be >= 0 for multi-context architecture
+        if (!Number.isInteger(authIndex) || authIndex < 0) {
+            const errorMsg = `❌ FATAL: Invalid authIndex (${authIndex}). BrowserManager failed to inject authIndex correctly. This is a configuration error.`;
+            console.error(errorMsg);
+            throw new Error(errorMsg);
+        }
+
         this.endpoint = endpoint;
+        this.authIndex = authIndex;
         this.socket = null;
         this.isConnected = false;
         this.reconnectDelay = 5000;
@@ -110,10 +119,12 @@ class ConnectionManager extends EventTarget {
 
     async establish() {
         if (this.isConnected) return Promise.resolve();
-        Logger.output("Connecting to server:", this.endpoint);
+        // Add authIndex to WebSocket URL for server-side identification
+        const wsUrl = this.authIndex >= 0 ? `${this.endpoint}?authIndex=${this.authIndex}` : this.endpoint;
+        Logger.output("Connecting to server:", wsUrl);
         return new Promise((resolve, reject) => {
             try {
-                this.socket = new WebSocket(this.endpoint);
+                this.socket = new WebSocket(wsUrl);
                 this.socket.addEventListener("open", () => {
                     this.isConnected = true;
                     this.reconnectAttempts = 0;
@@ -199,7 +210,7 @@ class RequestProcessor {
 
         const attemptPromise = (async () => {
             try {
-                Logger.output(`Executing request:`, requestSpec.method, requestSpec.path);
+                Logger.debug(`Executing request:`, requestSpec.method, requestSpec.path);
 
                 const requestUrl = this._constructUrl(requestSpec);
                 const requestConfig = this._buildRequestConfig(requestSpec, abortController.signal);
@@ -504,9 +515,9 @@ class RequestProcessor {
 }
 
 class ProxySystem extends EventTarget {
-    constructor(websocketEndpoint) {
+    constructor(websocketEndpoint, authIndex = -1) {
         super();
-        this.connectionManager = new ConnectionManager(websocketEndpoint);
+        this.connectionManager = new ConnectionManager(websocketEndpoint, authIndex);
         this.requestProcessor = new RequestProcessor();
         this._setupEventHandlers();
     }
@@ -572,7 +583,7 @@ class ProxySystem extends EventTarget {
     async _processProxyRequest(requestSpec) {
         const operationId = requestSpec.request_id;
         const mode = requestSpec.streaming_mode || "fake";
-        Logger.output(`Browser received request`);
+        Logger.debug(`Browser received request`);
         let cancelTimeout;
 
         try {
