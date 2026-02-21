@@ -598,8 +598,25 @@ class BrowserManager {
         });
         this.logger.info(`${logPrefix} Page loaded.`);
 
-        // Wait for page to stabilize (similar to reference implementation)
-        await this.page.waitForTimeout(3000);
+        // Wake up window with mouse movement (without clicking)
+        try {
+            await this.page.bringToFront();
+
+            // Get viewport size for realistic movement range
+            const vp = this.page.viewportSize() || { height: 1080, width: 1920 };
+
+            // Move to a random point to simulate activity
+            const randomX = Math.floor(Math.random() * (vp.width * 0.7));
+            const randomY = Math.floor(Math.random() * (vp.height * 0.7));
+            await this._simulateHumanMovement(this.page, randomX, randomY);
+
+            this.logger.info(`${logPrefix} ✅ Executed realistic mouse movement for page activation.`);
+        } catch (e) {
+            this.logger.warn(`${logPrefix} Mouse movement minor error: ${e.message}`);
+        }
+
+        // Wait for page to stabilize
+        await this.page.waitForTimeout(2000 + Math.random() * 1000);
     }
 
     /**
@@ -1387,10 +1404,7 @@ class BrowserManager {
             // Check for cookie expiration, region restrictions, and other errors
             await this._checkPageStatusAndErrors("[Browser]");
 
-            // Check if we were redirected to the wrong page BEFORE handling popups
-            await this._verifyAndRetryNavigation("[Browser]");
-
-            // Handle various popups AFTER URL check (Cookie consent, Got it, Onboarding, etc.)
+            // Handle various popups (Cookie consent, Got it, Onboarding, Continue to the app, etc.)
             await this._handlePopups("[Browser]");
 
             // Try to click Launch button if it exists (not a popup, but a page button)
@@ -1514,10 +1528,7 @@ class BrowserManager {
             // Check for cookie expiration, region restrictions, and other errors
             await this._checkPageStatusAndErrors("[Reconnect]");
 
-            // Check if we were redirected to the wrong page BEFORE handling popups
-            await this._verifyAndRetryNavigation("[Reconnect]");
-
-            // Handle various popups AFTER URL check (Cookie consent, Got it, Onboarding, etc.)
+            // Handle various popups (Cookie consent, Got it, Onboarding, Continue to the app, etc.)
             await this._handlePopups("[Reconnect]");
 
             // Try to click Launch button if it exists (not a popup, but a page button)
