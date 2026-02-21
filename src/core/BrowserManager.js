@@ -722,12 +722,6 @@ class BrowserManager {
                 selector: 'button:text("Agree")',
             },
             {
-                exitAfterClick: true,
-                logFound: `${logPrefix} ✅ Found "Continue to the app" button, clicking...`,
-                name: "Continue to the app",
-                selector: 'button:text("Continue to the app")', // Special flag to exit loop after clicking
-            },
-            {
                 logFound: `${logPrefix} ✅ Found "Got it" popup, clicking...`,
                 name: "Got it dialog",
                 selector: 'div.dialog button:text("Got it")',
@@ -748,24 +742,15 @@ class BrowserManager {
                 selector: 'button:text("Dismiss")',
             },
             {
-                logFound: `${logPrefix} ✅ Found "Not now" button, clicking...`,
-                name: "Not now button",
-                selector: 'button:text("Not now")',
-            },
-            {
-                logFound: `${logPrefix} ✅ Found "Maybe later" button, clicking...`,
-                name: "Maybe later button",
-                selector: 'button:text("Maybe later")',
-            },
-            {
                 logFound: `${logPrefix} ✅ Found "Skip" button, clicking...`,
                 name: "Skip button",
                 selector: 'button:text-is("Skip")',
             },
             {
-                logFound: `${logPrefix} ✅ Found update notification, clicking close...`,
-                name: "Update notification",
-                selector: 'button[aria-label="Close notification"]',
+                exitAfterClick: true,
+                logFound: `${logPrefix} ✅ Found "Continue to the app" button, clicking...`,
+                name: "Continue to the app",
+                selector: 'button:text("Continue to the app")',
             },
         ];
 
