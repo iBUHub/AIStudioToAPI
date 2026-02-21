@@ -165,6 +165,18 @@ class BrowserManager {
                     return false;
                 }
 
+                // Random mouse movement while waiting (30% chance per iteration)
+                if (Math.random() < 0.3) {
+                    try {
+                        const vp = this.page.viewportSize() || { height: 1080, width: 1920 };
+                        const randomX = Math.floor(Math.random() * (vp.width * 0.7));
+                        const randomY = Math.floor(Math.random() * (vp.height * 0.7));
+                        await this._simulateHumanMovement(this.page, randomX, randomY);
+                    } catch (e) {
+                        // Ignore movement errors
+                    }
+                }
+
                 // Wait before next check
                 await this.page.waitForTimeout(checkInterval);
             }
