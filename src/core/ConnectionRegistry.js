@@ -66,7 +66,7 @@ class ConnectionRegistry extends EventEmitter {
             // Attempt lightweight reconnect if callback is provided and not already reconnecting
             if (this.onConnectionLostCallback && !this.isReconnecting) {
                 this.isReconnecting = true;
-                const lightweightReconnectTimeoutMs = 55000;
+                const lightweightReconnectTimeoutMs = 180000; // 3 minutes to accommodate Code button (60s) + initialization (90s) + buffer
                 this.logger.info(
                     `[Server] Attempting lightweight reconnect (timeout ${lightweightReconnectTimeoutMs / 1000}s)...`
                 );

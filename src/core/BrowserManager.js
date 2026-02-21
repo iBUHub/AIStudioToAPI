@@ -401,12 +401,237 @@ class BrowserManager {
     }
 
     /**
+     * Helper: Load index.html content
+     * @returns {string} index.html content
+     */
+    _loadIndexHtmlContent() {
+        return fs.readFileSync(path.join(__dirname, "..", "..", "scripts", "client", "index.html"), "utf-8");
+    }
+
+    /**
+     * Helper: Detect if current page is new version AI Studio
+     * New version has Remix button and read-only content
+     * @returns {Promise<boolean>} true if new version detected
+     */
+    async _isNewVersionAIStudio() {
+        try {
+            const remixButton = this.page.locator('button:has-text("Remix")').first();
+            const isVisible = await remixButton.isVisible({ timeout: 3000 });
+            return isVisible;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    /**
+     * Helper: Handle new version AI Studio Remix flow
+     * Clicks Remix button, fills dialog, and waits for redirect
+     * @param {string} logPrefix - Log prefix for messages
+     * @param {number} authIndex - The auth index to use for saving app URL
+     */
+    async _handleNewVersionRemix(logPrefix = "[Browser]", authIndex = -1) {
+        const maxRemixAttempts = 5; // Maximum number of remix attempts
+
+        for (let attempt = 1; attempt <= maxRemixAttempts; attempt++) {
+            try {
+                if (attempt > 1) {
+                    this.logger.info(`${logPrefix} Remix attempt ${attempt}/${maxRemixAttempts}...`);
+                } else {
+                    this.logger.info(`${logPrefix} New version detected, clicking Remix button...`);
+                }
+
+                // Click Remix button
+                const remixButton = this.page.locator('button:has-text("Remix")').first();
+                await remixButton.click({ timeout: 10000 });
+
+                this.logger.info(`${logPrefix} Waiting for Remix dialog to appear...`);
+                await this.page.waitForTimeout(1000);
+
+                // Fill name field (overwrite existing content)
+                this.logger.info(`${logPrefix} Filling name field...`);
+                const nameInput = this.page.locator('input[placeholder*="name" i], input[type="text"]').first();
+                await nameInput.click({ timeout: 10000 });
+
+                // Clear the field first
+                const isMac = os.platform() === "darwin";
+                const selectAllKey = isMac ? "Meta+A" : "Control+A";
+                await this.page.keyboard.press(selectAllKey);
+                await this.page.waitForTimeout(100);
+
+                // Fill with project name
+                const appName = "AIStudioToAPI";
+                await nameInput.fill(appName);
+                this.logger.info(`${logPrefix} Filled name: ${appName}`);
+
+                // Fill description field (overwrite existing content)
+                this.logger.info(`${logPrefix} Filling description field...`);
+                const descInput = this.page.locator('textarea, input[placeholder*="description" i]').first();
+                await descInput.click({ timeout: 10000 });
+                await this.page.keyboard.press(selectAllKey);
+                await this.page.waitForTimeout(100);
+                await descInput.fill("https://github.com/iBUHub/AIStudioToAPI");
+                this.logger.info(`${logPrefix} Filled description.`);
+
+                // Click Apply button and wait for new page to open
+                this.logger.info(`${logPrefix} Clicking Apply button and waiting for new page...`);
+
+                // Set up listener for new page before clicking
+                const newPagePromise = this.context.waitForEvent("page", { timeout: 60000 });
+
+                const applyButton = this.page.locator('button:has-text("Apply")').first();
+                await applyButton.click({ timeout: 10000 });
+
+                // Wait for the new page to be created
+                this.logger.info(`${logPrefix} Waiting for new page to open...`);
+                const newPage = await newPagePromise;
+
+                // Wait for the new page to load
+                await newPage.waitForLoadState("domcontentloaded", { timeout: 60000 });
+
+                const newPageUrl = newPage.url();
+                this.logger.info(`${logPrefix} New page opened: ${newPageUrl}`);
+
+                // Close the old page and switch to the new one
+                this.logger.info(`${logPrefix} Switching to new page...`);
+
+                // Clean up old page flags and listeners before closing
+                if (this.page._earlyConsoleHandler) {
+                    try {
+                        this.page.off("console", this.page._earlyConsoleHandler);
+                        this.logger.info(`${logPrefix} Removed early console handler from old page`);
+                    } catch (e) {
+                        // Ignore errors during cleanup
+                    }
+                }
+                delete this.page._earlyInitialized;
+                delete this.page._hadSaveButton;
+                delete this.page._alreadyInitialized;
+                delete this.page._earlyConsoleHandler;
+
+                await this.page.close();
+                this.page = newPage;
+
+                // Wait for URL to change to the final /apps/{app-id} format
+                this.logger.info(`${logPrefix} Waiting for URL to change to final /apps/{app-id} format...`);
+                const maxAttempts = 30; // 30 attempts * 2 seconds = 60 seconds max
+                let finalUrl = this.page.url();
+                let urlChanged = false;
+
+                for (let i = 0; i < maxAttempts; i++) {
+                    await this.page.waitForTimeout(2000);
+                    const currentUrl = this.page.url();
+
+                    this.logger.info(`${logPrefix} [Attempt ${i + 1}/${maxAttempts}] Current URL: ${currentUrl}`);
+
+                    // Check for error message indicating remix failed
+                    const hasError = await this.page.evaluate(() => {
+                        // eslint-disable-next-line no-undef
+                        const bodyText = document.body.innerText || "";
+                        return bodyText.includes("Unable to remix") || bodyText.includes("Please try again");
+                    });
+
+                    if (hasError) {
+                        this.logger.warn(`${logPrefix} ⚠️ Detected remix error message, will retry...`);
+                        // Close error dialog if present
+                        try {
+                            const closeButton = this.page
+                                .locator('button[aria-label="Close"], button:has-text("Close")')
+                                .first();
+                            if (await closeButton.isVisible({ timeout: 2000 })) {
+                                await closeButton.click({ timeout: 5000 });
+                                this.logger.info(`${logPrefix} Closed error dialog`);
+                            }
+                        } catch (e) {
+                            // No close button found
+                        }
+                        throw new Error("Remix failed with error message");
+                    }
+
+                    // Check if URL matches the pattern /apps/{uuid}
+                    if (currentUrl.match(/\/apps\/[a-f0-9-]+/i) && !currentUrl.includes("/bundled/blank")) {
+                        finalUrl = currentUrl;
+                        urlChanged = true;
+                        this.logger.info(`${logPrefix} URL changed to final format: ${finalUrl}`);
+                        break;
+                    }
+
+                    // Try to wait for navigation
+                    try {
+                        await this.page.waitForLoadState("domcontentloaded", { timeout: 3000 });
+                    } catch (e) {
+                        // Ignore timeout, continue checking
+                    }
+                }
+
+                if (!urlChanged) {
+                    throw new Error(
+                        `Failed to reach final app page after ${maxAttempts * 2} seconds. Still on: ${finalUrl}`
+                    );
+                }
+
+                // Additional wait for page to stabilize
+                await this.page.waitForTimeout(2000);
+
+                this.logger.info(`${logPrefix} ✅ Now on: ${finalUrl}`);
+
+                // Save the app URL to auth file for future use
+                await this._saveAppUrlToAuth(authIndex, finalUrl);
+
+                return; // Success, exit the retry loop
+            } catch (error) {
+                this.logger.warn(`${logPrefix} Remix attempt ${attempt} failed: ${error.message}`);
+
+                if (attempt < maxRemixAttempts) {
+                    this.logger.info(`${logPrefix} Retrying remix (${attempt + 1}/${maxRemixAttempts})...`);
+                    await this.page.waitForTimeout(2000); // Wait before retry
+                } else {
+                    this.logger.error(`${logPrefix} All ${maxRemixAttempts} remix attempts failed`);
+                    throw new Error(`Failed to remix after ${maxRemixAttempts} attempts: ${error.message}`);
+                }
+            }
+        }
+    }
+
+    /**
+     * Helper: Save app URL to auth file
+     * Saves the new version app URL to auth file for direct access next time
+     * @param {number} authIndex - The auth index to update
+     * @param {string} appUrl - The app URL to save
+     */
+    async _saveAppUrlToAuth(authIndex, appUrl) {
+        if (authIndex < 0) return;
+
+        try {
+            const configDir = path.join(process.cwd(), "configs", "auth");
+            const authFilePath = path.join(configDir, `auth-${authIndex}.json`);
+
+            // Read original file content
+            const authData = this.authSource.getAuth(authIndex);
+            if (!authData) {
+                this.logger.warn(`[Browser] Cannot save app URL: auth source #${authIndex} not found`);
+                return;
+            }
+
+            // Save the app URL
+            authData.appUrl = appUrl;
+
+            // Write back to file
+            await fs.promises.writeFile(authFilePath, JSON.stringify(authData, null, 2));
+
+            this.logger.info(`[Browser] 💾 Saved app URL to auth file: ${appUrl}`);
+        } catch (error) {
+            this.logger.error(`[Browser] ❌ Failed to save app URL: ${error.message}`);
+        }
+    }
+
+    /**
      * Helper: Inject script into editor and activate
      * Contains the common UI interaction logic for both launchOrSwitchContext and attemptLightweightReconnect
      * @param {string} buildScriptContent - The script content to inject
      * @param {string} logPrefix - Log prefix for step messages (e.g., "[Browser]" or "[Reconnect]")
+     * @param {number} authIndex - The auth index to use for saving app URL
      */
-    async _injectScriptToEditor(buildScriptContent, logPrefix = "[Browser]") {
+    async _injectScriptToEditor(buildScriptContent, logPrefix = "[Browser]", authIndex = -1) {
         this.logger.info(`${logPrefix} Preparing UI interaction, forcefully removing all possible overlay layers...`);
         /* eslint-disable no-undef */
         await this.page.evaluate(() => {
@@ -418,34 +643,219 @@ class BrowserManager {
         });
         /* eslint-enable no-undef */
 
-        this.logger.info(`${logPrefix} (Step 1/5) Preparing to click "Code" button...`);
-        const maxTimes = 15;
-        for (let i = 1; i <= maxTimes; i++) {
-            try {
-                this.logger.info(`  [Attempt ${i}/${maxTimes}] Cleaning overlay layers and clicking...`);
-                /* eslint-disable no-undef */
-                await this.page.evaluate(() => {
-                    document.querySelectorAll("div.cdk-overlay-backdrop").forEach(el => el.remove());
-                });
-                /* eslint-enable no-undef */
-                await this.page.waitForTimeout(500);
+        // Check if we're on a saved app URL (already on new version app page)
+        const currentUrl = this.page.url();
+        const isOnSavedAppUrl = currentUrl.match(/\/apps\/[a-f0-9-]+/i) && !currentUrl.includes("/bundled/blank");
 
-                // Use Smart Click instead of hardcoded locator
-                await this._smartClickCode(this.page);
+        let isNewVersion = false;
 
-                this.logger.info("  ✅ Click successful!");
-                break;
-            } catch (error) {
-                this.logger.warn(`  [Attempt ${i}/${maxTimes}] Click failed: ${error.message.split("\n")[0]}`);
-                if (i === maxTimes) {
-                    throw new Error(`Unable to click "Code" button after multiple attempts, initialization failed.`);
+        if (isOnSavedAppUrl) {
+            // Already on saved app URL, this is definitely new version
+            // Skip Remix flow, directly wait for Code button to be enabled
+            this.logger.info(`${logPrefix} Already on saved app URL (new version), skipping Remix flow...`);
+            isNewVersion = true;
+
+            // Use the early initialization flag from launchOrSwitchContext
+            const alreadyInitialized = this.page._earlyInitialized || false;
+            if (alreadyInitialized) {
+                this.logger.info(`${logPrefix} 🎯 App was already initialized during navigation!`);
+            }
+
+            // Wait for Code button to appear and be enabled
+            // Launch button is optional and will be clicked automatically by the page if needed
+            this.logger.info(`${logPrefix} Waiting for Code button to be enabled...`);
+            const codeButton = this.page.locator('button:text("Code")').first();
+            await codeButton.waitFor({ state: "visible", timeout: 30000 });
+
+            const maxWaitForEnabled = 60; // 60 seconds max to wait for Code button to be enabled
+            let isEnabled = false;
+            for (let j = 0; j < maxWaitForEnabled; j++) {
+                // Every 10 seconds, try to click Launch button if it exists
+                if (j > 0 && j % 10 === 0) {
+                    try {
+                        const launchButton = this.page.locator('button:has-text("Launch")').first();
+                        if (await launchButton.isVisible({ timeout: 500 })) {
+                            this.logger.info(`${logPrefix} Clicking Launch button (${j}s elapsed)...`);
+                            await launchButton.click({ timeout: 5000 });
+                        }
+                    } catch (e) {
+                        // Launch button not found or not clickable, continue
+                    }
+                }
+
+                const disabled = await codeButton.getAttribute("disabled");
+                const ariaDisabled = await codeButton.getAttribute("aria-disabled");
+
+                if (disabled === null && ariaDisabled !== "true") {
+                    isEnabled = true;
+                    this.logger.info(`${logPrefix} Code button is now enabled!`);
+                    break;
+                }
+
+                if (j % 5 === 0 && j > 0) {
+                    this.logger.info(
+                        `${logPrefix} Code button still disabled, waiting... (${j + 1}/${maxWaitForEnabled}s)`
+                    );
+                }
+                await this.page.waitForTimeout(1000);
+            }
+
+            if (!isEnabled) {
+                throw new Error("Code button did not become enabled after 60 seconds");
+            }
+
+            // Store the flag for later use (re-read to capture any updates during the wait)
+            // The earlyConsoleHandler might have updated the flag during the Code button wait
+            const latestInitialized =
+                this.page._earlyInitialized || this.page._alreadyInitialized || alreadyInitialized;
+            this.page._alreadyInitialized = latestInitialized;
+            if (latestInitialized && !alreadyInitialized) {
+                this.logger.info(`${logPrefix} 🎯 Initialization detected during Code button wait!`);
+            }
+        } else {
+            // Not on saved app URL, check if this is new version and handle Remix flow
+            isNewVersion = await this._isNewVersionAIStudio();
+
+            if (isNewVersion) {
+                this.logger.info(`${logPrefix} Detected new version AI Studio, handling Remix flow...`);
+                await this._handleNewVersionRemix(logPrefix, authIndex);
+            }
+        }
+
+        this.logger.info(`${logPrefix} (Step 1/${isNewVersion ? "6" : "5"}) Preparing to click "Code" button...`);
+
+        // For new version, wait for Code button to be enabled and click once
+        if (isNewVersion && !isOnSavedAppUrl) {
+            this.logger.info(`  [New Version] Waiting for Code button to be enabled...`);
+            const codeButton = this.page.locator('button:text("Code")').first();
+
+            // Wait for button to be visible and enabled (not disabled)
+            await codeButton.waitFor({ state: "visible", timeout: 30000 });
+
+            // Check if button is enabled (wait up to 60 seconds)
+            const maxWaitForEnabled = 60;
+            let isEnabled = false;
+            for (let j = 0; j < maxWaitForEnabled; j++) {
+                // Every 10 seconds, try to click Launch button if it exists
+                if (j > 0 && j % 10 === 0) {
+                    try {
+                        const launchButton = this.page.locator('button:has-text("Launch")').first();
+                        if (await launchButton.isVisible({ timeout: 500 })) {
+                            this.logger.info(`  [New Version] Clicking Launch button (${j}s elapsed)...`);
+                            await launchButton.click({ timeout: 5000 });
+                        }
+                    } catch (e) {
+                        // Launch button not found or not clickable, continue
+                    }
+                }
+
+                const disabled = await codeButton.getAttribute("disabled");
+                const ariaDisabled = await codeButton.getAttribute("aria-disabled");
+
+                if (disabled === null && ariaDisabled !== "true") {
+                    isEnabled = true;
+                    this.logger.info(`  [New Version] Code button is now enabled!`);
+                    break;
+                }
+
+                if (j % 5 === 0 && j > 0) {
+                    this.logger.info(
+                        `  [New Version] Code button still disabled, waiting... (${j + 1}/${maxWaitForEnabled}s)`
+                    );
+                }
+                await this.page.waitForTimeout(1000);
+            }
+
+            if (!isEnabled) {
+                throw new Error("Code button did not become enabled after 60 seconds");
+            }
+
+            // New version: click once without retry
+            this.logger.info(`  [New Version] Cleaning overlay layers and clicking Code button...`);
+            /* eslint-disable no-undef */
+            await this.page.evaluate(() => {
+                document.querySelectorAll("div.cdk-overlay-backdrop").forEach(el => el.remove());
+            });
+            /* eslint-enable no-undef */
+            await this.page.waitForTimeout(500);
+
+            await this._smartClickCode(this.page);
+            this.logger.info("  ✅ Click successful!");
+        } else {
+            // Old version or saved URL: use retry loop
+            const maxTimes = 15;
+            for (let i = 1; i <= maxTimes; i++) {
+                try {
+                    this.logger.info(`  [Attempt ${i}/${maxTimes}] Cleaning overlay layers and clicking...`);
+                    /* eslint-disable no-undef */
+                    await this.page.evaluate(() => {
+                        document.querySelectorAll("div.cdk-overlay-backdrop").forEach(el => el.remove());
+                    });
+                    /* eslint-enable no-undef */
+                    await this.page.waitForTimeout(500);
+
+                    await this._smartClickCode(this.page);
+
+                    this.logger.info("  ✅ Click successful!");
+                    break;
+                } catch (error) {
+                    this.logger.warn(`  [Attempt ${i}/${maxTimes}] Click failed: ${error.message.split("\n")[0]}`);
+                    if (i === maxTimes) {
+                        throw new Error(
+                            `Unable to click "Code" button after multiple attempts, initialization failed.`
+                        );
+                    }
                 }
             }
         }
 
-        this.logger.info(
-            `${logPrefix} (Step 2/5) "Code" button clicked successfully, waiting for editor to become visible...`
-        );
+        if (isNewVersion) {
+            // New version: need to edit both index.html and index.ts
+            this.logger.info(`${logPrefix} (Step 2/6) Waiting for file tree to appear...`);
+            await this.page.waitForTimeout(2000);
+
+            // First, edit index.html
+            this.logger.info(`${logPrefix} (Step 3/6) Clicking index.html file...`);
+            const indexHtmlLocator = this.page.locator('text="index.html"').first();
+            await indexHtmlLocator.click({ timeout: 30000 });
+
+            this.logger.info(`${logPrefix} Waiting for index.html editor to become visible...`);
+            const editorContainerLocator1 = this.page.locator("div.monaco-editor").first();
+            await editorContainerLocator1.waitFor({
+                state: "visible",
+                timeout: 60000,
+            });
+
+            // Paste index.html content
+            this.logger.info(`${logPrefix} Pasting index.html content...`);
+            await editorContainerLocator1.click({ timeout: 30000 });
+
+            const indexHtmlContent = this._loadIndexHtmlContent();
+            const isMac = os.platform() === "darwin";
+            const selectAllKey = isMac ? "Meta+A" : "Control+A";
+            await this.page.keyboard.press(selectAllKey);
+            await this.page.waitForTimeout(200);
+
+            /* eslint-disable no-undef */
+            await this.page.evaluate(text => navigator.clipboard.writeText(text), indexHtmlContent);
+            /* eslint-enable no-undef */
+            const pasteKey = isMac ? "Meta+V" : "Control+V";
+            await this.page.keyboard.press(pasteKey);
+            this.logger.info(`${logPrefix} index.html content pasted.`);
+
+            // Now click index.ts file
+            this.logger.info(`${logPrefix} (Step 4/6) Clicking index.ts file...`);
+            const indexTsLocator = this.page.locator('text="index.ts"').first();
+            await indexTsLocator.click({ timeout: 30000 });
+
+            this.logger.info(`${logPrefix} (Step 5/6) Waiting for index.ts editor to become visible...`);
+        } else {
+            // Old version: editor appears directly
+            this.logger.info(
+                `${logPrefix} (Step 2/5) "Code" button clicked successfully, waiting for editor to become visible...`
+            );
+        }
+
         const editorContainerLocator = this.page.locator("div.monaco-editor").first();
         await editorContainerLocator.waitFor({
             state: "visible",
@@ -468,8 +878,18 @@ class BrowserManager {
         /* eslint-enable no-undef */
         await this.page.waitForTimeout(250);
 
-        this.logger.info(`${logPrefix} (Step 3/5) Editor displayed, focusing and pasting script...`);
+        this.logger.info(
+            `${logPrefix} (Step ${isNewVersion ? "5/6" : "3/5"}) Editor displayed, ${isNewVersion ? "selecting all and " : ""}pasting script...`
+        );
         await editorContainerLocator.click({ timeout: 30000 });
+
+        if (isNewVersion) {
+            // New version: select all existing content first
+            const isMac = os.platform() === "darwin";
+            const selectAllKey = isMac ? "Meta+A" : "Control+A";
+            await this.page.keyboard.press(selectAllKey);
+            await this.page.waitForTimeout(200);
+        }
 
         /* eslint-disable no-undef */
         await this.page.evaluate(text => navigator.clipboard.writeText(text), buildScriptContent);
@@ -477,9 +897,416 @@ class BrowserManager {
         const isMac = os.platform() === "darwin";
         const pasteKey = isMac ? "Meta+V" : "Control+V";
         await this.page.keyboard.press(pasteKey);
-        this.logger.info(`${logPrefix} (Step 4/5) Script pasted.`);
-        this.logger.info(`${logPrefix} (Step 5/5) Clicking "Preview" button to activate script...`);
+        this.logger.info(`${logPrefix} index.ts script pasted.`);
+
+        if (isNewVersion) {
+            // New version: check if Save button appears after editing files
+            this.logger.info(`${logPrefix} Checking if Save button appears (indicates file changes)...`);
+            await this.page.waitForTimeout(1000);
+
+            // Check if Save button exists and click it
+            const maxSaveWait = 10; // 10 seconds max
+            let filesSaved = false;
+            let hadSaveButton = false; // Track if Save button was present
+
+            for (let i = 0; i < maxSaveWait; i++) {
+                try {
+                    const saveButton = this.page.locator('button:has-text("Save")').first();
+                    if (await saveButton.isVisible({ timeout: 1000 })) {
+                        hadSaveButton = true; // Save button exists, meaning files were modified
+                        this.logger.info(`${logPrefix} Found Save button (files were modified), clicking to save...`);
+
+                        // Click Save button
+                        await saveButton.click({ timeout: 5000 });
+                        await this.page.waitForTimeout(1000);
+
+                        // Verify Save button disappeared (files saved)
+                        const stillVisible = await saveButton.isVisible({ timeout: 1000 }).catch(() => false);
+                        if (!stillVisible) {
+                            this.logger.info(`${logPrefix} All files saved successfully!`);
+                            filesSaved = true;
+                            break;
+                        } else {
+                            this.logger.info(`${logPrefix} Save button still visible, trying again...`);
+                        }
+                    } else {
+                        // Save button not visible, files were not modified (no changes detected)
+                        this.logger.info(`${logPrefix} No Save button found, files were not modified (no changes).`);
+                        hadSaveButton = false; // No Save button = no file changes
+                        filesSaved = true;
+                        break;
+                    }
+                } catch (e) {
+                    // Save button not found
+                    this.logger.info(`${logPrefix} No Save button found, files were not modified (no changes).`);
+                    hadSaveButton = false; // No Save button = no file changes
+                    filesSaved = true;
+                    break;
+                }
+            }
+
+            if (!filesSaved) {
+                this.logger.warn(`${logPrefix} ⚠️ Could not confirm files save, but continuing...`);
+            }
+
+            // Store whether Save button was present (indicates files were modified and need restart)
+            this.page._hadSaveButton = hadSaveButton;
+
+            // Re-check initialization status before Save button check
+            // The earlyConsoleHandler might have detected initialization during file editing
+            const currentInitStatus = this.page._earlyInitialized || this.page._alreadyInitialized || false;
+            if (currentInitStatus) {
+                this.logger.info(
+                    `${logPrefix} 🎯 App initialization detected during file editing (before Save check)!`
+                );
+                this.page._alreadyInitialized = true;
+            }
+        }
+
+        // For new version, set up second console listener after Save button click
+        let initPromise = null;
+        let secondConsoleHandler = null;
+        if (isNewVersion) {
+            // Check if Save button was present (indicates files were modified)
+            const hadSaveButton = this.page._hadSaveButton;
+
+            if (hadSaveButton) {
+                // Files were modified and saved, now set up second listener and stop first listener
+                this.logger.info(
+                    `${logPrefix} Files were saved, setting up second listener and stopping first listener...`
+                );
+
+                // Remove the early console handler (first listener)
+                if (this.page._earlyConsoleHandler) {
+                    this.page.off("console", this.page._earlyConsoleHandler);
+                    this.logger.info(`${logPrefix} Stopped first listener (early console handler)`);
+                    delete this.page._earlyConsoleHandler;
+                }
+
+                // Set up second listener
+                initPromise = new Promise((resolve, reject) => {
+                    const timeout = setTimeout(() => {
+                        reject(new Error("Timeout waiting for initialization"));
+                    }, 120000);
+
+                    secondConsoleHandler = msg => {
+                        const msgText = msg.text();
+                        if (msgText.includes("[ProxyClient]")) {
+                            if (
+                                msgText.includes("System initialization complete") ||
+                                msgText.includes("Connection successful") ||
+                                msgText.includes("waiting for server instructions")
+                            ) {
+                                clearTimeout(timeout);
+                                this.page.off("console", secondConsoleHandler);
+                                resolve();
+                            }
+                        }
+                    };
+
+                    this.page.on("console", secondConsoleHandler);
+                    this.logger.info(`${logPrefix} Started second listener (after Save)`);
+                });
+            } else {
+                // No Save button, use the early listener (already set up)
+                this.logger.info(`${logPrefix} No file changes, will use early listener (already set up)...`);
+                initPromise = Promise.resolve(); // Will be handled by early listener check
+            }
+        }
+
+        this.logger.info(
+            `${logPrefix} (Step ${isNewVersion ? "6/6" : "5/5"}) Clicking "Preview" button to activate script...`
+        );
+
         await this.page.locator('button:text("Preview")').click();
+
+        // Bring page to front to ensure it's visible
+        this.logger.info(`${logPrefix} Bringing page to front...`);
+        try {
+            await this.page.bringToFront();
+        } catch (e) {
+            this.logger.warn(`${logPrefix} Could not bring page to front: ${e.message}`);
+        }
+        await this.page.waitForTimeout(500);
+
+        // For new version, check for "concurrent updates" or "snapshot" errors and retry if needed
+        if (isNewVersion) {
+            this.logger.info(`${logPrefix} Checking for errors after Preview...`);
+            await this.page.waitForTimeout(3000); // Wait for potential error dialog
+
+            const hasError = await this.page.evaluate(() => {
+                // eslint-disable-next-line no-undef
+                const bodyText = document.body.innerText || "";
+                return {
+                    appletFailed: bodyText.includes("Failed to initialize applet"),
+                    concurrentUpdates:
+                        bodyText.includes("There are concurrent updates") || bodyText.includes("concurrent updates"),
+                    snapshotFailed:
+                        bodyText.includes("Failed to create snapshot") || bodyText.includes("Please try again"),
+                };
+            });
+
+            if (hasError.concurrentUpdates || hasError.snapshotFailed || hasError.appletFailed) {
+                const errorType = hasError.concurrentUpdates
+                    ? "concurrent updates"
+                    : hasError.snapshotFailed
+                      ? "snapshot creation failed"
+                      : "applet initialization failed";
+                this.logger.warn(`${logPrefix} ⚠️ Detected "${errorType}" error, reloading and retrying...`);
+
+                // Get current app URL
+                const currentUrl = this.page.url();
+                const appUrlMatch = currentUrl.match(/(https:\/\/aistudio\.google\.com\/apps\/[a-f0-9-]+)/i);
+
+                if (appUrlMatch) {
+                    const appUrl = appUrlMatch[1] + "?showPreview=true&showAssistant=true";
+                    this.logger.info(`${logPrefix} Reloading: ${appUrl}`);
+
+                    // Set up early console monitoring before reload (same as first time)
+                    let alreadyInitializedAfterReload = false;
+                    const earlyConsoleHandlerAfterReload = msg => {
+                        const msgText = msg.text();
+                        if (msgText.includes("[ProxyClient]")) {
+                            if (
+                                msgText.includes("System initialization complete") ||
+                                msgText.includes("Connection successful") ||
+                                msgText.includes("waiting for server instructions")
+                            ) {
+                                alreadyInitializedAfterReload = true;
+                                this.logger.info(`${logPrefix} 🎯 Detected app already initialized after reload!`);
+                            }
+                        }
+                    };
+                    this.page.on("console", earlyConsoleHandlerAfterReload);
+
+                    // Reload the app URL
+                    await this.page.goto(appUrl, {
+                        timeout: 180000,
+                        waitUntil: "domcontentloaded",
+                    });
+                    this.logger.info(`${logPrefix} Page reloaded.`);
+
+                    // Store the early initialization flag and handler reference (keep it active)
+                    this.page._earlyInitialized = alreadyInitializedAfterReload;
+                    this.page._earlyConsoleHandler = earlyConsoleHandlerAfterReload;
+
+                    // Recursively call _injectScriptToEditor to reuse the same logic
+                    // This will handle: wait for Code button, check Save button, click Preview, wait for init
+                    this.logger.info(`${logPrefix} Retrying script injection after reload...`);
+                    await this._injectScriptToEditor(buildScriptContent, logPrefix, authIndex);
+                    return; // Exit after recursive call completes
+                } else {
+                    this.logger.warn(`${logPrefix} Could not extract app URL for reload, continuing...`);
+                }
+            }
+        }
+
+        // For new version, wait for Preview to load (no Launch button click here)
+        // But skip this wait if app was already initialized
+        if (isNewVersion) {
+            const alreadyInitialized = this.page._alreadyInitialized;
+            const hadSaveButton = this.page._hadSaveButton;
+
+            if (alreadyInitialized && !hadSaveButton) {
+                this.logger.info(`${logPrefix} App already initialized, skipping Preview load wait...`);
+            } else {
+                this.logger.info(`${logPrefix} Waiting for Preview to load...`);
+                await this.page.waitForTimeout(3000); // Give preview time to appear
+            }
+        }
+
+        // Wait for "System initializing" to appear in the page
+        const maxWaitForInit = 90; // 90 seconds max
+        let systemInitialized = false;
+
+        // For new version, the preview is in a cross-origin iframe, so we can't detect the message in DOM
+        // Instead, we'll listen for console logs from the browser client
+        if (isNewVersion) {
+            // Re-check initialization status one more time before final decision
+            // The earlyConsoleHandler might have detected initialization during Preview click
+            const alreadyInitialized = this.page._alreadyInitialized || this.page._earlyInitialized || false;
+            const hadSaveButton = this.page._hadSaveButton;
+
+            this.logger.info(
+                `${logPrefix} [Status Check] alreadyInitialized=${alreadyInitialized}, hadSaveButton=${hadSaveButton}`
+            );
+
+            if (alreadyInitialized && !hadSaveButton) {
+                this.logger.info(`${logPrefix} App was already initialized and no code changes, skipping wait!`);
+                systemInitialized = true;
+                delete this.page._alreadyInitialized; // Clean up
+                delete this.page._hadSaveButton; // Clean up
+            } else if (hadSaveButton) {
+                this.logger.info(`${logPrefix} Waiting for application to load...`);
+                // Code was modified, use the second listener
+                this.logger.info(`${logPrefix} Code was modified (Save button present), waiting for app restart...`);
+                try {
+                    await initPromise;
+                    this.logger.info(
+                        `${logPrefix} Browser client initialization detected via second console listener!`
+                    );
+                    systemInitialized = true;
+                } catch (error) {
+                    this.logger.error(`${logPrefix} ❌ ${error.message}`);
+                    delete this.page._alreadyInitialized;
+                    delete this.page._hadSaveButton;
+                    throw new Error(`WebSocket connection timeout after 120 seconds. Account initialization failed.`);
+                }
+                delete this.page._alreadyInitialized;
+                delete this.page._hadSaveButton;
+            } else if (alreadyInitialized) {
+                // No Save button but already initialized - app is still running
+                this.logger.info(`${logPrefix} App was already initialized (detected by early listener)!`);
+                systemInitialized = true;
+                delete this.page._alreadyInitialized;
+                delete this.page._hadSaveButton;
+            } else {
+                this.logger.info(`${logPrefix} Waiting for application to load...`);
+                // No Save button and not initialized yet - wait for initialization
+                this.logger.info(`${logPrefix} No early initialization detected, waiting via early listener...`);
+                try {
+                    await new Promise((resolve, reject) => {
+                        const timeout = setTimeout(() => {
+                            reject(new Error("Timeout waiting for initialization via early listener"));
+                        }, 120000);
+
+                        // Set up a temporary listener to catch initialization
+                        const tempHandler = msg => {
+                            const msgText = msg.text();
+                            if (msgText.includes("[ProxyClient]")) {
+                                if (
+                                    msgText.includes("System initialization complete") ||
+                                    msgText.includes("Connection successful") ||
+                                    msgText.includes("waiting for server instructions")
+                                ) {
+                                    clearTimeout(timeout);
+                                    this.page.off("console", tempHandler);
+                                    resolve();
+                                }
+                            }
+                        };
+
+                        this.page.on("console", tempHandler);
+                    });
+                    this.logger.info(`${logPrefix} Browser client initialization detected via early listener!`);
+                    systemInitialized = true;
+                } catch (error) {
+                    this.logger.error(`${logPrefix} ❌ ${error.message}`);
+                    delete this.page._alreadyInitialized;
+                    delete this.page._hadSaveButton;
+                    throw new Error(`WebSocket connection timeout after 120 seconds. Account initialization failed.`);
+                }
+                delete this.page._alreadyInitialized;
+                delete this.page._hadSaveButton;
+            }
+        } else {
+            // Old version: can detect message in same-origin content
+            for (let i = 0; i < maxWaitForInit; i++) {
+                await this.page.waitForTimeout(1000);
+
+                // Periodically interact with the page to trigger loading
+                if (i % 5 === 0 && i > 0) {
+                    try {
+                        // Move mouse to trigger page activity (no clicking)
+                        const vp = this.page.viewportSize() || { height: 1080, width: 1920 };
+                        const randomX = Math.floor(Math.random() * (vp.width * 0.5));
+                        const randomY = Math.floor(Math.random() * (vp.height * 0.5));
+                        await this._simulateHumanMovement(this.page, randomX, randomY);
+                    } catch (e) {
+                        // Ignore interaction errors
+                    }
+                }
+
+                // Check if "System initializing" text appears in the page or iframe
+                const hasInitMessage = await this.page.evaluate(() => {
+                    // Check main page
+                    // eslint-disable-next-line no-undef
+                    const bodyText = document.body.innerText || "";
+                    if (
+                        bodyText.includes("System initializing") ||
+                        bodyText.includes("System initialization") ||
+                        bodyText.includes("Connecting to server") ||
+                        bodyText.includes("Connection successful")
+                    ) {
+                        return true;
+                    }
+
+                    // Try to check same-origin iframes (old version)
+                    // eslint-disable-next-line no-undef
+                    const iframes = document.querySelectorAll("iframe");
+                    for (const iframe of iframes) {
+                        try {
+                            // Try to access iframe content (only works for same-origin)
+                            const iframeBody = iframe.contentDocument?.body?.innerText || "";
+                            if (
+                                iframeBody.includes("System initializing") ||
+                                iframeBody.includes("System initialization") ||
+                                iframeBody.includes("Connecting to server") ||
+                                iframeBody.includes("Connection successful")
+                            ) {
+                                return true;
+                            }
+                        } catch (e) {
+                            // Cross-origin iframe, cannot access content
+                        }
+                    }
+
+                    return false;
+                });
+
+                if (hasInitMessage) {
+                    systemInitialized = true;
+                    this.logger.info(`${logPrefix} "System initializing" message detected!`);
+                    break;
+                }
+
+                if (i % 10 === 0 && i > 0) {
+                    this.logger.info(
+                        `${logPrefix} Still waiting for system initialization... (${i}/${maxWaitForInit}s)`
+                    );
+
+                    // Debug: Log current page content every 10 seconds
+                    if (i % 10 === 0) {
+                        try {
+                            const debugInfo = await this.page.evaluate(() => {
+                                // eslint-disable-next-line no-undef
+                                const mainText = document.body.innerText.substring(0, 200);
+                                // eslint-disable-next-line no-undef
+                                const iframes = document.querySelectorAll("iframe");
+                                const iframeInfo = [];
+                                for (const iframe of iframes) {
+                                    try {
+                                        iframeInfo.push({
+                                            src: iframe.src || "no-src",
+                                            title: iframe.title || "no-title",
+                                        });
+                                    } catch (e) {
+                                        iframeInfo.push({ error: "access-denied" });
+                                    }
+                                }
+                                return { iframeCount: iframes.length, iframeInfo, mainText };
+                            });
+                            this.logger.info(`${logPrefix} [Debug] Main page text: "${debugInfo.mainText}..."`);
+                            this.logger.info(`${logPrefix} [Debug] Iframe count: ${debugInfo.iframeCount}`);
+                            if (debugInfo.iframeInfo.length > 0) {
+                                this.logger.info(
+                                    `${logPrefix} [Debug] Iframe info: ${JSON.stringify(debugInfo.iframeInfo)}`
+                                );
+                            }
+                        } catch (e) {
+                            // Ignore debug errors
+                        }
+                    }
+                }
+            }
+
+            if (!systemInitialized) {
+                this.logger.warn(
+                    `${logPrefix} ⚠️ "System initializing" message did not appear after ${maxWaitForInit} seconds, but continuing...`
+                );
+            }
+        }
+
         this.logger.info(`${logPrefix} ✅ UI interaction complete, script is now running.`);
 
         // Active Trigger (Hack to wake up Google Backend)
@@ -506,16 +1333,90 @@ class BrowserManager {
      * Helper: Navigate to target page and wake up the page
      * Contains the common navigation and page activation logic
      * @param {string} logPrefix - Log prefix for messages (e.g., "[Browser]" or "[Reconnect]")
+     * @param {number} authIndex - The auth index to use for loading saved app URL
      */
-    async _navigateAndWakeUpPage(logPrefix = "[Browser]") {
+    async _navigateAndWakeUpPage(logPrefix = "[Browser]", authIndex = -1) {
         this.logger.info(`${logPrefix} Navigating to target page...`);
-        const targetUrl =
-            "https://aistudio.google.com/u/0/apps/bundled/blank?showPreview=true&showCode=true&showAssistant=true";
+
+        // Check if we have a saved app URL for this account
+        let targetUrl = "https://aistudio.google.com/u/0/apps/bundled/blank?showPreview=true&showAssistant=true";
+        let usingSavedUrl = false;
+
+        if (authIndex >= 0) {
+            try {
+                const authData = this.authSource.getAuth(authIndex);
+                if (authData && authData.appUrl) {
+                    targetUrl = authData.appUrl;
+                    usingSavedUrl = true;
+                    this.logger.info(`${logPrefix} Found saved app URL, attempting direct access: ${targetUrl}`);
+                }
+            } catch (e) {
+                this.logger.warn(`${logPrefix} Failed to check for saved app URL: ${e.message}`);
+            }
+        }
+
         await this.page.goto(targetUrl, {
             timeout: 180000,
             waitUntil: "domcontentloaded",
         });
         this.logger.info(`${logPrefix} Page loaded.`);
+
+        // If we used a saved URL, check if the page is valid (not "Page not found" and not login redirect)
+        if (usingSavedUrl) {
+            await this.page.waitForTimeout(2000); // Wait for page to render
+
+            const currentUrl = this.page.url();
+            let pageTitle = "";
+            try {
+                pageTitle = await this.page.title();
+            } catch (e) {
+                this.logger.warn(`${logPrefix} Unable to get page title: ${e.message}`);
+            }
+
+            this.logger.info(`${logPrefix} [Diagnostic] URL: ${currentUrl}`);
+            this.logger.info(`${logPrefix} [Diagnostic] Title: "${pageTitle}"`);
+
+            // Check for cookie expiration (redirected to login page)
+            if (
+                currentUrl.includes("accounts.google.com") ||
+                currentUrl.includes("ServiceLogin") ||
+                pageTitle.includes("Sign in") ||
+                pageTitle.includes("登录")
+            ) {
+                this.logger.error(`${logPrefix} 🚨 Cookie expired/invalid! Redirected to Google login page.`);
+                throw new Error(
+                    "🚨 Cookie expired/invalid! Browser was redirected to Google login page. Please re-extract storageState."
+                );
+            }
+
+            // Check for page not found
+            const isPageNotFound = await this.page.evaluate(() => {
+                // eslint-disable-next-line no-undef
+                const bodyText = document.body.innerText || "";
+                return (
+                    bodyText.includes("Page not found") || bodyText.includes("404") || bodyText.includes("not found")
+                );
+            });
+
+            if (isPageNotFound) {
+                this.logger.warn(
+                    `${logPrefix} ⚠️ Saved app URL is invalid (Page not found), falling back to blank page...`
+                );
+
+                // Clear the invalid app URL from auth file
+                await this._clearAppUrlFromAuth(authIndex);
+
+                // Navigate to blank page instead
+                targetUrl = "https://aistudio.google.com/u/0/apps/bundled/blank?showPreview=true&showAssistant=true";
+                await this.page.goto(targetUrl, {
+                    timeout: 180000,
+                    waitUntil: "domcontentloaded",
+                });
+                this.logger.info(`${logPrefix} Navigated to blank page after invalid URL.`);
+            } else {
+                this.logger.info(`${logPrefix} Saved app URL is valid, continuing...`);
+            }
+        }
 
         // Wake up window using JS and Human Movement
         try {
@@ -540,6 +1441,36 @@ class BrowserManager {
             this.logger.warn(`${logPrefix} Wakeup minor error: ${e.message}`);
         }
         await this.page.waitForTimeout(2000 + Math.random() * 2000);
+    }
+
+    /**
+     * Helper: Clear app URL from auth file
+     * Removes the saved app URL when it becomes invalid
+     * @param {number} authIndex - The auth index to update
+     */
+    async _clearAppUrlFromAuth(authIndex) {
+        if (authIndex < 0) return;
+
+        try {
+            const configDir = path.join(process.cwd(), "configs", "auth");
+            const authFilePath = path.join(configDir, `auth-${authIndex}.json`);
+
+            // Read original file content
+            const authData = this.authSource.getAuth(authIndex);
+            if (!authData) {
+                return;
+            }
+
+            // Remove the app URL
+            delete authData.appUrl;
+
+            // Write back to file
+            await fs.promises.writeFile(authFilePath, JSON.stringify(authData, null, 2));
+
+            this.logger.info(`[Browser] 🗑️ Cleared invalid app URL from auth file`);
+        } catch (error) {
+            this.logger.error(`[Browser] ❌ Failed to clear app URL: ${error.message}`);
+        }
     }
 
     /**
@@ -1077,6 +2008,23 @@ class BrowserManager {
 
         if (this.context) {
             this.logger.info("[Browser] Closing old API browser context...");
+
+            // Clean up page-level flags and listeners before closing context
+            if (this.page) {
+                if (this.page._earlyConsoleHandler) {
+                    try {
+                        this.page.off("console", this.page._earlyConsoleHandler);
+                        this.logger.info("[Browser] Removed early console handler before context close");
+                    } catch (e) {
+                        // Ignore errors during cleanup
+                    }
+                }
+                delete this.page._earlyInitialized;
+                delete this.page._hadSaveButton;
+                delete this.page._alreadyInitialized;
+                delete this.page._earlyConsoleHandler;
+            }
+
             const closePromise = this.context.close();
             const timeoutPromise = new Promise(r => setTimeout(r, 5000)); // 5秒超时
             await Promise.race([closePromise, timeoutPromise]);
@@ -1147,7 +2095,27 @@ class BrowserManager {
                 }
             });
 
-            await this._navigateAndWakeUpPage("[Browser]");
+            // Set up early console monitoring for saved URL scenario
+            // This needs to be done before navigation because app might auto-start
+            let alreadyInitialized = false;
+            const earlyConsoleHandler = msg => {
+                const msgText = msg.text();
+                if (msgText.includes("[ProxyClient]")) {
+                    if (
+                        msgText.includes("System initialization complete") ||
+                        msgText.includes("Connection successful") ||
+                        msgText.includes("waiting for server instructions")
+                    ) {
+                        alreadyInitialized = true;
+                        this.page._earlyInitialized = true; // Update the flag immediately
+                        this.page._alreadyInitialized = true; // Also update _alreadyInitialized
+                        this.logger.info(`[Browser] 🎯 Detected app already initialized during navigation!`);
+                    }
+                }
+            };
+            this.page.on("console", earlyConsoleHandler);
+
+            await this._navigateAndWakeUpPage("[Browser]", authIndex);
 
             // Check for cookie expiration, region restrictions, and other errors
             await this._checkPageStatusAndErrors("[Browser]");
@@ -1155,7 +2123,12 @@ class BrowserManager {
             // Handle various popups (Cookie consent, Got it, Onboarding, etc.)
             await this._handlePopups("[Browser]");
 
-            await this._injectScriptToEditor(buildScriptContent, "[Browser]");
+            // Store the early initialization flag and keep the handler reference
+            // Keep it active for the entire process
+            this.page._earlyInitialized = alreadyInitialized;
+            this.page._earlyConsoleHandler = earlyConsoleHandler; // Store reference for later removal
+
+            await this._injectScriptToEditor(buildScriptContent, "[Browser]", authIndex);
 
             // Start background wakeup service - only started here during initial browser launch
             this._startBackgroundWakeup();
@@ -1221,8 +2194,28 @@ class BrowserManager {
             // Load and configure the build.js script using the shared helper
             const buildScriptContent = this._loadAndConfigureBuildScript();
 
+            // Set up early console monitoring for reconnect scenario
+            // This listener will stay active throughout the entire reconnect process
+            let alreadyInitialized = false;
+            const earlyConsoleHandler = msg => {
+                const msgText = msg.text();
+                if (msgText.includes("[ProxyClient]")) {
+                    if (
+                        msgText.includes("System initialization complete") ||
+                        msgText.includes("Connection successful") ||
+                        msgText.includes("waiting for server instructions")
+                    ) {
+                        alreadyInitialized = true;
+                        this.page._earlyInitialized = true; // Update the flag immediately
+                        this.page._alreadyInitialized = true; // Also update _alreadyInitialized
+                        this.logger.info(`[Reconnect] 🎯 Detected app initialized!`);
+                    }
+                }
+            };
+            this.page.on("console", earlyConsoleHandler);
+
             // Navigate to target page and wake it up
-            await this._navigateAndWakeUpPage("[Reconnect]");
+            await this._navigateAndWakeUpPage("[Reconnect]", authIndex);
 
             // Check for cookie expiration, region restrictions, and other errors
             await this._checkPageStatusAndErrors("[Reconnect]");
@@ -1230,8 +2223,12 @@ class BrowserManager {
             // Handle various popups (Cookie consent, Got it, Onboarding, etc.)
             await this._handlePopups("[Reconnect]");
 
+            // Store the early initialization flag and keep the handler reference
+            this.page._earlyInitialized = alreadyInitialized;
+            this.page._earlyConsoleHandler = earlyConsoleHandler; // Store reference for later removal
+
             // Use shared script injection helper with [Reconnect] log prefix
-            await this._injectScriptToEditor(buildScriptContent, "[Reconnect]");
+            await this._injectScriptToEditor(buildScriptContent, "[Reconnect]", authIndex);
 
             // [Auth Update] Save the refreshed cookies to the auth file immediately
             await this._updateAuthFile(authIndex);
@@ -1263,6 +2260,23 @@ class BrowserManager {
         }
         if (this.browser) {
             this.logger.info("[Browser] Closing main browser instance...");
+
+            // Clean up page-level flags and listeners before closing
+            if (this.page) {
+                if (this.page._earlyConsoleHandler) {
+                    try {
+                        this.page.off("console", this.page._earlyConsoleHandler);
+                        this.logger.info("[Browser] Removed early console handler before close");
+                    } catch (e) {
+                        // Ignore errors during cleanup
+                    }
+                }
+                delete this.page._earlyInitialized;
+                delete this.page._hadSaveButton;
+                delete this.page._alreadyInitialized;
+                delete this.page._earlyConsoleHandler;
+            }
+
             try {
                 // Give close() 5 seconds, otherwise force proceed
                 await Promise.race([this.browser.close(), new Promise(resolve => setTimeout(resolve, 5000))]);

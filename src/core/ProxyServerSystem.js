@@ -134,6 +134,13 @@ class ProxyServerSystem extends EventEmitter {
                 this.requestHandler.authSwitcher.isSystemBusy = true;
                 await this.browserManager.launchOrSwitchContext(index);
 
+                // Wait for WebSocket connection to be established
+                this.logger.info(`[System] Waiting for WebSocket connection to be established...`);
+                const connectionEstablished = await this._waitForWebSocketConnection(90000);
+                if (!connectionEstablished) {
+                    throw new Error("WebSocket connection not established within 90 seconds");
+                }
+
                 isStarted = true;
                 this.logger.info(`[System] ✅ Successfully started with account #${index}!`);
                 break;
@@ -511,6 +518,27 @@ class ProxyServerSystem extends EventEmitter {
                 });
             });
         });
+    }
+
+    /**
+     * Wait for WebSocket connection to be established
+     * @param {number} timeoutMs - Maximum time to wait in milliseconds
+     * @returns {Promise<boolean>} true if connection established, false if timeout
+     */
+    async _waitForWebSocketConnection(timeoutMs = 90000) {
+        const startTime = Date.now();
+        const checkInterval = 200; // Check every 200ms
+
+        while (Date.now() - startTime < timeoutMs) {
+            if (this.connectionRegistry.hasActiveConnections()) {
+                this.logger.info(`[System] ✅ WebSocket connection established after ${Date.now() - startTime}ms`);
+                return true;
+            }
+            await new Promise(resolve => setTimeout(resolve, checkInterval));
+        }
+
+        this.logger.error(`[System] ❌ WebSocket connection not established after ${timeoutMs}ms`);
+        return false;
     }
 }
 
