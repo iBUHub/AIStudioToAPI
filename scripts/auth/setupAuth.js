@@ -12,9 +12,6 @@ const os = require("os");
 const path = require("path");
 const readline = require("readline");
 
-// Load environment variables from .env file
-require("dotenv").config({ path: path.resolve(__dirname, "..", "..", ".env") });
-
 const DEFAULT_CAMOUFOX_VERSION = "135.0.1-beta.24";
 const GITHUB_RELEASE_TAG_PREFIX = "v";
 
@@ -446,6 +443,10 @@ const ensureNodeModules = () => {
     execOrThrow(npmCommand(), ["install"], { cwd: PROJECT_ROOT, shell: true });
 };
 
+const loadEnvConfig = () => {
+    require("dotenv").config({ path: path.resolve(__dirname, "..", "..", ".env") });
+};
+
 const runSaveAuth = camoufoxExecutablePath => {
     console.log(getText("[4/4] 启动认证保存工具...", "[4/4] Starting auth save tool..."));
     console.log("");
@@ -497,6 +498,7 @@ const main = async () => {
     console.log("");
 
     ensureNodeModules();
+    loadEnvConfig();
 
     let camoufoxExecutablePath = process.env.CAMOUFOX_EXECUTABLE_PATH;
     if (!camoufoxExecutablePath) {
