@@ -55,7 +55,7 @@ class ConnectionRegistry extends EventEmitter {
             clearTimeout(this.reconnectGraceTimer);
         }
 
-        this.logger.info("[Server] Starting 5-second reconnect grace period...");
+        this.logger.info("[Server] Starting 10-second reconnect grace period...");
         this.reconnectGraceTimer = setTimeout(async () => {
             this.logger.info(
                 "[Server] Grace period ended, no reconnection detected. Connection lost confirmed, cleaning up all pending requests..."
@@ -66,7 +66,7 @@ class ConnectionRegistry extends EventEmitter {
             // Attempt lightweight reconnect if callback is provided and not already reconnecting
             if (this.onConnectionLostCallback && !this.isReconnecting) {
                 this.isReconnecting = true;
-                const lightweightReconnectTimeoutMs = 55000;
+                const lightweightReconnectTimeoutMs = 50000;
                 this.logger.info(
                     `[Server] Attempting lightweight reconnect (timeout ${lightweightReconnectTimeoutMs / 1000}s)...`
                 );
@@ -94,7 +94,7 @@ class ConnectionRegistry extends EventEmitter {
             this.emit("connectionLost");
 
             this.reconnectGraceTimer = null;
-        }, 5000);
+        }, 10000);
 
         this.emit("connectionRemoved", websocket);
     }
