@@ -42,7 +42,6 @@ class BrowserManager {
 
         // Target URL for AI Studio app
         this.targetUrl = "https://ai.studio/apps/0400c62c-9bcb-48c1-b056-9b5cf4cb5603";
-        this.expectedAppId = "0400c62c-9bcb-48c1-b056-9b5cf4cb5603";
 
         // Firefox/Camoufox does not use Chromium-style command line args.
         // We keep this empty; Camoufox has its own anti-fingerprinting optimizations built-in.
@@ -115,7 +114,7 @@ class BrowserManager {
      */
     async _checkPageErrors() {
         try {
-            const hasError = await this.page.evaluate(() => {
+            return await this.page.evaluate(() => {
                 // eslint-disable-next-line no-undef
                 const bodyText = document.body.innerText || "";
                 return {
@@ -126,7 +125,6 @@ class BrowserManager {
                         bodyText.includes("Failed to create snapshot") || bodyText.includes("Please try again"),
                 };
             });
-            return hasError;
         } catch (e) {
             return { appletFailed: false, concurrentUpdates: false, snapshotFailed: false };
         }
@@ -378,110 +376,110 @@ class BrowserManager {
      * Feature: Smart "Code" Button Clicking
      * Tries multiple selectors (Code, Develop, Edit, Icons) to be robust against UI changes.
      */
-    async _smartClickCode(page) {
-        const selectors = [
-            // Priority 1: Exact text match (Fastest)
-            'button:text("Code")',
-            // Priority 2: Alternative texts used by Google
-            'button:text("Develop")',
-            'button:text("Edit")',
-            // Priority 3: Fuzzy attribute matching
-            'button[aria-label*="Code"]',
-            'button[aria-label*="code"]',
-            // Priority 4: Icon based
-            'button mat-icon:text("code")',
-            'button span:has-text("Code")',
-        ];
-
-        this.logger.info('[Browser] Trying to locate "Code" entry point using smart selectors...');
-
-        for (const selector of selectors) {
-            try {
-                // Use a short timeout for quick fail-over
-                const element = page.locator(selector).first();
-                if (await element.isVisible({ timeout: 2000 })) {
-                    this.logger.info(`[Browser] ✅ Smart match: "${selector}", clicking...`);
-                    // Direct click with force as per new logic
-                    await element.click({ force: true, timeout: 10000 });
-                    return true;
-                }
-            } catch (e) {
-                // Ignore timeout for single selector, try next
-            }
-        }
-
-        throw new Error('Unable to find "Code" button or alternatives (Smart Click Failed)');
-    }
+    // async _smartClickCode(page) {
+    //     const selectors = [
+    //         // Priority 1: Exact text match (Fastest)
+    //         'button:text("Code")',
+    //         // Priority 2: Alternative texts used by Google
+    //         'button:text("Develop")',
+    //         'button:text("Edit")',
+    //         // Priority 3: Fuzzy attribute matching
+    //         'button[aria-label*="Code"]',
+    //         'button[aria-label*="code"]',
+    //         // Priority 4: Icon based
+    //         'button mat-icon:text("code")',
+    //         'button span:has-text("Code")',
+    //     ];
+    //
+    //     this.logger.info('[Browser] Trying to locate "Code" entry point using smart selectors...');
+    //
+    //     for (const selector of selectors) {
+    //         try {
+    //             // Use a short timeout for quick fail-over
+    //             const element = page.locator(selector).first();
+    //             if (await element.isVisible({ timeout: 2000 })) {
+    //                 this.logger.info(`[Browser] ✅ Smart match: "${selector}", clicking...`);
+    //                 // Direct click with force as per new logic
+    //                 await element.click({ force: true, timeout: 10000 });
+    //                 return true;
+    //             }
+    //         } catch (e) {
+    //             // Ignore timeout for single selector, try next
+    //         }
+    //     }
+    //
+    //     throw new Error('Unable to find "Code" button or alternatives (Smart Click Failed)');
+    // }
 
     /**
      * Helper: Load and configure build.js script content
      * Applies environment-specific configurations (TARGET_DOMAIN, LOG_LEVEL)
      * @returns {string} Configured build.js script content
      */
-    _loadAndConfigureBuildScript() {
-        let buildScriptContent = fs.readFileSync(
-            path.join(__dirname, "..", "..", "scripts", "client", "build.js"),
-            "utf-8"
-        );
-
-        if (process.env.TARGET_DOMAIN) {
-            const lines = buildScriptContent.split("\n");
-            let domainReplaced = false;
-            for (let i = 0; i < lines.length; i++) {
-                if (lines[i].includes("this.targetDomain =")) {
-                    this.logger.info(`[Config] Found targetDomain line: ${lines[i]}`);
-                    lines[i] = `        this.targetDomain = "${process.env.TARGET_DOMAIN}";`;
-                    this.logger.info(`[Config] Replaced with: ${lines[i]}`);
-                    domainReplaced = true;
-                    break;
-                }
-            }
-            if (domainReplaced) {
-                buildScriptContent = lines.join("\n");
-            } else {
-                this.logger.warn("[Config] Failed to find targetDomain line in build.js, ignoring.");
-            }
-        }
-
-        if (process.env.WS_PORT) {
-            // WS_PORT environment variable is no longer supported
-            this.logger.error(
-                `[Config] ❌ WS_PORT environment variable is deprecated and no longer supported. ` +
-                    `The WebSocket port is now fixed at 9998. Please remove WS_PORT from your .env file.`
-            );
-            // Do not modify the default WS_PORT - keep it at 9998
-        }
-
-        // Inject LOG_LEVEL configuration into build.js
-        // Read from LoggingService.currentLevel instead of environment variable
-        // This ensures runtime log level changes are respected when browser restarts
-        const LoggingService = require("../utils/LoggingService");
-        const currentLogLevel = LoggingService.currentLevel; // 0=DEBUG, 1=INFO, 2=WARN, 3=ERROR
-        const currentLogLevelName = LoggingService.getLevel(); // "DEBUG", "INFO", etc.
-
-        if (currentLogLevel !== 1) {
-            const lines = buildScriptContent.split("\n");
-            let levelReplaced = false;
-            for (let i = 0; i < lines.length; i++) {
-                // Match "currentLevel: <number>," pattern, ignoring comments
-                // This is more robust than looking for specific comments like "// Default: INFO"
-                if (/^\s*currentLevel:\s*\d+/.test(lines[i])) {
-                    this.logger.info(`[Config] Found LOG_LEVEL config line: ${lines[i]}`);
-                    lines[i] = `    currentLevel: ${currentLogLevel}, // Injected: ${currentLogLevelName}`;
-                    this.logger.info(`[Config] Replaced with: ${lines[i]}`);
-                    levelReplaced = true;
-                    break;
-                }
-            }
-            if (levelReplaced) {
-                buildScriptContent = lines.join("\n");
-            } else {
-                this.logger.warn("[Config] Failed to find LOG_LEVEL config line in build.js, using default INFO.");
-            }
-        }
-
-        return buildScriptContent;
-    }
+    // _loadAndConfigureBuildScript() {
+    //     let buildScriptContent = fs.readFileSync(
+    //         path.join(__dirname, "..", "..", "scripts", "client", "build.js"),
+    //         "utf-8"
+    //     );
+    //
+    //     if (process.env.TARGET_DOMAIN) {
+    //         const lines = buildScriptContent.split("\n");
+    //         let domainReplaced = false;
+    //         for (let i = 0; i < lines.length; i++) {
+    //             if (lines[i].includes("this.targetDomain =")) {
+    //                 this.logger.info(`[Config] Found targetDomain line: ${lines[i]}`);
+    //                 lines[i] = `        this.targetDomain = "${process.env.TARGET_DOMAIN}";`;
+    //                 this.logger.info(`[Config] Replaced with: ${lines[i]}`);
+    //                 domainReplaced = true;
+    //                 break;
+    //             }
+    //         }
+    //         if (domainReplaced) {
+    //             buildScriptContent = lines.join("\n");
+    //         } else {
+    //             this.logger.warn("[Config] Failed to find targetDomain line in build.js, ignoring.");
+    //         }
+    //     }
+    //
+    //     if (process.env.WS_PORT) {
+    //         // WS_PORT environment variable is no longer supported
+    //         this.logger.error(
+    //             `[Config] ❌ WS_PORT environment variable is deprecated and no longer supported. ` +
+    //                 `The WebSocket port is now fixed at 9998. Please remove WS_PORT from your .env file.`
+    //         );
+    //         // Do not modify the default WS_PORT - keep it at 9998
+    //     }
+    //
+    //     // Inject LOG_LEVEL configuration into build.js
+    //     // Read from LoggingService.currentLevel instead of environment variable
+    //     // This ensures runtime log level changes are respected when browser restarts
+    //     const LoggingService = require("../utils/LoggingService");
+    //     const currentLogLevel = LoggingService.currentLevel; // 0=DEBUG, 1=INFO, 2=WARN, 3=ERROR
+    //     const currentLogLevelName = LoggingService.getLevel(); // "DEBUG", "INFO", etc.
+    //
+    //     if (currentLogLevel !== 1) {
+    //         const lines = buildScriptContent.split("\n");
+    //         let levelReplaced = false;
+    //         for (let i = 0; i < lines.length; i++) {
+    //             // Match "currentLevel: <number>," pattern, ignoring comments
+    //             // This is more robust than looking for specific comments like "// Default: INFO"
+    //             if (/^\s*currentLevel:\s*\d+/.test(lines[i])) {
+    //                 this.logger.info(`[Config] Found LOG_LEVEL config line: ${lines[i]}`);
+    //                 lines[i] = `    currentLevel: ${currentLogLevel}, // Injected: ${currentLogLevelName}`;
+    //                 this.logger.info(`[Config] Replaced with: ${lines[i]}`);
+    //                 levelReplaced = true;
+    //                 break;
+    //             }
+    //         }
+    //         if (levelReplaced) {
+    //             buildScriptContent = lines.join("\n");
+    //         } else {
+    //             this.logger.warn("[Config] Failed to find LOG_LEVEL config line in build.js, using default INFO.");
+    //         }
+    //     }
+    //
+    //     return buildScriptContent;
+    // }
 
     /**
      * Helper: Send active trigger and start health monitor
@@ -549,42 +547,42 @@ class BrowserManager {
      * @param {string} logPrefix - Log prefix for messages (e.g., "[Browser]" or "[Reconnect]")
      * @throws {Error} If navigation fails after retry
      */
-    async _verifyAndRetryNavigation(logPrefix = "[Browser]") {
-        let currentUrl = this.page.url();
-
-        if (!currentUrl.includes(this.expectedAppId)) {
-            this.logger.warn(`${logPrefix} ⚠️ Page redirected to: ${currentUrl}`);
-            this.logger.info(`${logPrefix} Expected app ID: ${this.expectedAppId}`);
-            this.logger.info(`${logPrefix} Attempting to navigate again...`);
-
-            // Reset WebSocket initialization flags before re-navigation
-            this._wsInitSuccess = false;
-            this._wsInitFailed = false;
-
-            // Wait a bit before retrying
-            await this.page.waitForTimeout(2000);
-
-            // Try navigating again
-            await this.page.goto(this.targetUrl, {
-                timeout: 180000,
-                waitUntil: "domcontentloaded",
-            });
-            await this.page.waitForTimeout(2000);
-
-            // Check URL again
-            currentUrl = this.page.url();
-            if (!currentUrl.includes(this.expectedAppId)) {
-                this.logger.error(`${logPrefix} ❌ Still on wrong page after retry: ${currentUrl}`);
-                throw new Error(
-                    `Failed to navigate to correct page. Current URL: ${currentUrl}, Expected app ID: ${this.expectedAppId}`
-                );
-            } else {
-                this.logger.info(`${logPrefix} ✅ Successfully navigated to correct page on retry: ${currentUrl}`);
-            }
-        } else {
-            this.logger.info(`${logPrefix} ✅ Confirmed on correct page: ${currentUrl}`);
-        }
-    }
+    // async _verifyAndRetryNavigation(logPrefix = "[Browser]") {
+    //     let currentUrl = this.page.url();
+    //
+    //     if (!currentUrl.includes(this.expectedAppId)) {
+    //         this.logger.warn(`${logPrefix} ⚠️ Page redirected to: ${currentUrl}`);
+    //         this.logger.info(`${logPrefix} Expected app ID: ${this.expectedAppId}`);
+    //         this.logger.info(`${logPrefix} Attempting to navigate again...`);
+    //
+    //         // Reset WebSocket initialization flags before re-navigation
+    //         this._wsInitSuccess = false;
+    //         this._wsInitFailed = false;
+    //
+    //         // Wait a bit before retrying
+    //         await this.page.waitForTimeout(2000);
+    //
+    //         // Try navigating again
+    //         await this.page.goto(this.targetUrl, {
+    //             timeout: 180000,
+    //             waitUntil: "domcontentloaded",
+    //         });
+    //         await this.page.waitForTimeout(2000);
+    //
+    //         // Check URL again
+    //         currentUrl = this.page.url();
+    //         if (!currentUrl.includes(this.expectedAppId)) {
+    //             this.logger.error(`${logPrefix} ❌ Still on wrong page after retry: ${currentUrl}`);
+    //             throw new Error(
+    //                 `Failed to navigate to correct page. Current URL: ${currentUrl}, Expected app ID: ${this.expectedAppId}`
+    //             );
+    //         } else {
+    //             this.logger.info(`${logPrefix} ✅ Successfully navigated to correct page on retry: ${currentUrl}`);
+    //         }
+    //     } else {
+    //         this.logger.info(`${logPrefix} ✅ Confirmed on correct page: ${currentUrl}`);
+    //     }
+    // }
 
     /**
      * Helper: Check page status and detect various error conditions
