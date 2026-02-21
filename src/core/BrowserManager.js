@@ -737,11 +737,6 @@ class BrowserManager {
                 selector: 'button[aria-label="Close"]',
             },
             {
-                logFound: `${logPrefix} ✅ Found "Dismiss" button, clicking...`,
-                name: "Dismiss button",
-                selector: 'button:text("Dismiss")',
-            },
-            {
                 logFound: `${logPrefix} ✅ Found "Skip" button, clicking...`,
                 name: "Skip button",
                 selector: 'button:text-is("Skip")',
@@ -941,13 +936,11 @@ class BrowserManager {
                     }
                 }
 
-                // 2. Anti-Timeout: Click top-left corner (1,1) every ~1 minute (15 ticks)
+                // 2. Anti-Timeout: Move mouse to top-left corner (1,1) every ~1 minute (15 ticks)
+                // Note: Only move, do not click to avoid triggering page elements
                 if (tickCount % 15 === 0) {
                     try {
                         await this._simulateHumanMovement(page, 1, 1);
-                        await page.mouse.down();
-                        await page.waitForTimeout(100 + Math.random() * 100);
-                        await page.mouse.up();
                     } catch (e) {
                         /* empty */
                     }
@@ -1335,7 +1328,7 @@ class BrowserManager {
 
             this.page = await this.context.newPage();
 
-            // Pure JS Wakeup (Focus & Click)
+            // Pure JS Wakeup (Focus & Mouse Movement)
             try {
                 await this.page.bringToFront();
                 // eslint-disable-next-line no-undef
@@ -1345,10 +1338,7 @@ class BrowserManager {
                 const startX = Math.floor(Math.random() * (vp.width * 0.5));
                 const startY = Math.floor(Math.random() * (vp.height * 0.5));
                 await this._simulateHumanMovement(this.page, startX, startY);
-                await this.page.mouse.down();
-                await this.page.waitForTimeout(100);
-                await this.page.mouse.up();
-                this.logger.info("[Browser] ⚡ Forced window wake-up via JS focus.");
+                this.logger.info("[Browser] ⚡ Forced window wake-up via JS focus and mouse movement.");
             } catch (e) {
                 this.logger.warn(`[Browser] Wakeup minor error: ${e.message}`);
             }
@@ -1507,6 +1497,11 @@ class BrowserManager {
         }
 
         try {
+            // Reset WebSocket initialization flags to ensure clean state for reconnection
+            this._wsInitSuccess = false;
+            this._wsInitFailed = false;
+            this.logger.info("[Reconnect] Reset WebSocket initialization flags");
+
             // Navigate to target page and wake it up
             await this._navigateAndWakeUpPage("[Reconnect]");
 
