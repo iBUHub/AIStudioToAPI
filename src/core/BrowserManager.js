@@ -705,7 +705,7 @@ class BrowserManager {
             {
                 logFound: `${logPrefix} ✅ Found "Skip" button, clicking...`,
                 name: "Skip button",
-                selector: 'button:text("Skip")',
+                selector: 'button:text-is("Skip")',
             },
             {
                 logFound: `${logPrefix} ✅ Found update notification, clicking close...`,
@@ -1322,13 +1322,7 @@ class BrowserManager {
             // Check for cookie expiration, region restrictions, and other errors
             await this._checkPageStatusAndErrors("[Browser]");
 
-            // Handle various popups (Cookie consent, Got it, Onboarding, etc.)
-            await this._handlePopups("[Browser]");
-
-            // Try to click Launch button if it exists (not a popup, but a page button)
-            await this._tryClickLaunchButton("[Browser]");
-
-            // Check if we were redirected to the wrong page after handling popups
+            // Check if we were redirected to the wrong page BEFORE handling popups
             const targetUrl = "https://ai.studio/apps/0400c62c-9bcb-48c1-b056-9b5cf4cb5603";
             const expectedAppId = "0400c62c-9bcb-48c1-b056-9b5cf4cb5603";
             let currentUrl = this.page.url();
@@ -1352,12 +1346,6 @@ class BrowserManager {
                 });
                 await this.page.waitForTimeout(2000);
 
-                // Handle popups again after retry
-                await this._handlePopups("[Browser]");
-
-                // Try to click Launch button again after retry
-                await this._tryClickLaunchButton("[Browser]");
-
                 // Check URL again
                 currentUrl = this.page.url();
                 if (!currentUrl.includes(expectedAppId)) {
@@ -1371,6 +1359,12 @@ class BrowserManager {
             } else {
                 this.logger.info(`[Browser] ✅ Confirmed on correct page: ${currentUrl}`);
             }
+
+            // Handle various popups AFTER URL check (Cookie consent, Got it, Onboarding, etc.)
+            await this._handlePopups("[Browser]");
+
+            // Try to click Launch button if it exists (not a popup, but a page button)
+            await this._tryClickLaunchButton("[Browser]");
 
             // Wait for WebSocket initialization with error checking and retry logic
             const maxRetries = 3;
@@ -1487,13 +1481,7 @@ class BrowserManager {
             // Check for cookie expiration, region restrictions, and other errors
             await this._checkPageStatusAndErrors("[Reconnect]");
 
-            // Handle various popups (Cookie consent, Got it, Onboarding, etc.)
-            await this._handlePopups("[Reconnect]");
-
-            // Try to click Launch button if it exists (not a popup, but a page button)
-            await this._tryClickLaunchButton("[Reconnect]");
-
-            // Check if we were redirected to the wrong page after handling popups
+            // Check if we were redirected to the wrong page BEFORE handling popups
             const targetUrl = "https://ai.studio/apps/0400c62c-9bcb-48c1-b056-9b5cf4cb5603";
             const expectedAppId = "0400c62c-9bcb-48c1-b056-9b5cf4cb5603";
             let currentUrl = this.page.url();
@@ -1517,12 +1505,6 @@ class BrowserManager {
                 });
                 await this.page.waitForTimeout(2000);
 
-                // Handle popups again after retry
-                await this._handlePopups("[Reconnect]");
-
-                // Try to click Launch button again after retry
-                await this._tryClickLaunchButton("[Reconnect]");
-
                 // Check URL again
                 currentUrl = this.page.url();
                 if (!currentUrl.includes(expectedAppId)) {
@@ -1534,6 +1516,12 @@ class BrowserManager {
             } else {
                 this.logger.info(`[Reconnect] ✅ Confirmed on correct page: ${currentUrl}`);
             }
+
+            // Handle various popups AFTER URL check (Cookie consent, Got it, Onboarding, etc.)
+            await this._handlePopups("[Reconnect]");
+
+            // Try to click Launch button if it exists (not a popup, but a page button)
+            await this._tryClickLaunchButton("[Reconnect]");
 
             // Wait for WebSocket initialization with error checking and retry logic
             const maxRetries = 3;
