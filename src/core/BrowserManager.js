@@ -1269,6 +1269,9 @@ class BrowserManager {
             `🚀 [ContextPool] Starting pool preload (pool=${poolSize}, order=[${startupOrder.join(", ")}])...`
         );
 
+        // Abort any existing background preload/rebalance to ensure clean state
+        await this.abortBackgroundPreload();
+
         // Launch browser if not already running
         if (!this.browser) {
             await this._ensureBrowser();
@@ -1280,11 +1283,24 @@ class BrowserManager {
         for (let i = 0; i < startupOrder.length; i++) {
             const authIndex = startupOrder[i];
 
-            // Skip if already initialized or being initialized
-            if (this.contexts.has(authIndex) || this.initializingContexts.has(authIndex)) {
-                this.logger.info(`[ContextPool] Context #${authIndex} already exists or being initialized, skipping`);
+            // If already initialized, use it directly
+            if (this.contexts.has(authIndex)) {
+                this.logger.info(`[ContextPool] Context #${authIndex} already exists, reusing`);
                 firstReady = authIndex;
                 break;
+            }
+
+            // If being initialized by another task, wait for it to finish and verify success
+            if (this.initializingContexts.has(authIndex)) {
+                this.logger.info(`[ContextPool] Context #${authIndex} being initialized, waiting...`);
+                await this._waitForContextInit(authIndex);
+                if (this.contexts.has(authIndex)) {
+                    this.logger.info(`[ContextPool] Context #${authIndex} initialized successfully, reusing`);
+                    firstReady = authIndex;
+                    break;
+                }
+                this.logger.warn(`[ContextPool] Context #${authIndex} initialization failed, trying next`);
+                continue;
             }
 
             this.initializingContexts.add(authIndex);
@@ -2047,13 +2063,6 @@ class BrowserManager {
 
                         // Switch to new context
                         this._activateContext(contextData.context, contextData.page, authIndex);
-
-                        // Optimize UX: Force page to front immediately
-                        try {
-                            await this.page.bringToFront();
-                        } catch (ignored) {
-                            /* ignore error if page is busy */
-                        }
 
                         this.logger.info(`✅ [FastSwitch] Switched to account #${authIndex} instantly!`);
                         return;
