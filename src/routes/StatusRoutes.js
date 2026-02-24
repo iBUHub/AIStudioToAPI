@@ -631,16 +631,18 @@ class StatusRoutes {
             LoggingService.setLevel(newLevel);
             this.logger.info(`[WebUI] Log level switched to: ${newLevel}`);
 
-            // Sync browser log level via WebSocket
-            const browserSynced = this.serverSystem.requestHandler.setBrowserLogLevel(newLevel);
+            // Sync browser log level via WebSocket (broadcasts to all active contexts)
+            const updatedCount = this.serverSystem.requestHandler.setBrowserLogLevel(newLevel);
+            const browserSynced = updatedCount > 0;
             if (!browserSynced) {
-                this.logger.warn(`[WebUI] Browser log level sync failed (no active connection)`);
+                this.logger.warn(`[WebUI] Browser log level sync failed (no active connections)`);
             }
 
             res.status(200).json({
                 browserSynced,
                 message: "settingUpdateSuccess",
                 setting: "logLevel",
+                updatedContexts: updatedCount,
                 value: newLevel === "DEBUG" ? "debug" : "normal",
             });
         });

@@ -1853,37 +1853,38 @@ class RequestHandler {
     }
 
     /**
-     * Set browser (build.js) log level at runtime
+     * Set browser (build.js) log level at runtime for all active contexts
      * @param {string} level - 'DEBUG', 'INFO', 'WARN', or 'ERROR'
-     * @returns {boolean} true if message sent successfully, false otherwise
+     * @returns {number} Number of browser contexts updated (0 if none)
      */
     setBrowserLogLevel(level) {
         const validLevels = ["DEBUG", "INFO", "WARN", "ERROR"];
         const upperLevel = level?.toUpperCase();
 
         if (!validLevels.includes(upperLevel)) {
-            return false;
+            return 0;
         }
 
-        const connection = this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex);
-        if (connection) {
-            connection.send(
-                JSON.stringify({
-                    event_type: "set_log_level",
-                    level: upperLevel,
-                })
-            );
-            this.logger.info(`[Config] Browser log level set to: ${upperLevel}`);
+        // Broadcast to all active browser contexts
+        const sentCount = this.connectionRegistry.broadcastMessage(
+            JSON.stringify({
+                event_type: "set_log_level",
+                level: upperLevel,
+            })
+        );
+
+        if (sentCount > 0) {
+            this.logger.info(`[Config] Browser log level set to: ${upperLevel} (${sentCount} context(s) updated)`);
 
             // Also update server-side LoggingService level to keep in sync
             const LoggingService = require("../utils/LoggingService");
             LoggingService.setLevel(upperLevel);
             this.logger.info(`[Config] Server log level synchronized to: ${upperLevel}`);
 
-            return true;
+            return sentCount;
         } else {
-            this.logger.warn(`[Config] Unable to set browser log level: No available WebSocket connection.`);
-            return false;
+            this.logger.warn(`[Config] Unable to set browser log level: No active WebSocket connections.`);
+            return 0;
         }
     }
 

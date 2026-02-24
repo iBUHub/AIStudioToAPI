@@ -276,6 +276,40 @@ class ConnectionRegistry extends EventEmitter {
     }
 
     /**
+     * Get all active WebSocket connections
+     * @returns {Map<number, WebSocket>} Map of authIndex -> WebSocket connection
+     */
+    getAllConnections() {
+        return this.connectionsByAuth;
+    }
+
+    /**
+     * Broadcast a message to all active WebSocket connections
+     * @param {string} message - JSON string to broadcast
+     * @returns {number} Number of connections the message was sent to
+     */
+    broadcastMessage(message) {
+        let sentCount = 0;
+        for (const [authIndex, connection] of this.connectionsByAuth.entries()) {
+            try {
+                // WebSocket readyState: 0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED
+                // Only send if connection is OPEN
+                if (connection.readyState === 1) {
+                    connection.send(message);
+                    sentCount++;
+                } else {
+                    this.logger.debug(
+                        `[Registry] Skipping broadcast to authIndex=${authIndex} (readyState=${connection.readyState})`
+                    );
+                }
+            } catch (error) {
+                this.logger.warn(`[Registry] Failed to broadcast to authIndex=${authIndex}: ${error.message}`);
+            }
+        }
+        return sentCount;
+    }
+
+    /**
      * Close WebSocket connection for a specific account
      *
      * IMPORTANT: When deleting an account, always call BrowserManager.closeContext() BEFORE this method
