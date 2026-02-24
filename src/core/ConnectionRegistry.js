@@ -263,9 +263,9 @@ class ConnectionRegistry extends EventEmitter {
         return currentAuthIndex >= 0 && this.reconnectGraceTimers.has(currentAuthIndex);
     }
 
-    getConnectionByAuth(authIndex) {
+    getConnectionByAuth(authIndex, log = true) {
         const connection = this.connectionsByAuth.get(authIndex);
-        if (connection) {
+        if (connection && log) {
             this.logger.debug(`[Registry] Found WebSocket connection for authIndex=${authIndex}`);
         } else if (this.logger.getLevel?.() === "DEBUG") {
             this.logger.debug(

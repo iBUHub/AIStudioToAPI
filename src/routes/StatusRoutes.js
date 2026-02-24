@@ -849,7 +849,7 @@ class StatusRoutes {
                 accountDetails,
                 activeContextsCount: browserManager.contexts.size,
                 apiKeySource: config.apiKeySource,
-                browserConnected: !!this.serverSystem.connectionRegistry.getConnectionByAuth(currentAuthIndex),
+                browserConnected: !!this.serverSystem.connectionRegistry.getConnectionByAuth(currentAuthIndex, false),
                 currentAccountName,
                 currentAuthIndex,
                 debugMode: LoggingService.isDebugEnabled(),
