@@ -483,7 +483,7 @@ class FormatConverter {
                         if (!signatureAttachedToCall) {
                             functionCallPart.thoughtSignature = FormatConverter.DUMMY_THOUGHT_SIGNATURE;
                             signatureAttachedToCall = true;
-                            this.logger.info(
+                            this.logger.debug(
                                 `[Adapter] Using dummy thoughtSignature for first functionCall: ${toolCall.function.name}`
                             );
                         }
