@@ -183,8 +183,7 @@ class BrowserManager {
                     return false;
                 }
 
-                // Read state fresh each iteration - the state object may be replaced
-                // by retry logic in _initializeContext or attemptLightweightReconnect
+                // Read state fresh each iteration
                 const state = this._wsInitState.get(authIndex);
 
                 // Check if initialization succeeded
@@ -194,16 +193,14 @@ class BrowserManager {
 
                 // Check if initialization failed
                 if (state && state.failed) {
-                    this.logger.warn(`${logPrefix} Initialization failed, will attempt refresh...`);
+                    this.logger.warn(`${logPrefix} Initialization failed`);
                     return false;
                 }
 
                 // Check for page errors
                 const errors = await this._checkPageErrors(page);
                 if (errors.appletFailed || errors.concurrentUpdates || errors.snapshotFailed) {
-                    this.logger.warn(
-                        `${logPrefix} Detected page error: ${JSON.stringify(errors)}, will attempt refresh...`
-                    );
+                    this.logger.warn(`${logPrefix} Detected page error: ${JSON.stringify(errors)}`);
                     return false;
                 }
 
@@ -1908,41 +1905,14 @@ class BrowserManager {
             // Try to click Launch button if it exists (not a popup, but a page button)
             await this._tryClickLaunchButton(page, `[Context#${authIndex}]`);
 
-            // Wait for WebSocket initialization with error checking and retry logic
-            const maxRetries = 3;
-            let retryCount = 0;
-            let initSuccess = false;
-
+            // Wait for WebSocket initialization (no retry)
             // Check if initialization already succeeded (console listener may have detected it)
             const wsState = this._wsInitState.get(authIndex);
             if (wsState && wsState.success) {
                 this.logger.info(`[Context#${authIndex}] ✅ WebSocket already initialized, skipping wait`);
-                initSuccess = true;
-            }
-
-            while (retryCount < maxRetries && !initSuccess) {
-                if (retryCount > 0) {
-                    this.logger.info(`[Context#${authIndex}] 🔄 Retry attempt ${retryCount}/${maxRetries - 1}...`);
-
-                    // Reset state before page refresh to ensure clean state
-                    this._wsInitState.set(authIndex, { failed: false, success: false });
-
-                    // Navigate to target page again
-                    await page.goto(this.targetUrl, {
-                        timeout: 180000,
-                        waitUntil: "domcontentloaded",
-                    });
-                    await page.waitForTimeout(2000);
-
-                    // Handle various popups (Cookie consent, Got it, Onboarding, etc.)
-                    await this._handlePopups(page, `[Context#${authIndex}]`);
-
-                    // Try to click Launch button after reload
-                    await this._tryClickLaunchButton(page, `[Context#${authIndex}]`);
-                }
-
+            } else {
                 // Wait for WebSocket initialization (60 second timeout)
-                initSuccess = await this._waitForWebSocketInit(
+                const initSuccess = await this._waitForWebSocketInit(
                     page,
                     `[Context#${authIndex}]`,
                     60000,
@@ -1951,17 +1921,8 @@ class BrowserManager {
                 );
 
                 if (!initSuccess) {
-                    retryCount++;
-                    if (retryCount < maxRetries) {
-                        this.logger.warn(`[Context#${authIndex}] Initialization failed, refreshing page...`);
-                    }
+                    throw new Error("WebSocket initialization failed. Please check browser logs and page errors.");
                 }
-            }
-
-            if (!initSuccess) {
-                throw new Error(
-                    "WebSocket initialization failed after multiple retries. Please check browser logs and page errors."
-                );
             }
 
             // Final check before adding to contexts map
@@ -2259,53 +2220,25 @@ class BrowserManager {
             // Try to click Launch button if it exists (not a popup, but a page button)
             await this._tryClickLaunchButton(page, "[Reconnect]");
 
-            // Wait for WebSocket initialization with error checking and retry logic
-            const maxRetries = 3;
-            let retryCount = 0;
-            let initSuccess = false;
-
+            // Wait for WebSocket initialization (no retry)
             // Check if initialization already succeeded (console listener may have detected it)
             const wsState = this._wsInitState.get(targetAuthIndex);
             if (wsState && wsState.success) {
                 this.logger.info(`[Reconnect] ✅ WebSocket already initialized, skipping wait`);
-                initSuccess = true;
-            }
-
-            while (retryCount < maxRetries && !initSuccess) {
-                if (retryCount > 0) {
-                    this.logger.info(`[Reconnect] 🔄 Retry attempt ${retryCount}/${maxRetries - 1}...`);
-
-                    // Reset state before page refresh to ensure clean state
-                    this._wsInitState.set(targetAuthIndex, { failed: false, success: false });
-
-                    // Navigate to target page again
-                    await page.goto(this.targetUrl, {
-                        timeout: 180000,
-                        waitUntil: "domcontentloaded",
-                    });
-                    await page.waitForTimeout(2000);
-
-                    // Handle various popups (Cookie consent, Got it, Onboarding, etc.)
-                    await this._handlePopups(page, "[Reconnect]");
-
-                    // Try to click Launch button after reload
-                    await this._tryClickLaunchButton(page, "[Reconnect]");
-                }
-
+            } else {
                 // Wait for WebSocket initialization (60 second timeout)
-                initSuccess = await this._waitForWebSocketInit(page, "[Reconnect]", 60000, targetAuthIndex, false);
+                const initSuccess = await this._waitForWebSocketInit(
+                    page,
+                    "[Reconnect]",
+                    60000,
+                    targetAuthIndex,
+                    false
+                );
 
                 if (!initSuccess) {
-                    retryCount++;
-                    if (retryCount < maxRetries) {
-                        this.logger.warn(`[Reconnect] Initialization failed, refreshing page...`);
-                    }
+                    this.logger.error("[Reconnect] WebSocket initialization failed.");
+                    return false;
                 }
-            }
-
-            if (!initSuccess) {
-                this.logger.error("[Reconnect] WebSocket initialization failed after multiple retries.");
-                return false;
             }
 
             this._sendActiveTrigger("[Reconnect]");
