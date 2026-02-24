@@ -152,14 +152,15 @@ class ConnectionRegistry extends EventEmitter {
         }
 
         this.logger.info(`[Server] Starting 10-second reconnect grace period for account #${disconnectedAuthIndex}...`);
+        // Capture current auth index at disconnection time to avoid race condition
+        const currentAuthIndexAtDisconnect = this.getCurrentAuthIndex ? this.getCurrentAuthIndex() : -1;
         const graceTimerId = setTimeout(async () => {
             this.logger.info(
                 `[Server] Grace period ended for account #${disconnectedAuthIndex}, no reconnection detected.`
             );
 
-            // Re-check if this is the current account at the time of grace period expiry
-            const currentAuthIndex = this.getCurrentAuthIndex ? this.getCurrentAuthIndex() : -1;
-            const isCurrentAccount = disconnectedAuthIndex === currentAuthIndex;
+            // Use the auth index captured at disconnection time, not the current one
+            const isCurrentAccount = disconnectedAuthIndex === currentAuthIndexAtDisconnect;
 
             // Only clear message queues if this is the current account
             if (isCurrentAccount) {
