@@ -149,11 +149,21 @@ class BrowserManager {
 
     /**
      * Helper: Wait for WebSocket initialization with log monitoring
+     * Supports abort for background tasks and context deletion
+     * @param {object} page - Playwright page object
      * @param {string} logPrefix - Log prefix for messages
      * @param {number} timeout - Timeout in milliseconds (default 60000)
-     * @returns {Promise<boolean>} true if initialization succeeded, false if failed
+     * @param {number} authIndex - Auth index for this context (default -1)
+     * @param {boolean} isBackgroundTask - Whether this is a background preload task (default false)
+     * @returns {Promise<boolean>} true if initialization succeeded, false if failed or aborted
      */
-    async _waitForWebSocketInit(page, logPrefix = "[Browser]", timeout = 60000, authIndex = -1) {
+    async _waitForWebSocketInit(
+        page,
+        logPrefix = "[Browser]",
+        timeout = 60000,
+        authIndex = -1,
+        isBackgroundTask = false
+    ) {
         this.logger.info(`${logPrefix} ⏳ Waiting for WebSocket initialization (timeout: ${timeout / 1000}s)...`);
 
         const startTime = Date.now();
@@ -161,6 +171,18 @@ class BrowserManager {
 
         try {
             while (Date.now() - startTime < timeout) {
+                // Check if this specific context was marked for abort
+                if (this.abortedContexts.has(authIndex)) {
+                    this.logger.info(`${logPrefix} WebSocket wait aborted (context marked for deletion)`);
+                    return false;
+                }
+
+                // Check if background preload was aborted (only for background tasks)
+                if (isBackgroundTask && this._backgroundPreloadAbort) {
+                    this.logger.info(`${logPrefix} WebSocket wait aborted (background preload aborted)`);
+                    return false;
+                }
+
                 // Read state fresh each iteration - the state object may be replaced
                 // by retry logic in _initializeContext or attemptLightweightReconnect
                 const state = this._wsInitState.get(authIndex);
@@ -1920,7 +1942,13 @@ class BrowserManager {
                 }
 
                 // Wait for WebSocket initialization (60 second timeout)
-                initSuccess = await this._waitForWebSocketInit(page, `[Context#${authIndex}]`, 60000, authIndex);
+                initSuccess = await this._waitForWebSocketInit(
+                    page,
+                    `[Context#${authIndex}]`,
+                    60000,
+                    authIndex,
+                    isBackgroundTask
+                );
 
                 if (!initSuccess) {
                     retryCount++;
@@ -2265,7 +2293,7 @@ class BrowserManager {
                 }
 
                 // Wait for WebSocket initialization (60 second timeout)
-                initSuccess = await this._waitForWebSocketInit(page, "[Reconnect]", 60000, targetAuthIndex);
+                initSuccess = await this._waitForWebSocketInit(page, "[Reconnect]", 60000, targetAuthIndex, false);
 
                 if (!initSuccess) {
                     retryCount++;
