@@ -686,7 +686,7 @@ class BrowserManager {
 
         const popupConfigs = [
             {
-                logFound: `${logPrefix} ✅ Found "Continue to the app" button, clicking...`,
+                logFound: `${logPrefix} Found "Continue to the app" button, clicking...`,
                 name: "Continue to the app",
                 selector: 'button:text("Continue to the app")',
             },
@@ -759,7 +759,7 @@ class BrowserManager {
             // 2. Consecutive idle count exceeds threshold (no new popups appearing)
             if (i >= minIterations - 1 && consecutiveIdleCount >= idleThreshold) {
                 this.logger.debug(
-                    `${logPrefix} ✅ Popup detection complete (${i + 1} iterations, ${handledPopups.size} popups handled)`
+                    `${logPrefix} Popup detection complete (${i + 1} iterations, ${handledPopups.size} popups handled)`
                 );
                 break;
             }
@@ -771,10 +771,10 @@ class BrowserManager {
 
         // Log final summary
         if (handledPopups.size === 0) {
-            this.logger.info(`${logPrefix} ℹ️ No popups detected during scan`);
+            this.logger.info(`${logPrefix} No popups detected during scan`);
         } else {
             this.logger.info(
-                `${logPrefix} ✅ Popup detection complete: handled ${handledPopups.size} popup(s) - ${Array.from(handledPopups).join(", ")}`
+                `${logPrefix} Popup detection complete: handled ${handledPopups.size} popup(s) - ${Array.from(handledPopups).join(", ")}`
             );
         }
     }
@@ -802,9 +802,9 @@ class BrowserManager {
                 try {
                     const element = page.locator(selector).first();
                     if (await element.isVisible({ timeout: 2000 })) {
-                        this.logger.debug(`${logPrefix} ✅ Found Launch button with selector: ${selector}`);
+                        this.logger.debug(`${logPrefix} Found Launch button with selector: ${selector}`);
                         await element.click({ force: true, timeout: 5000 });
-                        this.logger.info(`${logPrefix} ✅ Launch button clicked successfully`);
+                        this.logger.info(`${logPrefix} Launch button clicked successfully`);
                         clicked = true;
                         await page.waitForTimeout(1000);
                         break;

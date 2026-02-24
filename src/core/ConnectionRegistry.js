@@ -141,6 +141,7 @@ class ConnectionRegistry extends EventEmitter {
                 if (disconnectedAuthIndex === currentAuthIndex) {
                     this.closeAllMessageQueues();
                 }
+                // Emit event after all cleanup is done
                 this.emit("connectionRemoved", websocket);
                 return;
             }
@@ -211,6 +212,7 @@ class ConnectionRegistry extends EventEmitter {
             this.reconnectGraceTimers.set(disconnectedAuthIndex, graceTimerId);
         }
 
+        // Emit event after grace timer is set up
         this.emit("connectionRemoved", websocket);
     }
 
