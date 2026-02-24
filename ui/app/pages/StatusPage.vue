@@ -1639,7 +1639,6 @@ const batchDeleteAccounts = async () => {
             if (res.status === 409 && data.requiresConfirmation) {
                 shouldUpdate = false;
                 state.isSwitchingAccount = false;
-                notification.close();
                 ElMessageBox.confirm(t("warningDeleteCurrentAccount"), t("warningTitle"), {
                     cancelButtonText: t("cancel"),
                     confirmButtonText: t("ok"),
@@ -1675,9 +1674,9 @@ const batchDeleteAccounts = async () => {
         } catch (err) {
             ElMessage.error(t("batchDeleteFailed", { error: err.message || err }));
         } finally {
+            notification.close();
             if (shouldUpdate) {
                 state.isSwitchingAccount = false;
-                notification.close();
                 updateContent();
             }
         }
@@ -1873,7 +1872,6 @@ const deleteAccountByIndex = async targetIndex => {
             if (res.status === 409 && data.requiresConfirmation) {
                 shouldUpdate = false;
                 state.isSwitchingAccount = false;
-                notification.close();
                 ElMessageBox.confirm(t("warningDeleteCurrentAccount"), t("warningTitle"), {
                     cancelButtonText: t("cancel"),
                     confirmButtonText: t("ok"),
@@ -1898,9 +1896,9 @@ const deleteAccountByIndex = async targetIndex => {
         } catch (err) {
             ElMessage.error(t("deleteFailed", { message: err.message || err }));
         } finally {
+            notification.close();
             if (shouldUpdate) {
                 state.isSwitchingAccount = false;
-                notification.close();
                 updateContent();
             }
         }
