@@ -634,31 +634,6 @@ class BrowserManager {
                 name: "Continue to the app",
                 selector: 'button:text("Continue to the app")',
             },
-            {
-                logFound: `${logPrefix} ✅ Found Cookie consent banner, clicking "Agree"...`,
-                name: "Cookie consent",
-                selector: 'button:text("Agree")',
-            },
-            {
-                logFound: `${logPrefix} ✅ Found "Got it" popup, clicking...`,
-                name: "Got it dialog",
-                selector: 'div.dialog button:text("Got it")',
-            },
-            {
-                logFound: `${logPrefix} ✅ Found "Got it" button (generic), clicking...`,
-                name: "Got it button",
-                selector: 'button:text("Got it")',
-            },
-            {
-                logFound: `${logPrefix} ✅ Found onboarding tutorial popup, clicking close button...`,
-                name: "Onboarding tutorial",
-                selector: 'button[aria-label="Close"]',
-            },
-            {
-                logFound: `${logPrefix} ✅ Found "Skip" button, clicking...`,
-                name: "Skip button",
-                selector: 'button:text-is("Skip")',
-            },
         ];
 
         // Polling-based detection with smart exit conditions
