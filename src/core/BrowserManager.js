@@ -524,6 +524,23 @@ class BrowserManager {
     // }
 
     /**
+     * Activate a context as the current one: update legacy references, reset wakeup state,
+     * and start background services (health monitor + wakeup + active trigger).
+     * @param {object} ctx - The browser context object
+     * @param {object} pg - The page object
+     * @param {number} authIndex - The auth index being activated
+     */
+    _activateContext(ctx, pg, authIndex) {
+        this.context = ctx;
+        this.page = pg;
+        this._currentAuthIndex = authIndex;
+        this.noButtonCount = 0;
+        this._startHealthMonitor();
+        this._startBackgroundWakeup();
+        this._sendActiveTrigger("[Browser]");
+    }
+
+    /**
      * Helper: Send active trigger
      * Sends a trigger request to wake up Google backend
      * This is a fire-and-forget operation - we don't wait for the trigger request to complete
@@ -1827,7 +1844,7 @@ class BrowserManager {
                 throw new Error(`Context initialization aborted for index ${authIndex} (marked for deletion)`);
             }
 
-            await this._navigateAndWakeUpPage(page, `[Context#${authIndex}]`, authIndex);
+            await this._navigateAndWakeUpPage(page, `[Context#${authIndex}]`);
 
             // Check abort status after navigation
             if (this.abortedContexts.has(authIndex) || (isBackgroundTask && this._backgroundPreloadAbort)) {
@@ -2029,16 +2046,7 @@ class BrowserManager {
                         }
 
                         // Switch to new context
-                        this.context = contextData.context;
-                        this.page = contextData.page;
-                        this._currentAuthIndex = authIndex;
-
-                        // Reset BackgroundWakeup state for new context
-                        this.noButtonCount = 0;
-
-                        // Start background tasks for new context
-                        this._startHealthMonitor();
-                        this._startBackgroundWakeup(); // Internal check prevents duplicate instances
+                        this._activateContext(contextData.context, contextData.page, authIndex);
 
                         // Optimize UX: Force page to front immediately
                         try {
@@ -2091,19 +2099,7 @@ class BrowserManager {
             // Initialize new context (isBackgroundTask=false for foreground initialization)
             const { context, page } = await this._initializeContext(authIndex, false);
 
-            // Update current references
-            this.context = context;
-            this.page = page;
-            this._currentAuthIndex = authIndex;
-
-            // Reset BackgroundWakeup state for new context
-            this.noButtonCount = 0;
-
-            this._sendActiveTrigger("[Reconnect]");
-
-            // Start background tasks
-            this._startHealthMonitor();
-            this._startBackgroundWakeup(); // Internal check prevents duplicate instances
+            this._activateContext(context, page, authIndex);
 
             this.logger.info("==================================================");
             this.logger.info(`✅ [Browser] Account ${authIndex} context initialized successfully!`);
@@ -2206,7 +2202,7 @@ class BrowserManager {
             this.logger.info("[Reconnect] Reset WebSocket initialization state");
 
             // Navigate to target page and wake it up
-            await this._navigateAndWakeUpPage(page, "[Reconnect]", targetAuthIndex);
+            await this._navigateAndWakeUpPage(page, "[Reconnect]");
 
             // Check for cookie expiration, region restrictions, and other errors
             await this._checkPageStatusAndErrors(page, "[Reconnect]");
