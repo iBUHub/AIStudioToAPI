@@ -972,14 +972,18 @@ class BrowserManager {
      * Helper: Save debug information (screenshot and HTML) to root directory
      * @param {string} suffix - Suffix for the debug file names
      * @param {number} [authIndex] - Optional auth index to get the correct page from contexts Map
+     * @param {object} [explicitPage] - Optional explicit page object to use (for cases where page is not yet in contexts)
      */
-    async _saveDebugArtifacts(suffix = "final", authIndex = null) {
-        // Prioritize retrieving the page for the specific account from the contexts Map, falling back to this.page
-        let targetPage = this.page;
-        if (authIndex !== null && this.contexts.has(authIndex)) {
-            const ctxData = this.contexts.get(authIndex);
-            if (ctxData && ctxData.page) {
-                targetPage = ctxData.page;
+    async _saveDebugArtifacts(suffix = "final", authIndex = null, explicitPage = null) {
+        // Prioritize explicit page, then retrieve from contexts Map, finally fall back to this.page
+        let targetPage = explicitPage;
+        if (!targetPage) {
+            targetPage = this.page;
+            if (authIndex !== null && this.contexts.has(authIndex)) {
+                const ctxData = this.contexts.get(authIndex);
+                if (ctxData && ctxData.page) {
+                    targetPage = ctxData.page;
+                }
             }
         }
         if (!targetPage || targetPage.isClosed()) return;
@@ -1962,6 +1966,11 @@ class BrowserManager {
                 this.logger.error(`❌ [Browser] Context initialization failed for index ${authIndex}, cleaning up...`);
             }
 
+            // Save debug artifacts before closing the page (only for non-abort errors)
+            if (!isAbortError && page && !page.isClosed()) {
+                await this._saveDebugArtifacts("init_failed", authIndex, page);
+            }
+
             // Remove from contexts map if it was added
             if (this.contexts.has(authIndex)) {
                 this.contexts.delete(authIndex);
@@ -2116,7 +2125,7 @@ class BrowserManager {
             this.logger.info("==================================================");
         } catch (error) {
             this.logger.error(`❌ [Browser] Account ${authIndex} context initialization failed: ${error.message}`);
-            await this._saveDebugArtifacts("init_failed", authIndex);
+            // Debug artifacts are already saved in _initializeContext's catch block
 
             // Clean up if HealthMonitor was started
             if (this.contexts.has(authIndex)) {
