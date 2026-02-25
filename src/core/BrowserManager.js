@@ -174,13 +174,15 @@ class BrowserManager {
                 // Check if this specific context was marked for abort
                 if (this.abortedContexts.has(authIndex)) {
                     this.logger.info(`${logPrefix} WebSocket wait aborted (context marked for deletion)`);
-                    return false;
+                    throw new Error(`Context initialization aborted for index ${authIndex} (marked for deletion)`);
                 }
 
                 // Check if background preload was aborted (only for background tasks)
                 if (isBackgroundTask && this._backgroundPreloadAbort) {
                     this.logger.info(`${logPrefix} WebSocket wait aborted (background preload aborted)`);
-                    return false;
+                    throw new Error(
+                        `Context initialization aborted for index ${authIndex} (background preload aborted)`
+                    );
                 }
 
                 // Read state fresh each iteration
@@ -222,6 +224,11 @@ class BrowserManager {
             this.logger.error(`${logPrefix} ⏱️ WebSocket initialization timeout after ${timeout / 1000}s`);
             return false;
         } catch (error) {
+            // If it's an abort error, re-throw it so the caller can handle it properly
+            if (error.message && error.message.includes("aborted for index")) {
+                throw error;
+            }
+            // For other errors, log and return false
             this.logger.error(`${logPrefix} Error during WebSocket initialization wait: ${error.message}`);
             return false;
         }
@@ -721,7 +728,7 @@ class BrowserManager {
             {
                 logFound: `${logPrefix} Found "Continue to the app" button, clicking...`,
                 name: "Continue to the app",
-                selector: 'button:text("Continue to the app")',
+                text: "Continue to the app",
             },
         ];
 
@@ -742,11 +749,28 @@ class BrowserManager {
                 if (handledPopups.has(popup.name)) continue;
 
                 try {
-                    const element = page.locator(popup.selector).first();
-                    // Quick visibility check with very short timeout
-                    if (await element.isVisible({ timeout: 200 })) {
+                    // Use DOM operation to find and click button
+                    const clicked = await page.evaluate(text => {
+                        // eslint-disable-next-line no-undef
+                        const buttons = document.querySelectorAll("button");
+                        for (const btn of buttons) {
+                            // Check if the element occupies space (simple visibility check)
+                            const rect = btn.getBoundingClientRect();
+                            const isVisible = rect.width > 0 && rect.height > 0;
+
+                            if (isVisible) {
+                                const btnText = (btn.innerText || "").trim();
+                                if (btnText === text) {
+                                    btn.click();
+                                    return true;
+                                }
+                            }
+                        }
+                        return false;
+                    }, popup.text);
+
+                    if (clicked) {
                         this.logger.info(popup.logFound);
-                        await element.click({ force: true });
                         handledPopups.add(popup.name);
                         foundAny = true;
 
@@ -815,6 +839,7 @@ class BrowserManager {
     /**
      * Helper: Try to click Launch button if it exists on the page
      * This is not a popup, but a page button that may need to be clicked
+     * @param {Page} page - The page object to check for Launch button
      * @param {string} logPrefix - Log prefix for messages (e.g., "[Browser]" or "[Reconnect]")
      */
     async _tryClickLaunchButton(page, logPrefix = "[Browser]") {
@@ -848,7 +873,7 @@ class BrowserManager {
             }
 
             if (!clicked) {
-                this.logger.info(`${logPrefix} ℹ️ No Launch button found (this is normal if already launched)`);
+                this.logger.info(`${logPrefix} No Launch button found (this is normal if already launched)`);
             }
         } catch (error) {
             this.logger.warn(`${logPrefix} ⚠️ Error while checking for Launch button: ${error.message}`);
@@ -954,7 +979,7 @@ class BrowserManager {
                             "div.cdk-global-overlay-wrapper",
                         ];
 
-                        const targetTexts = ["Reload", "Retry", "Got it", "Dismiss", "Not now"];
+                        const targetTexts = ["Reload", "Retry", "Got it", "Dismiss", "Not now", "Continue to the app"];
 
                         // Remove passive blockers
                         blockers.forEach(selector => {
@@ -1540,10 +1565,10 @@ class BrowserManager {
                 await this._initializeContext(authIndex, true); // Mark as background task
                 this.logger.info(`✅ [ContextPool] Background context #${authIndex} ready.`);
             } catch (error) {
-                // Check if this is an abort error (user deleted the account during initialization)
+                // Check if this is an abort error (user deleted the account during initialization or background preload was aborted)
                 const isAbortError = error.message && error.message.includes("aborted for index");
                 if (isAbortError) {
-                    this.logger.info(`[ContextPool] Background context #${authIndex} aborted (account deleted)`);
+                    this.logger.info(`[ContextPool] Background context #${authIndex} aborted as requested`);
                     // If aborted due to background preload abort, mark as aborted
                     aborted = true;
                 } else {
@@ -1926,6 +1951,7 @@ class BrowserManager {
                 this.logger.info(`[Context#${authIndex}] ✅ WebSocket already initialized, skipping wait`);
             } else {
                 // Wait for WebSocket initialization (60 second timeout)
+                // This will throw an abort error if the context is aborted during wait
                 const initSuccess = await this._waitForWebSocketInit(
                     page,
                     `[Context#${authIndex}]`,
@@ -2274,6 +2300,15 @@ class BrowserManager {
 
             return true;
         } catch (error) {
+            // Check if this is an abort error (context was deleted during reconnect)
+            const isAbortError = error.message && error.message.includes("aborted for index");
+            if (isAbortError) {
+                this.logger.info(
+                    `[Reconnect] Lightweight reconnect aborted for account #${targetAuthIndex} (context deleted)`
+                );
+                return false;
+            }
+
             this.logger.error(
                 `❌ [Reconnect] Lightweight reconnect failed for account #${targetAuthIndex}: ${error.message}`
             );
