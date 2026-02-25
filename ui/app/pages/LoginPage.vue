@@ -28,12 +28,21 @@
                     <path d="M14 18h6" />
                 </svg>
             </button>
-            <div class="login-content">
+            <div v-if="configLoaded" class="login-content">
                 <h2 class="login-title">
-                    {{ t("loginHeading") }}
+                    {{ requirePassword ? t("loginHeadingAuth") : t("loginHeading") }}
                 </h2>
+                <div v-if="requireUsername">
+                    <input type="text" name="username" :placeholder="t('usernamePlaceholder')" required autofocus />
+                </div>
                 <div>
-                    <input type="password" name="apiKey" :placeholder="t('apiKeyPlaceholder')" required autofocus />
+                    <input
+                        type="password"
+                        :name="requirePassword ? 'password' : 'apiKey'"
+                        :placeholder="requirePassword ? t('passwordPlaceholder') : t('apiKeyPlaceholder')"
+                        required
+                        :autofocus="!requireUsername"
+                    />
                 </div>
                 <div>
                     <button type="submit">
@@ -58,6 +67,9 @@ const route = useRoute();
 
 // Create reactive version counter
 const langVersion = ref(0);
+const requireUsername = ref(false);
+const requirePassword = ref(false);
+const configLoaded = ref(false);
 
 // Listen for language changes
 const onLangChange = () => {
@@ -67,8 +79,20 @@ const onLangChange = () => {
 // Initialize theme
 useTheme();
 
-onMounted(() => {
+onMounted(async () => {
     I18n.onChange(onLangChange);
+    try {
+        const res = await fetch("/api/auth/config");
+        if (res.ok) {
+            const data = await res.json();
+            requireUsername.value = data.requireUsername;
+            requirePassword.value = data.requirePassword;
+        }
+    } catch (err) {
+        console.error("Failed to load auth config", err);
+    } finally {
+        configLoaded.value = true;
+    }
 });
 
 const t = (key, options) => {
@@ -79,7 +103,7 @@ const t = (key, options) => {
 const errorText = computed(() => {
     const code = String(route.query.error || "");
     if (code === "1") {
-        return t("loginErrorInvalidKey");
+        return requirePassword.value ? t("loginErrorInvalidCredentials") : t("loginErrorInvalidKey");
     }
     if (code === "2") {
         return t("loginErrorRateLimit");

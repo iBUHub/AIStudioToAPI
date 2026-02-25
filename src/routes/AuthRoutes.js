@@ -113,6 +113,14 @@ class AuthRoutes {
             res.sendFile(this.distIndexPath);
         });
 
+        // Config endpoint to tell the frontend what login fields to display
+        app.get("/api/auth/config", (req, res) => {
+            // Require username only if both username and password are set
+            const requireUsername = !!process.env.WEB_CONSOLE_USERNAME && !!process.env.WEB_CONSOLE_PASSWORD;
+            const requirePassword = !!process.env.WEB_CONSOLE_PASSWORD;
+            res.json({ requirePassword, requireUsername });
+        });
+
         // Login endpoint with rate limiting
         app.post("/login", (req, res) => {
             const ip = this.getClientIP(req);
@@ -139,8 +147,27 @@ class AuthRoutes {
                 }
             }
 
-            const { apiKey } = req.body;
-            if (apiKey && this.config.apiKeys.includes(apiKey)) {
+            const { apiKey, username, password } = req.body;
+            let authSuccess = false;
+            const submittedPassword = password || apiKey;
+            const expectedUsername = process.env.WEB_CONSOLE_USERNAME;
+            const expectedPassword = process.env.WEB_CONSOLE_PASSWORD;
+
+            if (expectedUsername && expectedPassword) {
+                if (username === expectedUsername && submittedPassword === expectedPassword) {
+                    authSuccess = true;
+                }
+            } else if (!expectedUsername && expectedPassword) {
+                if (submittedPassword === expectedPassword) {
+                    authSuccess = true;
+                }
+            } else {
+                if (submittedPassword && this.config.apiKeys.includes(submittedPassword)) {
+                    authSuccess = true;
+                }
+            }
+
+            if (authSuccess) {
                 // Clear failed attempts on successful login
                 if (this.rateLimitEnabled) {
                     this.loginAttempts.delete(ip);
