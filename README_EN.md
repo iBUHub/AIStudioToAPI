@@ -256,7 +256,6 @@ This endpoint forwards requests to the official Gemini API format endpoint.
 | `FORCE_WEB_SEARCH`         | Force enable web search for all requests.                                                                                  | `false`       |
 | `FORCE_URL_CONTEXT`        | Force enable URL context for all requests.                                                                                 | `false`       |
 | `CAMOUFOX_EXECUTABLE_PATH` | Path to the Camoufox browser executable (supports both absolute and relative paths). Only required if manually downloaded. | Auto-detected |
-| ~~`WS_PORT`~~              | ~~WebSocket server port.~~ **⚠️ Deprecated: This environment variable is no longer supported. Port is fixed at 9998.**     | ~~`9998`~~    |
 
 ### 🧠 Model List Configuration
 
