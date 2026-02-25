@@ -131,8 +131,12 @@ class StatusRoutes {
                     );
                     this.logger.warn("[System] Closing context for invalid auth.");
                     try {
-                        // Close only the invalid account's context, not the entire browser
+                        // Terminate all pending requests first to prevent them from hanging
+                        this.serverSystem.connectionRegistry.closeAllMessageQueues();
+                        // Close context (this will trigger WebSocket disconnect)
                         await browserManager.closeContext(currentAuthIndex);
+                        // Close WebSocket connection explicitly
+                        this.serverSystem.connectionRegistry.closeConnectionByAuth(currentAuthIndex);
                     } catch (err) {
                         this.logger.error(`[System] Error while closing context automatically: ${err.message}`);
                     }
