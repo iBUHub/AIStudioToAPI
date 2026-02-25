@@ -203,7 +203,17 @@ class BrowserManager {
                     this.logger.warn(`${logPrefix} Detected page error: ${JSON.stringify(errors)}`);
                     return false;
                 }
-
+                // Random mouse movement while waiting (80% chance per iteration)
+                if (Math.random() < 0.3) {
+                    try {
+                        const vp = page.viewportSize() || { height: 1080, width: 1920 };
+                        const randomX = Math.floor(Math.random() * (vp.width * 0.7));
+                        const randomY = Math.floor(Math.random() * (vp.height * 0.7));
+                        await this._simulateHumanMovement(page, randomX, randomY);
+                    } catch (e) {
+                        // Ignore movement errors
+                    }
+                }
                 // Wait before next check
                 await page.waitForTimeout(checkInterval);
             }
@@ -556,7 +566,7 @@ class BrowserManager {
         this.noButtonCount = 0;
         this._startHealthMonitor();
         this._startBackgroundWakeup();
-        this._sendActiveTrigger("[Browser]");
+        this._sendActiveTrigger("[Browser]", pg);
     }
 
     /**
@@ -564,13 +574,17 @@ class BrowserManager {
      * Sends a trigger request to wake up Google backend
      * This is a fire-and-forget operation - we don't wait for the trigger request to complete
      * @param {string} logPrefix - Log prefix for step messages (e.g., "[Browser]" or "[Reconnect]")
+     * @param {Page} page - The page object to use (defaults to this.page if not provided)
      */
-    _sendActiveTrigger(logPrefix = "[Browser]") {
+    _sendActiveTrigger(logPrefix = "[Browser]", page = null) {
         // Active Trigger (Hack to wake up Google Backend)
         this.logger.info(`${logPrefix} ⚡ Sending active trigger request to Launch flow...`);
 
+        // Use provided page or fall back to this.page
+        const targetPage = page || this.page;
+
         // Fire-and-forget: send trigger request in background without waiting
-        this.page
+        targetPage
             .evaluate(async () => {
                 try {
                     await fetch("https://generativelanguage.googleapis.com/v1beta/models?key=ActiveTrigger", {
@@ -2241,7 +2255,7 @@ class BrowserManager {
                 }
             }
 
-            this._sendActiveTrigger("[Reconnect]");
+            this._sendActiveTrigger("[Reconnect]", page);
 
             // [Auth Update] Save the refreshed cookies to the auth file immediately
             await this._updateAuthFile(targetAuthIndex);
