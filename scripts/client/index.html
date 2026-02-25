@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Your App</title>
+    <script>
+        (function () {
+            // Create promise for build.js to await
+            var resolveAuthIndex;
+            window.__authIndexReady = new Promise(function(resolve) { resolveAuthIndex = resolve; });
+
+            window.addEventListener("message", function (event) {
+                if (event.data && event.data.type === "authIndexResponse") {
+                    var authIndex = parseInt(event.data.authIndex, 10);
+                    if (!isNaN(authIndex) && authIndex >= 0) {
+                        if (!window.chrome) window.chrome = {};
+                        window.chrome._contextId = authIndex;
+                        console.log("[Init] ✅ Got authIndex:", authIndex);
+                        resolveAuthIndex(authIndex);
+                    }
+                }
+            });
+
+            // Immediately request authIndex from parent
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({ type: "requestAuthIndex" }, "*");
+            }
+        })();
+    </script>
+</head>
+<body>
+<div id="app"></div>
+<script type="module" src="/index.ts"></script>
+</body>
+</html>

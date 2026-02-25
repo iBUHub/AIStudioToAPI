@@ -53,7 +53,9 @@ class AuthSource {
                 `[Auth] Reload complete. ${this.availableIndices.length} valid sources available: [${this.availableIndices.join(", ")}]`
             );
             this.lastScannedIndices = newIndices;
+            return true; // Changes detected
         }
+        return false; // No changes
     }
 
     removeAuth(index) {

@@ -107,31 +107,48 @@ class StatusRoutes {
 
         app.get("/api/status", isAuthenticated, async (req, res) => {
             // Force a reload of auth sources on each status check for real-time accuracy
-            this.serverSystem.authSource.reloadAuthSources();
+            const hasChanges = this.serverSystem.authSource.reloadAuthSources();
 
             const { authSource, browserManager, requestHandler } = this.serverSystem;
 
             // If the system is busy switching accounts, skip the validity check to prevent race conditions
             if (requestHandler.isSystemBusy) {
+                // Rebalance context pool if auth files changed
+                if (hasChanges) {
+                    this.serverSystem.browserManager.rebalanceContextPool().catch(err => {
+                        this.logger.error(`[System] Background rebalance failed: ${err.message}`);
+                    });
+                }
                 return res.json(this._getStatusData());
             }
 
-            // After reloading, only check for auth validity if a browser is active.
-            if (browserManager.browser) {
-                const currentAuthIndex = requestHandler.currentAuthIndex;
-
-                if (currentAuthIndex === -1 || !authSource.availableIndices.includes(currentAuthIndex)) {
+            // After reloading, only check for auth validity if a browser is active and has a valid current account.
+            const currentAuthIndex = requestHandler.currentAuthIndex;
+            if (browserManager.browser && currentAuthIndex >= 0) {
+                if (!authSource.availableIndices.includes(currentAuthIndex)) {
                     this.logger.warn(
                         `[System] Current auth index #${currentAuthIndex} is no longer valid after reload (e.g., file deleted).`
                     );
-                    this.logger.warn("[System] Closing browser connection due to invalid auth.");
+                    this.logger.warn("[System] Closing context for invalid auth.");
                     try {
-                        // Await closing to prevent repeated checks on subsequent status polls
-                        await browserManager.closeBrowser();
+                        // Terminate all pending requests first to prevent them from hanging
+                        this.serverSystem.connectionRegistry.closeAllMessageQueues();
+                        // Close context (this will trigger WebSocket disconnect)
+                        await browserManager.closeContext(currentAuthIndex);
+                        // Close WebSocket connection explicitly
+                        this.serverSystem.connectionRegistry.closeConnectionByAuth(currentAuthIndex);
                     } catch (err) {
-                        this.logger.error(`[System] Error while closing browser automatically: ${err.message}`);
+                        this.logger.error(`[System] Error while closing context automatically: ${err.message}`);
                     }
                 }
+            }
+
+            // Rebalance context pool if auth files changed (e.g., user manually added/removed files)
+            if (hasChanges) {
+                this.logger.info("[System] Auth file changes detected, rebalancing context pool...");
+                this.serverSystem.browserManager.rebalanceContextPool().catch(err => {
+                    this.logger.error(`[System] Background rebalance failed: ${err.message}`);
+                });
             }
 
             res.json(this._getStatusData());
@@ -204,6 +221,12 @@ class StatusRoutes {
                 const removedIndices = [];
                 const failed = [];
 
+                // Abort any ongoing background preload task before deletion
+                // This prevents race conditions where background tasks continue initializing contexts
+                // that are about to be deleted
+                await this.serverSystem.browserManager.abortBackgroundPreload();
+
+                // Delete duplicate auth files
                 for (const group of duplicateGroups) {
                     const removed = Array.isArray(group.removedIndices) ? group.removedIndices : [];
                     if (removed.length === 0) continue;
@@ -230,6 +253,32 @@ class StatusRoutes {
                         failed,
                         message: "accountDedupPartialFailed",
                         removedIndices,
+                    });
+                }
+
+                // Reload auth sources to update internal state immediately after dedup deletions
+                if (removedIndices.length > 0) {
+                    authSource.reloadAuthSources();
+                }
+
+                // Close contexts for removed duplicate accounts
+                if (removedIndices.length > 0) {
+                    for (const idx of removedIndices) {
+                        try {
+                            await this.serverSystem.browserManager.closeContext(idx);
+                            this.serverSystem.connectionRegistry.closeConnectionByAuth(idx);
+                        } catch (error) {
+                            this.logger.warn(
+                                `[Auth] Failed to close context for removed duplicate #${idx}: ${error.message}`
+                            );
+                        }
+                    }
+                }
+
+                // Rebalance context pool after dedup
+                if (removedIndices.length > 0) {
+                    this.serverSystem.browserManager.rebalanceContextPool().catch(err => {
+                        this.logger.error(`[Auth] Background rebalance failed: ${err.message}`);
                     });
                 }
 
@@ -291,6 +340,12 @@ class StatusRoutes {
                 });
             }
 
+            // Abort any ongoing background preload task before deletion
+            // This prevents race conditions where background tasks continue initializing contexts
+            // that are about to be deleted
+            await this.serverSystem.browserManager.abortBackgroundPreload();
+
+            // Delete auth files
             for (const targetIndex of validIndices) {
                 try {
                     authSource.removeAuth(targetIndex);
@@ -302,15 +357,52 @@ class StatusRoutes {
                 }
             }
 
-            // If current active account was deleted, close browser connection
+            // Reload auth sources to update internal state immediately after deletions
+            if (successIndices.length > 0) {
+                authSource.reloadAuthSources();
+            }
+
+            // If current active account was deleted, close context first, then connection
             if (includesCurrent && successIndices.includes(currentAuthIndex)) {
                 this.logger.warn(
-                    `[WebUI] Current active account #${currentAuthIndex} was deleted. Closing browser connection...`
+                    `[WebUI] Current active account #${currentAuthIndex} was deleted. Closing context and connection...`
                 );
-                this.serverSystem.browserManager.closeBrowser().catch(err => {
-                    this.logger.error(`[WebUI] Error closing browser after batch deletion: ${err.message}`);
+                // Set system busy flag to prevent new requests during cleanup
+                const previousBusy = this.serverSystem.isSystemBusy === true;
+                if (!previousBusy) {
+                    this.serverSystem.isSystemBusy = true;
+                }
+                try {
+                    // 1. Terminate all pending requests immediately
+                    this.serverSystem.connectionRegistry.closeAllMessageQueues();
+                    // 2. Close context first so page is gone when _removeConnection checks
+                    await this.serverSystem.browserManager.closeContext(currentAuthIndex);
+                    // 3. Then close WebSocket connection
+                    this.serverSystem.connectionRegistry.closeConnectionByAuth(currentAuthIndex);
+                } finally {
+                    // Reset system busy flag after cleanup completes
+                    if (!previousBusy) {
+                        this.serverSystem.isSystemBusy = false;
+                    }
+                }
+            }
+
+            // Close contexts and connections for all successfully deleted accounts (except current, already handled)
+            for (const idx of successIndices) {
+                if (idx !== currentAuthIndex) {
+                    this.logger.info(`[WebUI] Closing context and connection for deleted account #${idx}...`);
+                    // Close context first so page is gone when _removeConnection checks
+                    await this.serverSystem.browserManager.closeContext(idx);
+                    // Then close WebSocket connection
+                    this.serverSystem.connectionRegistry.closeConnectionByAuth(idx);
+                }
+            }
+
+            // Rebalance context pool after batch delete
+            if (successIndices.length > 0) {
+                this.serverSystem.browserManager.rebalanceContextPool().catch(err => {
+                    this.logger.error(`[Auth] Background rebalance failed: ${err.message}`);
                 });
-                this.serverSystem.browserManager.currentAuthIndex = -1;
             }
 
             if (failedIndices.length > 0) {
@@ -419,7 +511,7 @@ class StatusRoutes {
             }
         });
 
-        app.delete("/api/accounts/:index", isAuthenticated, (req, res) => {
+        app.delete("/api/accounts/:index", isAuthenticated, async (req, res) => {
             const rawIndex = req.params.index;
             const targetIndex = Number(rawIndex);
             const currentAuthIndex = this.serverSystem.requestHandler.currentAuthIndex;
@@ -444,22 +536,52 @@ class StatusRoutes {
                 });
             }
 
+            // Abort any ongoing background preload task before deletion
+            // This prevents race conditions where background tasks continue initializing contexts
+            // that are about to be deleted
+            await this.serverSystem.browserManager.abortBackgroundPreload();
+
             try {
+                // Delete auth file
                 authSource.removeAuth(targetIndex);
 
-                // If deleting current account, close browser connection
+                // Reload auth sources to update internal state immediately
+                authSource.reloadAuthSources();
+
+                // Always close context first, then connection
+                this.logger.info(`[WebUI] Account #${targetIndex} deleted. Closing context and connection...`);
+
                 if (targetIndex === currentAuthIndex) {
-                    this.logger.warn(
-                        `[WebUI] Current active account #${targetIndex} was deleted. Closing browser connection...`
-                    );
-                    this.serverSystem.browserManager.closeBrowser().catch(err => {
-                        this.logger.error(`[WebUI] Error closing browser after account deletion: ${err.message}`);
-                    });
-                    // Reset current account index through browserManager
-                    this.serverSystem.browserManager.currentAuthIndex = -1;
+                    // Set system busy flag to prevent new requests during cleanup
+                    const previousBusy = this.serverSystem.isSystemBusy === true;
+                    if (!previousBusy) {
+                        this.serverSystem.isSystemBusy = true;
+                    }
+                    try {
+                        // If deleting the current account, terminate pending requests first
+                        this.serverSystem.connectionRegistry.closeAllMessageQueues();
+                        // Close context first so page is gone when _removeConnection checks
+                        await this.serverSystem.browserManager.closeContext(targetIndex);
+                        // Then close WebSocket connection
+                        this.serverSystem.connectionRegistry.closeConnectionByAuth(targetIndex);
+                    } finally {
+                        // Reset system busy flag after cleanup completes
+                        if (!previousBusy) {
+                            this.serverSystem.isSystemBusy = false;
+                        }
+                    }
+                } else {
+                    // Non-current account: no need for system busy flag
+                    await this.serverSystem.browserManager.closeContext(targetIndex);
+                    this.serverSystem.connectionRegistry.closeConnectionByAuth(targetIndex);
                 }
 
-                this.logger.warn(
+                // Rebalance context pool after delete
+                this.serverSystem.browserManager.rebalanceContextPool().catch(err => {
+                    this.logger.error(`[Auth] Background rebalance failed: ${err.message}`);
+                });
+
+                this.logger.info(
                     `[WebUI] Account #${targetIndex} deleted via web interface. Previous current account: #${currentAuthIndex}`
                 );
                 res.status(200).json({
@@ -513,16 +635,18 @@ class StatusRoutes {
             LoggingService.setLevel(newLevel);
             this.logger.info(`[WebUI] Log level switched to: ${newLevel}`);
 
-            // Sync browser log level via WebSocket
-            const browserSynced = this.serverSystem.requestHandler.setBrowserLogLevel(newLevel);
+            // Sync browser log level via WebSocket (broadcasts to all active contexts)
+            const updatedCount = this.serverSystem.requestHandler.setBrowserLogLevel(newLevel);
+            const browserSynced = updatedCount > 0;
             if (!browserSynced) {
-                this.logger.warn(`[WebUI] Browser log level sync failed (no active connection)`);
+                this.logger.warn(`[WebUI] Browser log level sync failed (no active connections)`);
             }
 
             res.status(200).json({
                 browserSynced,
                 message: "settingUpdateSuccess",
                 setting: "logLevel",
+                updatedContexts: updatedCount,
                 value: newLevel === "DEBUG" ? "debug" : "normal",
             });
         });
@@ -531,7 +655,7 @@ class StatusRoutes {
             const { count } = req.body;
             const newCount = parseInt(count, 10);
 
-            if (!isNaN(newCount) && newCount > 0) {
+            if (Number.isFinite(newCount) && newCount > 0) {
                 this.logger.setDisplayLimit(newCount);
                 this.logger.info(`[WebUI] Log display limit updated to: ${newCount}`);
                 res.status(200).json({ message: "settingUpdateSuccess", setting: "logMaxCount", value: newCount });
@@ -540,7 +664,7 @@ class StatusRoutes {
             }
         });
 
-        app.post("/api/files", isAuthenticated, (req, res) => {
+        app.post("/api/files", isAuthenticated, async (req, res) => {
             const { content } = req.body;
             // Ignore req.body.filename - auto rename
 
@@ -549,6 +673,11 @@ class StatusRoutes {
             }
 
             try {
+                // Abort any ongoing background preload task before upload
+                // This prevents race conditions where background tasks continue initializing contexts
+                // while we're adding a new account
+                await this.serverSystem.browserManager.abortBackgroundPreload();
+
                 // Ensure directory exists
                 const configDir = path.join(process.cwd(), "configs", "auth");
                 if (!fs.existsSync(configDir)) {
@@ -566,16 +695,104 @@ class StatusRoutes {
                 const newFilename = `auth-${nextAuthIndex}.json`;
                 const filePath = path.join(configDir, newFilename);
 
-                fs.writeFileSync(filePath, fileContent);
+                await fs.promises.writeFile(filePath, fileContent);
 
                 // Reload auth sources to pick up changes
                 this.serverSystem.authSource.reloadAuthSources();
+
+                // Rebalance context pool to pick up new account
+                this.serverSystem.browserManager.rebalanceContextPool().catch(err => {
+                    this.logger.error(`[Auth] Background rebalance failed: ${err.message}`);
+                });
 
                 this.logger.info(`[WebUI] File uploaded via API: generated ${newFilename}`);
                 res.status(200).json({ filename: newFilename, message: "File uploaded successfully" });
             } catch (error) {
                 this.logger.error(`[WebUI] Failed to write file: ${error.message}`);
                 res.status(500).json({ error: "Failed to save file" });
+            }
+        });
+
+        // Batch upload files
+        app.post("/api/files/batch", isAuthenticated, async (req, res) => {
+            const { files } = req.body;
+
+            if (!Array.isArray(files) || files.length === 0) {
+                return res.status(400).json({ error: "Missing files array" });
+            }
+
+            try {
+                // Abort any ongoing background preload task before batch upload
+                // This prevents race conditions where background tasks continue initializing contexts
+                // while we're adding multiple new accounts
+                await this.serverSystem.browserManager.abortBackgroundPreload();
+
+                // Ensure directory exists
+                const configDir = path.join(process.cwd(), "configs", "auth");
+                if (!fs.existsSync(configDir)) {
+                    fs.mkdirSync(configDir, { recursive: true });
+                }
+
+                const results = [];
+
+                // Get starting index
+                const existingIndices = this.serverSystem.authSource.availableIndices || [];
+                let nextAuthIndex = existingIndices.length > 0 ? Math.max(...existingIndices) + 1 : 0;
+
+                // Write all files first, track each file's result
+                for (let i = 0; i < files.length; i++) {
+                    const content = files[i];
+
+                    if (!content) {
+                        results.push({ error: "Missing content", index: i, success: false });
+                        continue;
+                    }
+
+                    try {
+                        // If content is object, stringify it
+                        const fileContent = typeof content === "object" ? JSON.stringify(content, null, 2) : content;
+
+                        const newFilename = `auth-${nextAuthIndex}.json`;
+                        const filePath = path.join(configDir, newFilename);
+
+                        await fs.promises.writeFile(filePath, fileContent);
+
+                        results.push({ filename: newFilename, index: i, success: true });
+                        this.logger.info(`[WebUI] Batch upload: generated ${newFilename}`);
+
+                        nextAuthIndex++;
+                    } catch (error) {
+                        results.push({ error: error.message, index: i, success: false });
+                        this.logger.error(`[WebUI] Batch upload failed for file ${i}: ${error.message}`);
+                    }
+                }
+
+                // Only reload and rebalance once after all files are written
+                const successCount = results.filter(r => r.success).length;
+                if (successCount > 0) {
+                    this.serverSystem.authSource.reloadAuthSources();
+                    this.serverSystem.browserManager.rebalanceContextPool().catch(err => {
+                        this.logger.error(`[Auth] Background rebalance failed: ${err.message}`);
+                    });
+                }
+
+                const failureCount = results.length - successCount;
+                if (failureCount > 0) {
+                    return res.status(207).json({
+                        message: "Batch upload partially successful",
+                        results,
+                        successCount,
+                    });
+                }
+
+                res.status(200).json({
+                    message: "Batch upload successful",
+                    results,
+                    successCount,
+                });
+            } catch (error) {
+                this.logger.error(`[WebUI] Batch upload failed: ${error.message}`);
+                res.status(500).json({ error: "Failed to upload files" });
             }
         });
 
@@ -611,7 +828,9 @@ class StatusRoutes {
             const isDuplicate = canonicalIndex !== null && canonicalIndex !== index;
             const isRotation = rotationIndices.includes(index);
 
-            return { canonicalIndex, index, isDuplicate, isInvalid, isRotation, name };
+            const hasContext = browserManager.contexts.has(index);
+
+            return { canonicalIndex, hasContext, index, isDuplicate, isInvalid, isRotation, name };
         });
 
         const currentAuthIndex = requestHandler.currentAuthIndex;
@@ -632,8 +851,9 @@ class StatusRoutes {
             logs: displayLogs.join("\n"),
             status: {
                 accountDetails,
+                activeContextsCount: browserManager.contexts.size,
                 apiKeySource: config.apiKeySource,
-                browserConnected: !!browserManager.browser,
+                browserConnected: !!this.serverSystem.connectionRegistry.getConnectionByAuth(currentAuthIndex, false),
                 currentAccountName,
                 currentAuthIndex,
                 debugMode: LoggingService.isDebugEnabled(),
@@ -650,6 +870,7 @@ class StatusRoutes {
                 invalidIndicesRaw: invalidIndices,
                 isSystemBusy: requestHandler.isSystemBusy,
                 logMaxCount: limit,
+                maxContexts: config.maxContexts,
                 rotationIndicesRaw: rotationIndices,
                 streamingMode: this.serverSystem.streamingMode,
                 usageCount,

@@ -26,6 +26,8 @@ This guide will help you deploy the `aistudio-to-api` service on [Zeabur](https:
    | :--------- | :-------------------- | :----------------------------------------- |
    | `API_KEYS` | `your-secret-key-123` | **Required**. Define your own access keys. |
 
+   > ⚠️ **Warning**: Do not set or modify the `MAX_CONTEXTS` environment variable. Keep the default value of 1. Increasing this value will significantly increase memory usage and may cause the service to crash due to insufficient memory.
+
    **Port**:
    - Click the **Add Port** button.
    - **Port Number**: `7860`

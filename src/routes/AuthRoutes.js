@@ -24,8 +24,12 @@ class AuthRoutes {
 
         // Rate limiting configuration from environment variables
         this.rateLimitEnabled = process.env.RATE_LIMIT_MAX_ATTEMPTS !== "0";
-        this.rateLimitWindow = parseInt(process.env.RATE_LIMIT_WINDOW_MINUTES) || 15; // minutes
-        this.rateLimitMaxAttempts = parseInt(process.env.RATE_LIMIT_MAX_ATTEMPTS) || 5;
+
+        const parsedWindow = parseInt(process.env.RATE_LIMIT_WINDOW_MINUTES, 10);
+        this.rateLimitWindow = Number.isFinite(parsedWindow) && parsedWindow > 0 ? parsedWindow : 15; // minutes
+
+        const parsedMaxAttempts = parseInt(process.env.RATE_LIMIT_MAX_ATTEMPTS, 10);
+        this.rateLimitMaxAttempts = Number.isFinite(parsedMaxAttempts) && parsedMaxAttempts > 0 ? parsedMaxAttempts : 5;
 
         if (this.rateLimitEnabled) {
             this.logger.info(

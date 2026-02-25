@@ -8,7 +8,7 @@ A tool that wraps Google AI Studio web interface to provide OpenAI API, Gemini A
 
 - 🔄 **API Compatibility**: Compatible with OpenAI API, Gemini API, and Anthropic API formats
 - 🌐 **Web Automation**: Uses browser automation to interact with AI Studio web interface
-- 🔐 **Authentication**: Secure API key-based authentication
+- 👥 **Multi-Account Support**: Support multiple Google accounts logged in simultaneously for fast switching without re-login
 - 🔧 **Tool Calls Support**: OpenAI, Gemini, and Anthropic APIs all support Tool Calls (Function Calling)
 - 📝 **Model Support**: Access to various Gemini models through AI Studio, including image generation and TTS (text-to-speech) models
 - 🎨 **Homepage Display Control**: Provides a visual web console with account management, VNC login, and more
@@ -232,18 +232,19 @@ This endpoint forwards requests to the official Gemini API format endpoint.
 
 #### 🌐 Proxy Configuration
 
-| Variable                        | Description                                                                                                                                                                                                 | Default   |
-| :------------------------------ | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :-------- |
-| `INITIAL_AUTH_INDEX`            | Initial authentication index to use on startup.                                                                                                                                                             | `0`       |
-| `ENABLE_AUTH_UPDATE`            | Whether to enable automatic auth credential updates. Defaults to enabled. The auth file will be automatically updated upon successful login/account switch and every 24 hours. Set to `false` to disable.   | `true`    |
-| `MAX_RETRIES`                   | Maximum number of retries for failed requests (only effective for fake streaming and non-streaming).                                                                                                        | `3`       |
-| `RETRY_DELAY`                   | Delay between retries in milliseconds.                                                                                                                                                                      | `2000`    |
-| `SWITCH_ON_USES`                | Number of requests before automatically switching accounts (`0` to disable).                                                                                                                                | `40`      |
-| `FAILURE_THRESHOLD`             | Number of consecutive failures before switching accounts (`0` to disable).                                                                                                                                  | `3`       |
-| `IMMEDIATE_SWITCH_STATUS_CODES` | HTTP status codes that trigger immediate account switching (comma-separated, set to empty to disable).                                                                                                      | `429,503` |
-| `HTTP_PROXY`                    | HTTP proxy address for accessing Google services.                                                                                                                                                           | None      |
-| `HTTPS_PROXY`                   | HTTPS proxy address for accessing Google services.                                                                                                                                                          | None      |
-| `NO_PROXY`                      | Comma-separated list of addresses to bypass the proxy. The project automatically bypasses local addresses (localhost, 127.0.0.1 and 0.0.0.0), so manual local bypass configuration is usually not required. | None      |
+| Variable                        | Description                                                                                                                                                                                                                                                           | Default   |
+| :------------------------------ | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :-------- |
+| `INITIAL_AUTH_INDEX`            | Initial authentication index to use on startup.                                                                                                                                                                                                                       | `0`       |
+| `ENABLE_AUTH_UPDATE`            | Whether to enable automatic auth credential updates. Defaults to enabled. The auth file will be automatically updated upon successful login/account switch and every 24 hours. Set to `false` to disable.                                                             | `true`    |
+| `MAX_RETRIES`                   | Maximum number of retries for failed requests (only effective for fake streaming and non-streaming).                                                                                                                                                                  | `3`       |
+| `RETRY_DELAY`                   | Delay between retries in milliseconds.                                                                                                                                                                                                                                | `2000`    |
+| `SWITCH_ON_USES`                | Number of requests before automatically switching accounts (`0` to disable).                                                                                                                                                                                          | `40`      |
+| `FAILURE_THRESHOLD`             | Number of consecutive failures before switching accounts (`0` to disable).                                                                                                                                                                                            | `3`       |
+| `IMMEDIATE_SWITCH_STATUS_CODES` | HTTP status codes that trigger immediate account switching (comma-separated, set to empty to disable).                                                                                                                                                                | `429,503` |
+| `MAX_CONTEXTS`                  | Maximum number of accounts that can be logged in simultaneously. Accounts logged in simultaneously can switch faster without re-login. Higher values consume more memory (approx: 1 account ~700MB, 2 accounts ~950MB, 3 accounts ~1100MB). Set to `0` for unlimited. | `1`       |
+| `HTTP_PROXY`                    | HTTP proxy address for accessing Google services.                                                                                                                                                                                                                     | None      |
+| `HTTPS_PROXY`                   | HTTPS proxy address for accessing Google services.                                                                                                                                                                                                                    | None      |
+| `NO_PROXY`                      | Comma-separated list of addresses to bypass the proxy. The project automatically bypasses local addresses (localhost, 127.0.0.1 and 0.0.0.0), so manual local bypass configuration is usually not required.                                                           | None      |
 
 #### 🗒️ Other Configuration
 

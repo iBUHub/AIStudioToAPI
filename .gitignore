@@ -2,6 +2,7 @@
 .idea/
 .cursor/
 .DS_Store
+.claude/
 
 # Environment variables (keep .env.example)
 .env
