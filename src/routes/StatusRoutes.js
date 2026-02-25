@@ -691,7 +691,7 @@ class StatusRoutes {
                 const newFilename = `auth-${nextAuthIndex}.json`;
                 const filePath = path.join(configDir, newFilename);
 
-                fs.writeFileSync(filePath, fileContent);
+                await fs.promises.writeFile(filePath, fileContent);
 
                 // Reload auth sources to pick up changes
                 this.serverSystem.authSource.reloadAuthSources();
@@ -751,7 +751,7 @@ class StatusRoutes {
                         const newFilename = `auth-${nextAuthIndex}.json`;
                         const filePath = path.join(configDir, newFilename);
 
-                        fs.writeFileSync(filePath, fileContent);
+                        await fs.promises.writeFile(filePath, fileContent);
 
                         results.push({ filename: newFilename, index: i, success: true });
                         this.logger.info(`[WebUI] Batch upload: generated ${newFilename}`);
