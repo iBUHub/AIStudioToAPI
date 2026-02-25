@@ -8,7 +8,7 @@ A tool that wraps Google AI Studio web interface to provide OpenAI API, Gemini A
 
 - 🔄 **API Compatibility**: Compatible with OpenAI API, Gemini API, and Anthropic API formats
 - 🌐 **Web Automation**: Uses browser automation to interact with AI Studio web interface
-- 🔐 **Authentication**: Secure API key-based authentication
+- 👥 **Multi-Account Support**: Support multiple Google accounts logged in simultaneously for fast switching without re-login
 - 🔧 **Tool Calls Support**: OpenAI, Gemini, and Anthropic APIs all support Tool Calls (Function Calling)
 - 📝 **Model Support**: Access to various Gemini models through AI Studio, including image generation and TTS (text-to-speech) models
 - 🎨 **Homepage Display Control**: Provides a visual web console with account management, VNC login, and more
