@@ -144,6 +144,7 @@ Key variables (see `.env.example` for full list):
 - `IMMEDIATE_SWITCH_STATUS_CODES`: Status codes triggering immediate switch (default: 429,503)
 - `HTTP_PROXY`/`HTTPS_PROXY`: Proxy configuration for Google services
 - `CAMOUFOX_EXECUTABLE_PATH`: Custom browser executable path
+- `MAX_CONTEXTS`: Maximum number of accounts logged in simultaneously for faster switching (default: 1, memory usage: ~700MB per account)
 - `LOG_LEVEL`: Set to "DEBUG" for verbose logging
 
 ### Model Configuration

@@ -33,6 +33,8 @@ This guide will help you deploy the `aistudio-to-api` service on [Claw Cloud Run
    | :--------- | :-------------------- | :----------------------------------------- |
    | `API_KEYS` | `your-secret-key-123` | **Required**. Define your own access keys. |
 
+   > ⚠️ **Warning**: Do not set or modify the `MAX_CONTEXTS` environment variable. Keep the default value of 1. Increasing this value will significantly increase memory usage and may cause the service to crash due to insufficient memory.
+
 4. **Deploy**: Click **Create App** to start the deployment.
 
 ## 📡 Accessing the Service
