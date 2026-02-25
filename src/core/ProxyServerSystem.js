@@ -29,7 +29,7 @@ const WebRoutes = require("../routes/WebRoutes");
 class ProxyServerSystem extends EventEmitter {
     constructor() {
         super();
-        this.logger = new LoggingService("ProxySystem");
+        this.logger = new LoggingService("AIStudioToAPI");
 
         const configLoader = new ConfigLoader(this.logger);
         this.config = configLoader.loadConfiguration();
