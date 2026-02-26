@@ -157,7 +157,7 @@ class AuthSwitcher {
 
             // If we had a current account, try it as a final fallback
             // If we had no current account, we already tried all accounts, so skip fallback
-            if (hasCurrentAccount && originalStartAccount) {
+            if (hasCurrentAccount && originalStartAccount !== null) {
                 this.logger.warn("==================================================");
                 this.logger.warn(
                     `⚠️ [Auth] All other accounts failed. Making final attempt with original starting account #${originalStartAccount}...`

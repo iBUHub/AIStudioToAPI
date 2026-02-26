@@ -1452,7 +1452,7 @@ class BrowserManager {
             if (!this.isClosingIntentionally) {
                 this.logger.error("❌ [Browser] Main browser unexpectedly disconnected!");
             } else {
-                this.logger.info("[Browser] Main browser closed intentionally.");
+                this.logger.debug("[Browser] Main browser closed intentionally.");
             }
             this.browser = null;
             this._cleanupAllContexts();
@@ -2467,7 +2467,7 @@ class BrowserManager {
             // DO NOT reset backgroundWakeupRunning here!
             // If a BackgroundWakeup was running, it will detect this.page === null and exit on its own.
             // Resetting the flag here could allow a new instance to start before the old one exits.
-            this.logger.info(`[Browser] Current context was closed, currentAuthIndex reset to -1.`);
+            this.logger.debug(`[Browser] Current context was closed, currentAuthIndex reset to -1.`);
         }
 
         // Close the context AFTER removing from map
@@ -2533,7 +2533,7 @@ class BrowserManager {
         }
 
         if (this.browser) {
-            this.logger.info("[Browser] Closing main browser instance and all contexts...");
+            this.logger.debug("[Browser] Closing main browser instance and all contexts...");
             try {
                 // Give close() 5 seconds, otherwise force proceed
                 await Promise.race([this.browser.close(), new Promise(resolve => setTimeout(resolve, 5000))]);
@@ -2543,7 +2543,7 @@ class BrowserManager {
 
             this.browser = null;
             this._cleanupAllContexts();
-            this.logger.info("[Browser] Main browser instance and all contexts closed, currentAuthIndex reset to -1.");
+            this.logger.debug("[Browser] Main browser instance and all contexts closed, currentAuthIndex reset to -1.");
         }
 
         // Reset flag after close is complete
