@@ -11,6 +11,7 @@
  */
 const AuthSwitcher = require("../auth/AuthSwitcher");
 const FormatConverter = require("./FormatConverter");
+const { isUserAbortedError } = require("../utils/CustomErrors");
 
 class RequestHandler {
     constructor(serverSystem, connectionRegistry, logger, browserManager, config, authSource) {
@@ -1234,7 +1235,7 @@ class RequestHandler {
             if (!result.success) {
                 clearTimeout(connectionMaintainer);
 
-                if (result.error.message?.includes("The user aborted a request")) {
+                if (isUserAbortedError(result.error)) {
                     this.logger.info(
                         `[Request] Request #${proxyRequest.request_id} was properly cancelled by user, not counted in failure statistics.`
                     );
@@ -1397,7 +1398,7 @@ class RequestHandler {
         const headerMessage = await messageQueue.dequeue();
 
         if (headerMessage.event_type === "error") {
-            if (headerMessage.message && headerMessage.message.includes("The user aborted a request")) {
+            if (isUserAbortedError(headerMessage)) {
                 this.logger.info(
                     `[Request] Request #${proxyRequest.request_id} was properly cancelled by user, not counted in failure statistics.`
                 );
@@ -1488,7 +1489,7 @@ class RequestHandler {
 
             if (!result.success) {
                 // If retries failed, handle the failure (e.g., switch account)
-                if (result.error.message?.includes("The user aborted a request")) {
+                if (isUserAbortedError(result.error)) {
                     this.logger.info(`[Request] Request #${proxyRequest.request_id} was properly cancelled by user.`);
                 } else {
                     this.logger.error(`[Request] Browser returned error after retries: ${result.error.message}`);

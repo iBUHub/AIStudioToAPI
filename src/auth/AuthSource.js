@@ -280,7 +280,15 @@ class AuthSource {
 
     /**
      * Mark an auth as expired
+     *
+     * Side effects:
+     * - Adds "expired": true to the auth file (configs/auth/auth-{index}.json)
+     * - Adds index to this.expiredIndices array
+     * - Rebuilds rotation indices (calls this._buildRotationIndices()) to exclude the expired account from rotation
+     * - Updates canonicalIndexMap to reflect the new rotation state
+     *
      * @param {number} index - Auth index to mark as expired
+     * @returns {boolean} True if successfully marked as expired, false if auth doesn't exist, is already expired, or file operation fails
      */
     markAsExpired(index) {
         if (!this.availableIndices.includes(index)) {
@@ -315,7 +323,15 @@ class AuthSource {
 
     /**
      * Unmark an auth as expired (restore it to active status)
+     *
+     * Side effects:
+     * - Removes "expired" field from the auth file (configs/auth/auth-{index}.json)
+     * - Removes index from this.expiredIndices array
+     * - Rebuilds rotation indices (calls this._buildRotationIndices()) to include the restored account in rotation
+     * - Updates canonicalIndexMap to reflect the new rotation state
+     *
      * @param {number} index - Auth index to restore
+     * @returns {boolean} True if successfully restored, false if auth doesn't exist, is not expired, or file operation fails
      */
     unmarkAsExpired(index) {
         if (!this.availableIndices.includes(index)) {

@@ -7,6 +7,7 @@
 
 const { EventEmitter } = require("events");
 const MessageQueue = require("../utils/MessageQueue");
+const { ReconnectCancelledError, isReconnectCancelledError } = require("../utils/CustomErrors");
 
 /**
  * Connection Registry Module
@@ -81,7 +82,7 @@ class ConnectionRegistry extends EventEmitter {
             clearTimeout(timeoutId);
             // Reject the timeout promise to unblock Promise.race() - this is caught and ignored
             if (timeoutReject) {
-                timeoutReject(new Error("Reconnect succeeded, timeout cancelled"));
+                timeoutReject(new ReconnectCancelledError("Reconnect succeeded, timeout cancelled"));
             }
             this.lightweightReconnectTimeouts.delete(authIndex);
             this.logger.debug(`[Server] Cleared lightweight reconnect timeout for reconnected authIndex=${authIndex}`);
@@ -154,7 +155,7 @@ class ConnectionRegistry extends EventEmitter {
                     const { timeoutId, timeoutReject } = this.lightweightReconnectTimeouts.get(disconnectedAuthIndex);
                     clearTimeout(timeoutId);
                     if (timeoutReject) {
-                        timeoutReject(new Error("Page closed, reconnect cancelled"));
+                        timeoutReject(new ReconnectCancelledError("Page closed, reconnect cancelled"));
                     }
                     this.lightweightReconnectTimeouts.delete(disconnectedAuthIndex);
                 }
@@ -223,8 +224,7 @@ class ConnectionRegistry extends EventEmitter {
                     );
                 } catch (error) {
                     // Check if this is a cancellation (reconnect succeeded) or a real failure
-                    const isCancellation = error.message && error.message.includes("cancelled");
-                    if (isCancellation) {
+                    if (isReconnectCancelledError(error)) {
                         this.logger.info(
                             `[Server] Lightweight reconnect cancelled for account #${disconnectedAuthIndex} (connection re-established)`
                         );
@@ -388,7 +388,7 @@ class ConnectionRegistry extends EventEmitter {
                 const { timeoutId, timeoutReject } = this.lightweightReconnectTimeouts.get(authIndex);
                 clearTimeout(timeoutId);
                 if (timeoutReject) {
-                    timeoutReject(new Error("Connection closed manually, reconnect cancelled"));
+                    timeoutReject(new ReconnectCancelledError("Connection closed manually, reconnect cancelled"));
                 }
                 this.lightweightReconnectTimeouts.delete(authIndex);
                 this.logger.debug(`[Registry] Cleared lightweight reconnect timeout for authIndex=${authIndex}`);

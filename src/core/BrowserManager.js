@@ -11,29 +11,12 @@ const { firefox, devices } = require("playwright");
 const os = require("os");
 
 const { parseProxyFromEnv } = require("../utils/ProxyUtils");
-
-/**
- * Custom error class for authentication expiration
- * Used to distinguish auth expiration from other errors without string matching
- */
-class AuthExpiredError extends Error {
-    constructor(
-        message = "🚨 Cookie expired/invalid! Browser was redirected to Google login page. Please re-extract storageState."
-    ) {
-        super(message);
-        this.name = "AuthExpiredError";
-        this.isAuthExpired = true;
-    }
-}
-
-/**
- * Helper function to check if an error is an auth expiration error
- * @param {Error} error - The error to check
- * @returns {boolean} True if the error indicates auth expiration
- */
-function isAuthExpiredError(error) {
-    return error instanceof AuthExpiredError || error?.isAuthExpired === true;
-}
+const {
+    AuthExpiredError,
+    isAuthExpiredError,
+    ContextAbortedError,
+    isContextAbortedError,
+} = require("../utils/CustomErrors");
 
 /**
  * Browser Manager Module
@@ -197,7 +180,7 @@ class BrowserManager {
                 // Check if this specific context was marked for abort
                 if (this.abortedContexts.has(authIndex)) {
                     this.logger.info(`${logPrefix} WebSocket wait aborted (context marked for deletion)`);
-                    throw new Error(`Context initialization aborted for index ${authIndex} (marked for deletion)`);
+                    throw new ContextAbortedError(authIndex, "marked for deletion");
                 }
 
                 // Check if background preload was aborted (only for background tasks)
@@ -248,7 +231,7 @@ class BrowserManager {
             return false;
         } catch (error) {
             // If it's an abort error, re-throw it so the caller can handle it properly
-            if (error.message && error.message.includes("aborted for index")) {
+            if (isContextAbortedError(error)) {
                 throw error;
             }
             // For other errors, log and return false
@@ -1592,7 +1575,7 @@ class BrowserManager {
                 this.logger.info(`✅ [ContextPool] Background context #${authIndex} ready.`);
             } catch (error) {
                 // Check if this is an abort error (user deleted the account during initialization or background preload was aborted)
-                const isAbortError = error.message && error.message.includes("aborted for index");
+                const isAbortError = isContextAbortedError(error);
                 if (isAbortError) {
                     this.logger.info(`[ContextPool] Background context #${authIndex} aborted as requested`);
                     // If aborted due to background preload abort, mark as aborted
@@ -1880,12 +1863,12 @@ class BrowserManager {
         try {
             // Check if this context has been marked for abort before starting
             if (this.abortedContexts.has(authIndex)) {
-                throw new Error(`Context initialization aborted for index ${authIndex} (marked for deletion)`);
+                throw new ContextAbortedError(authIndex, "marked for deletion");
             }
 
             // Check if background preload was aborted (only for background tasks)
             if (isBackgroundTask && this._backgroundPreloadAbort) {
-                throw new Error(`Context initialization aborted for index ${authIndex} (background preload aborted)`);
+                throw new ContextAbortedError(authIndex, "background preload aborted");
             }
 
             // Initialize per-context WebSocket state to ensure clean state for this context
@@ -1905,7 +1888,7 @@ class BrowserManager {
 
             // Check abort status before expensive operations
             if (this.abortedContexts.has(authIndex) || (isBackgroundTask && this._backgroundPreloadAbort)) {
-                throw new Error(`Context initialization aborted for index ${authIndex} (marked for deletion)`);
+                throw new ContextAbortedError(authIndex, "marked for deletion");
             }
 
             context = await this.browser.newContext({
@@ -1917,7 +1900,7 @@ class BrowserManager {
 
             // Check abort status after context creation
             if (this.abortedContexts.has(authIndex) || (isBackgroundTask && this._backgroundPreloadAbort)) {
-                throw new Error(`Context initialization aborted for index ${authIndex} (marked for deletion)`);
+                throw new ContextAbortedError(authIndex, "marked for deletion");
             }
 
             // Inject Privacy Script immediately after context creation
@@ -1979,26 +1962,26 @@ class BrowserManager {
 
             // Check abort status before navigation (most time-consuming part)
             if (this.abortedContexts.has(authIndex) || (isBackgroundTask && this._backgroundPreloadAbort)) {
-                throw new Error(`Context initialization aborted for index ${authIndex} (marked for deletion)`);
+                throw new ContextAbortedError(authIndex, "marked for deletion");
             }
 
             await this._navigateAndWakeUpPage(page, `[Context#${authIndex}]`);
 
             // Check abort status after navigation
             if (this.abortedContexts.has(authIndex) || (isBackgroundTask && this._backgroundPreloadAbort)) {
-                throw new Error(`Context initialization aborted for index ${authIndex} (marked for deletion)`);
+                throw new ContextAbortedError(authIndex, "marked for deletion");
             }
 
             await this._checkPageStatusAndErrors(page, `[Context#${authIndex}]`, authIndex);
 
             if (this.abortedContexts.has(authIndex) || (isBackgroundTask && this._backgroundPreloadAbort)) {
-                throw new Error(`Context initialization aborted for index ${authIndex} (marked for deletion)`);
+                throw new ContextAbortedError(authIndex, "marked for deletion");
             }
 
             await this._handlePopups(page, `[Context#${authIndex}]`);
 
             if (this.abortedContexts.has(authIndex) || (isBackgroundTask && this._backgroundPreloadAbort)) {
-                throw new Error(`Context initialization aborted for index ${authIndex} (marked for deletion)`);
+                throw new ContextAbortedError(authIndex, "marked for deletion");
             }
 
             // Try to click Launch button if it exists (not a popup, but a page button)
@@ -2027,7 +2010,7 @@ class BrowserManager {
 
             // Final check before adding to contexts map
             if (this.abortedContexts.has(authIndex) || (isBackgroundTask && this._backgroundPreloadAbort)) {
-                throw new Error(`Context initialization aborted for index ${authIndex} (marked for deletion)`);
+                throw new ContextAbortedError(authIndex, "marked for deletion");
             }
 
             // Save to contexts map - with atomic abort check to prevent race condition
@@ -2039,7 +2022,7 @@ class BrowserManager {
                     page,
                 });
             } else {
-                throw new Error(`Context initialization aborted for index ${authIndex} (marked for deletion)`);
+                throw new ContextAbortedError(authIndex, "marked for deletion");
             }
 
             // Update auth file
@@ -2048,7 +2031,7 @@ class BrowserManager {
             return { context, page };
         } catch (error) {
             // Check if this is an abort error
-            const isAbortError = error.message && error.message.includes("aborted for index");
+            const isAbortError = isContextAbortedError(error);
             // Check if this is an auth expiration error
             const isAuthExpired = isAuthExpiredError(error);
 
@@ -2397,7 +2380,7 @@ class BrowserManager {
             return true;
         } catch (error) {
             // Check if this is an abort error (context was deleted during reconnect)
-            const isAbortError = error.message && error.message.includes("aborted for index");
+            const isAbortError = isContextAbortedError(error);
             // Check if this is an auth expiration error
             const isAuthExpired = isAuthExpiredError(error);
 
@@ -2575,5 +2558,3 @@ class BrowserManager {
 }
 
 module.exports = BrowserManager;
-module.exports.AuthExpiredError = AuthExpiredError;
-module.exports.isAuthExpiredError = isAuthExpiredError;
