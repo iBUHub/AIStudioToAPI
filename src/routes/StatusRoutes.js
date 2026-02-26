@@ -816,6 +816,7 @@ class StatusRoutes {
         const invalidIndices = initialIndices.filter(i => !authSource.availableIndices.includes(i));
         const rotationIndices = authSource.getRotationIndices();
         const duplicateIndices = authSource.duplicateIndices || [];
+        const expiredIndices = authSource.expiredIndices || [];
         const limit = this.logger.displayLimit || 100;
         const allLogs = this.logger.logBuffer || [];
         const displayLogs = allLogs.slice(-limit);
@@ -827,10 +828,11 @@ class StatusRoutes {
             const canonicalIndex = isInvalid ? null : authSource.getCanonicalIndex(index);
             const isDuplicate = canonicalIndex !== null && canonicalIndex !== index;
             const isRotation = rotationIndices.includes(index);
+            const isExpired = expiredIndices.includes(index);
 
             const hasContext = browserManager.contexts.has(index);
 
-            return { canonicalIndex, hasContext, index, isDuplicate, isInvalid, isRotation, name };
+            return { canonicalIndex, hasContext, index, isDuplicate, isExpired, isInvalid, isRotation, name };
         });
 
         const currentAuthIndex = requestHandler.currentAuthIndex;
@@ -858,6 +860,7 @@ class StatusRoutes {
                 currentAuthIndex,
                 debugMode: LoggingService.isDebugEnabled(),
                 duplicateIndicesRaw: duplicateIndices,
+                expiredIndicesRaw: expiredIndices,
                 failureCount,
                 forceThinking: this.serverSystem.forceThinking,
                 forceUrlContext: this.serverSystem.forceUrlContext,

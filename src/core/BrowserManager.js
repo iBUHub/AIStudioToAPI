@@ -676,7 +676,7 @@ class BrowserManager {
      * @param {string} logPrefix - Log prefix for messages (e.g., "[Browser]" or "[Reconnect]")
      * @throws {Error} If any error condition is detected
      */
-    async _checkPageStatusAndErrors(page, logPrefix = "[Browser]") {
+    async _checkPageStatusAndErrors(page, logPrefix = "[Browser]", authIndex = -1) {
         const currentUrl = page.url();
         let pageTitle = "";
         try {
@@ -695,6 +695,10 @@ class BrowserManager {
             pageTitle.includes("Sign in") ||
             pageTitle.includes("登录")
         ) {
+            // Mark auth as expired if authIndex is provided
+            if (authIndex >= 0 && this.authSource) {
+                this.authSource.markAsExpired(authIndex);
+            }
             throw new Error(
                 "🚨 Cookie expired/invalid! Browser was redirected to Google login page. Please re-extract storageState."
             );
@@ -1645,11 +1649,13 @@ class BrowserManager {
 
         // Build removal priority list (from lowest to highest priority to keep):
         // Priority 1: Old duplicate accounts (removedIndices from duplicateGroups)
-        // Priority 2: Accounts in rotation, ordered by distance from target (farthest first)
+        // Priority 2: Expired accounts (not the target if target is expired)
+        // Priority 3: Accounts in rotation, ordered by distance from target (farthest first)
 
         const rotation = this.authSource.getRotationIndices();
         const targetCanonical = this.authSource.getCanonicalIndex(targetAuthIndex);
         const duplicateGroups = this.authSource.getDuplicateGroups();
+        const expiredIndices = this.authSource.expiredIndices || [];
 
         // Get all old duplicate indices (not in rotation)
         const oldDuplicates = new Set();
@@ -1660,7 +1666,25 @@ class BrowserManager {
         }
 
         // Build rotation order starting from target (accounts closer to target have higher priority)
-        const startPos = Math.max(rotation.indexOf(targetCanonical), 0);
+        // Special case: If target is expired, use targetAuthIndex directly as startPos
+        const isTargetExpired = expiredIndices.includes(targetAuthIndex);
+        let startPos;
+        if (isTargetExpired) {
+            // For expired accounts, use the target index directly to find position in rotation
+            startPos = rotation.indexOf(targetAuthIndex);
+            if (startPos === -1) {
+                // Target not in rotation (it's expired), find closest position by index value
+                startPos = 0;
+                for (let i = 0; i < rotation.length; i++) {
+                    if (rotation[i] > targetAuthIndex) {
+                        startPos = i;
+                        break;
+                    }
+                }
+            }
+        } else {
+            startPos = Math.max(rotation.indexOf(targetCanonical), 0);
+        }
         const orderedFromTarget = [];
         for (let i = 0; i < rotation.length; i++) {
             orderedFromTarget.push(rotation[(startPos + i) % rotation.length]);
@@ -1692,7 +1716,14 @@ class BrowserManager {
             }
         }
 
-        // Priority 2: Accounts in rotation, from farthest to closest (reverse rotation order)
+        // Priority 2: Expired accounts (except target if target is expired)
+        for (const idx of allContextIndices) {
+            if (expiredIndices.includes(idx) && idx !== targetAuthIndex && !removalPriority.includes(idx)) {
+                removalPriority.push(idx);
+            }
+        }
+
+        // Priority 3: Accounts in rotation, from farthest to closest (reverse rotation order)
         for (let i = orderedFromTarget.length - 1; i >= 0; i--) {
             const canonical = orderedFromTarget[i];
             // Find all contexts with this canonical index
@@ -1735,10 +1766,12 @@ class BrowserManager {
         }
 
         // Targets = first maxContexts from ordered (or all available if unlimited)
-        // In unlimited mode, include all valid accounts (rotation + duplicates)
+        // In unlimited mode, include all valid accounts (rotation + duplicates), excluding expired
         let targets;
         if (isUnlimited) {
-            targets = new Set(this.authSource.availableIndices);
+            // Filter out expired accounts from availableIndices
+            const nonExpiredAvailable = this.authSource.availableIndices.filter(idx => !this.authSource.isExpired(idx));
+            targets = new Set(nonExpiredAvailable);
         } else {
             targets = new Set(ordered.slice(0, maxContexts));
         }
@@ -1934,7 +1967,7 @@ class BrowserManager {
                 throw new Error(`Context initialization aborted for index ${authIndex} (marked for deletion)`);
             }
 
-            await this._checkPageStatusAndErrors(page, `[Context#${authIndex}]`);
+            await this._checkPageStatusAndErrors(page, `[Context#${authIndex}]`, authIndex);
 
             if (this.abortedContexts.has(authIndex) || (isBackgroundTask && this._backgroundPreloadAbort)) {
                 throw new Error(`Context initialization aborted for index ${authIndex} (marked for deletion)`);
@@ -1994,8 +2027,16 @@ class BrowserManager {
         } catch (error) {
             // Check if this is an abort error
             const isAbortError = error.message && error.message.includes("aborted for index");
+            // Check if this is an auth expiration error
+            const isAuthExpired = error.message && error.message.includes("Cookie expired/invalid");
+
             if (isAbortError) {
                 this.logger.info(`[Browser] Context #${authIndex} initialization aborted as requested.`);
+            } else if (isAuthExpired) {
+                this.logger.error(
+                    `❌ [Browser] Context initialization failed for index ${authIndex} (auth expired), cleaning up...`
+                );
+                // Auth is already marked as expired in _checkPageStatusAndErrors
             } else {
                 this.logger.error(`❌ [Browser] Context initialization failed for index ${authIndex}, cleaning up...`);
             }
@@ -2088,13 +2129,27 @@ class BrowserManager {
                         pageTitle.includes("登录")
                     ) {
                         this.logger.warn(
-                            `[FastSwitch] Account #${authIndex} auth expired (redirected to login), cleaning up and re-initializing...`
+                            `[FastSwitch] Account #${authIndex} auth expired (redirected to login), marking as expired...`
                         );
+                        // Mark auth as expired
+                        this.authSource.markAsExpired(authIndex);
                         // Clean up the expired context
                         await this.closeContext(authIndex);
-                        // Fall through to slow path to re-initialize
+                        // Don't retry initialization - auth is expired, it will fail again
+                        throw new Error(
+                            "🚨 Cookie expired/invalid! Browser was redirected to Google login page. Please re-extract storageState."
+                        );
                     } else {
                         // Page is alive and auth is valid, proceed with fast switch
+                        // If this account was marked as expired but is now valid, restore it
+                        if (this.authSource.isExpired(authIndex)) {
+                            this.logger.info(
+                                `[FastSwitch] Account #${authIndex} was expired but is now valid, restoring...`
+                            );
+                            this.authSource.unmarkAsExpired(authIndex);
+                            // Note: rebalanceContextPool() will be called by the caller (AuthSwitcher)
+                        }
+
                         // Stop background tasks for old context
                         if (this._currentAuthIndex >= 0 && this.contexts.has(this._currentAuthIndex)) {
                             const oldContextData = this.contexts.get(this._currentAuthIndex);
@@ -2111,6 +2166,18 @@ class BrowserManager {
                         return;
                     }
                 } catch (error) {
+                    // Check if this is an auth expiration error
+                    const isAuthExpired = error.message && error.message.includes("Cookie expired/invalid");
+
+                    if (isAuthExpired) {
+                        // Auth is expired, don't retry - just throw the error
+                        this.logger.error(
+                            `[FastSwitch] Account #${authIndex} auth expired, skipping re-initialization`
+                        );
+                        throw error;
+                    }
+
+                    // For other errors, clean up and retry with slow path
                     this.logger.warn(
                         `[FastSwitch] Failed to check auth status for account #${authIndex}: ${error.message}, cleaning up and re-initializing...`
                     );
@@ -2152,6 +2219,13 @@ class BrowserManager {
             const { context, page } = await this._initializeContext(authIndex, false);
 
             this._activateContext(context, page, authIndex);
+
+            // If this account was marked as expired but login succeeded, restore it
+            if (this.authSource.isExpired(authIndex)) {
+                this.logger.info(`[Browser] Account #${authIndex} was expired but login succeeded, restoring...`);
+                this.authSource.unmarkAsExpired(authIndex);
+                // Note: rebalanceContextPool() will be called by the caller (AuthSwitcher)
+            }
 
             this.logger.info("==================================================");
             this.logger.info(`✅ [Browser] Account ${authIndex} context initialized successfully!`);
@@ -2257,7 +2331,7 @@ class BrowserManager {
             await this._navigateAndWakeUpPage(page, "[Reconnect]");
 
             // Check for cookie expiration, region restrictions, and other errors
-            await this._checkPageStatusAndErrors(page, "[Reconnect]");
+            await this._checkPageStatusAndErrors(page, "[Reconnect]", targetAuthIndex);
 
             // Handle various popups (Cookie consent, Got it, Onboarding, etc.)
             await this._handlePopups(page, "[Reconnect]");
@@ -2307,6 +2381,9 @@ class BrowserManager {
         } catch (error) {
             // Check if this is an abort error (context was deleted during reconnect)
             const isAbortError = error.message && error.message.includes("aborted for index");
+            // Check if this is an auth expiration error
+            const isAuthExpired = error.message && error.message.includes("Cookie expired/invalid");
+
             if (isAbortError) {
                 this.logger.info(
                     `[Reconnect] Lightweight reconnect aborted for account #${targetAuthIndex} (context deleted)`
@@ -2314,10 +2391,22 @@ class BrowserManager {
                 return false;
             }
 
+            if (isAuthExpired) {
+                this.logger.error(
+                    `❌ [Reconnect] Lightweight reconnect failed for account #${targetAuthIndex} (auth expired)`
+                );
+                // Auth is already marked as expired in _checkPageStatusAndErrors
+                await this._saveDebugArtifacts("reconnect_expired", targetAuthIndex, page);
+                // Close context for expired auth - it needs full re-initialization
+                await this.closeContext(targetAuthIndex);
+                return false;
+            }
+
             this.logger.error(
                 `❌ [Reconnect] Lightweight reconnect failed for account #${targetAuthIndex}: ${error.message}`
             );
-            await this._saveDebugArtifacts("reconnect_failed", targetAuthIndex);
+            await this._saveDebugArtifacts("reconnect_failed", targetAuthIndex, page);
+            // Keep context for non-expired failures - next request will try to refresh the page
             return false;
         }
     }
