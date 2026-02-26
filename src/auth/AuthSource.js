@@ -171,6 +171,7 @@ class AuthSource {
         this.rotationIndices = [];
         this.duplicateIndices = [];
         this.duplicateGroups = [];
+        this.canonicalIndexMap.clear();
 
         const emailKeyToIndices = new Map();
 

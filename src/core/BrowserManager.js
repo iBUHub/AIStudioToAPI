@@ -2128,7 +2128,7 @@ class BrowserManager {
                         pageTitle.includes("Sign in") ||
                         pageTitle.includes("登录")
                     ) {
-                        this.logger.warn(
+                        this.logger.error(
                             `[FastSwitch] Account #${authIndex} auth expired (redirected to login), marking as expired...`
                         );
                         // Mark auth as expired
@@ -2171,9 +2171,6 @@ class BrowserManager {
 
                     if (isAuthExpired) {
                         // Auth is expired, don't retry - just throw the error
-                        this.logger.error(
-                            `[FastSwitch] Account #${authIndex} auth expired, skipping re-initialization`
-                        );
                         throw error;
                     }
 
