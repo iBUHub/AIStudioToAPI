@@ -13,6 +13,29 @@ const os = require("os");
 const { parseProxyFromEnv } = require("../utils/ProxyUtils");
 
 /**
+ * Custom error class for authentication expiration
+ * Used to distinguish auth expiration from other errors without string matching
+ */
+class AuthExpiredError extends Error {
+    constructor(
+        message = "🚨 Cookie expired/invalid! Browser was redirected to Google login page. Please re-extract storageState."
+    ) {
+        super(message);
+        this.name = "AuthExpiredError";
+        this.isAuthExpired = true;
+    }
+}
+
+/**
+ * Helper function to check if an error is an auth expiration error
+ * @param {Error} error - The error to check
+ * @returns {boolean} True if the error indicates auth expiration
+ */
+function isAuthExpiredError(error) {
+    return error instanceof AuthExpiredError || error?.isAuthExpired === true;
+}
+
+/**
  * Browser Manager Module
  * Responsible for launching, managing, and switching browser contexts
  */
@@ -674,6 +697,7 @@ class BrowserManager {
      * Detects: cookie expiration, region restrictions, 403 errors, page load failures
      * @param {Page} page - The page object to check
      * @param {string} logPrefix - Log prefix for messages (e.g., "[Browser]" or "[Reconnect]")
+     * @param {number} authIndex - The auth index being checked (default: -1). When >= 0 and a login redirect is detected, this method will call this.authSource.markAsExpired(authIndex) to mark the auth as expired.
      * @throws {Error} If any error condition is detected
      */
     async _checkPageStatusAndErrors(page, logPrefix = "[Browser]", authIndex = -1) {
@@ -699,9 +723,7 @@ class BrowserManager {
             if (authIndex >= 0 && this.authSource) {
                 this.authSource.markAsExpired(authIndex);
             }
-            throw new Error(
-                "🚨 Cookie expired/invalid! Browser was redirected to Google login page. Please re-extract storageState."
-            );
+            throw new AuthExpiredError();
         }
 
         if (pageTitle.includes("Available regions") || pageTitle.includes("not available")) {
@@ -2028,7 +2050,7 @@ class BrowserManager {
             // Check if this is an abort error
             const isAbortError = error.message && error.message.includes("aborted for index");
             // Check if this is an auth expiration error
-            const isAuthExpired = error.message && error.message.includes("Cookie expired/invalid");
+            const isAuthExpired = isAuthExpiredError(error);
 
             if (isAbortError) {
                 this.logger.info(`[Browser] Context #${authIndex} initialization aborted as requested.`);
@@ -2136,9 +2158,7 @@ class BrowserManager {
                         // Clean up the expired context
                         await this.closeContext(authIndex);
                         // Don't retry initialization - auth is expired, it will fail again
-                        throw new Error(
-                            "🚨 Cookie expired/invalid! Browser was redirected to Google login page. Please re-extract storageState."
-                        );
+                        throw new AuthExpiredError();
                     } else {
                         // Page is alive and auth is valid, proceed with fast switch
                         // If this account was marked as expired but is now valid, restore it
@@ -2167,7 +2187,7 @@ class BrowserManager {
                     }
                 } catch (error) {
                     // Check if this is an auth expiration error
-                    const isAuthExpired = error.message && error.message.includes("Cookie expired/invalid");
+                    const isAuthExpired = isAuthExpiredError(error);
 
                     if (isAuthExpired) {
                         // Auth is expired, don't retry - just throw the error
@@ -2379,7 +2399,7 @@ class BrowserManager {
             // Check if this is an abort error (context was deleted during reconnect)
             const isAbortError = error.message && error.message.includes("aborted for index");
             // Check if this is an auth expiration error
-            const isAuthExpired = error.message && error.message.includes("Cookie expired/invalid");
+            const isAuthExpired = isAuthExpiredError(error);
 
             if (isAbortError) {
                 this.logger.info(
@@ -2555,3 +2575,5 @@ class BrowserManager {
 }
 
 module.exports = BrowserManager;
+module.exports.AuthExpiredError = AuthExpiredError;
+module.exports.isAuthExpiredError = isAuthExpiredError;
