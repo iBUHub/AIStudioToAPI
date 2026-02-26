@@ -680,7 +680,7 @@ class BrowserManager {
      * Detects: cookie expiration, region restrictions, 403 errors, page load failures
      * @param {Page} page - The page object to check
      * @param {string} logPrefix - Log prefix for messages (e.g., "[Browser]" or "[Reconnect]")
-     * @param {number} authIndex - The auth index being checked (default: -1). When >= 0 and a login redirect is detected, this method will call this.authSource.markAsExpired(authIndex) to mark the auth as expired.
+     * @param {number} authIndex - The auth index being checked (default: -1). When >= 0 and a login redirect is detected, this method will await this.authSource.markAsExpired(authIndex) to mark the auth as expired.
      * @throws {Error} If any error condition is detected
      */
     async _checkPageStatusAndErrors(page, logPrefix = "[Browser]", authIndex = -1) {
@@ -704,7 +704,7 @@ class BrowserManager {
         ) {
             // Mark auth as expired if authIndex is provided
             if (authIndex >= 0 && this.authSource) {
-                this.authSource.markAsExpired(authIndex);
+                await this.authSource.markAsExpired(authIndex);
             }
             throw new AuthExpiredError();
         }
@@ -1675,7 +1675,7 @@ class BrowserManager {
         const isTargetExpired = expiredIndices.includes(targetAuthIndex);
         let startPos;
         if (isTargetExpired) {
-            // For expired accounts, use the target index directly to find position in rotation
+            // For expired accounts, find rotation position by comparing index values (expired accounts are never in rotation)
             startPos = rotation.indexOf(targetAuthIndex);
             if (startPos === -1) {
                 // Target not in rotation (it's expired), find closest position by index value
@@ -2137,7 +2137,7 @@ class BrowserManager {
                             `[FastSwitch] Account #${authIndex} auth expired (redirected to login), marking as expired...`
                         );
                         // Mark auth as expired
-                        this.authSource.markAsExpired(authIndex);
+                        await this.authSource.markAsExpired(authIndex);
                         // Clean up the expired context
                         await this.closeContext(authIndex);
                         // Don't retry initialization - auth is expired, it will fail again
@@ -2149,7 +2149,7 @@ class BrowserManager {
                             this.logger.info(
                                 `[FastSwitch] Account #${authIndex} was expired but is now valid, restoring...`
                             );
-                            this.authSource.unmarkAsExpired(authIndex);
+                            await this.authSource.unmarkAsExpired(authIndex);
                             // Note: rebalanceContextPool() will be called by the caller (AuthSwitcher)
                         }
 
@@ -2223,7 +2223,7 @@ class BrowserManager {
             // If this account was marked as expired but login succeeded, restore it
             if (this.authSource.isExpired(authIndex)) {
                 this.logger.info(`[Browser] Account #${authIndex} was expired but login succeeded, restoring...`);
-                this.authSource.unmarkAsExpired(authIndex);
+                await this.authSource.unmarkAsExpired(authIndex);
                 // Note: rebalanceContextPool() will be called by the caller (AuthSwitcher)
             }
 

@@ -2,7 +2,7 @@
  * File: src/utils/CustomErrors.js
  * Description: Custom error classes for type-safe error handling without string matching
  *
- * Author: bbbugg
+ * Author: iBenzene, bbbugg
  */
 
 /**

@@ -6,6 +6,7 @@
  */
 
 const fs = require("fs");
+const fsPromises = require("fs").promises;
 const path = require("path");
 
 /**
@@ -288,9 +289,9 @@ class AuthSource {
      * - Updates canonicalIndexMap to reflect the new rotation state
      *
      * @param {number} index - Auth index to mark as expired
-     * @returns {boolean} True if successfully marked as expired, false if auth doesn't exist, is already expired, or file operation fails
+     * @returns {Promise<boolean>} True if successfully marked as expired, false if auth doesn't exist, is already expired, or file operation fails
      */
-    markAsExpired(index) {
+    async markAsExpired(index) {
         if (!this.availableIndices.includes(index)) {
             this.logger.warn(`[Auth] Cannot mark non-existent auth #${index} as expired`);
             return false;
@@ -303,9 +304,10 @@ class AuthSource {
 
         const authFilePath = path.join(process.cwd(), "configs", "auth", `auth-${index}.json`);
         try {
-            const authData = JSON.parse(fs.readFileSync(authFilePath, "utf-8"));
+            const fileContent = await fsPromises.readFile(authFilePath, "utf-8");
+            const authData = JSON.parse(fileContent);
             authData.expired = true;
-            fs.writeFileSync(authFilePath, JSON.stringify(authData, null, 2));
+            await fsPromises.writeFile(authFilePath, JSON.stringify(authData, null, 2));
 
             this.expiredIndices.push(index);
 
@@ -331,9 +333,9 @@ class AuthSource {
      * - Updates canonicalIndexMap to reflect the new rotation state
      *
      * @param {number} index - Auth index to restore
-     * @returns {boolean} True if successfully restored, false if auth doesn't exist, is not expired, or file operation fails
+     * @returns {Promise<boolean>} True if successfully restored, false if auth doesn't exist, is not expired, or file operation fails
      */
-    unmarkAsExpired(index) {
+    async unmarkAsExpired(index) {
         if (!this.availableIndices.includes(index)) {
             this.logger.warn(`[Auth] Cannot unmark non-existent auth #${index}`);
             return false;
@@ -346,9 +348,10 @@ class AuthSource {
 
         const authFilePath = path.join(process.cwd(), "configs", "auth", `auth-${index}.json`);
         try {
-            const authData = JSON.parse(fs.readFileSync(authFilePath, "utf-8"));
+            const fileContent = await fsPromises.readFile(authFilePath, "utf-8");
+            const authData = JSON.parse(fileContent);
             delete authData.expired;
-            fs.writeFileSync(authFilePath, JSON.stringify(authData, null, 2));
+            await fsPromises.writeFile(authFilePath, JSON.stringify(authData, null, 2));
 
             this.expiredIndices = this.expiredIndices.filter(idx => idx !== index);
 
