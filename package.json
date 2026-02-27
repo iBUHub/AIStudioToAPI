@@ -1,6 +1,6 @@
 {
     "name": "aistudio-to-api",
-    "version": "0.7.2",
+    "version": "1.0.0",
     "author": "Ellinav, iBenzene, bbbugg",
     "description": "Encapsulate Gemini models on AI Studio as API services.",
     "main": "main.js",
