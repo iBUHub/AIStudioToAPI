@@ -218,19 +218,19 @@ This endpoint forwards requests to the official Gemini API format endpoint.
 
 #### 📱 Application Configuration
 
-| Variable                    | Description                                                                                                          | Default              |
-| :-------------------------- | :------------------------------------------------------------------------------------------------------------------- | :------------------- |
-| `API_KEYS`                  | Comma-separated list of valid API keys for authentication.                                                           | `123456`             |
-| `WEB_CONSOLE_USERNAME`      | Username for web console login (optional). Used with password.                                                       | None                 |
-| `WEB_CONSOLE_PASSWORD`      | Password for web console login (optional). If set, this password replaces the API Key requirement for console login. | None                 |
-| `PORT`                      | API server port.                                                                                                     | `7860`               |
-| `HOST`                      | Server listening host address.                                                                                       | `0.0.0.0`            |
-| `ICON_URL`                  | Custom favicon URL for the console. Supports ICO, PNG, SVG, etc.                                                     | `/AIStudio_logo.svg` |
-| `SECURE_COOKIES`            | Enable secure cookies. `true` for HTTPS only, `false` for both HTTP and HTTPS.                                       | `false`              |
-| `RATE_LIMIT_MAX_ATTEMPTS`   | Maximum failed login attempts allowed within the time window (`0` to disable).                                       | `5`                  |
-| `RATE_LIMIT_WINDOW_MINUTES` | Time window for rate limiting in minutes.                                                                            | `15`                 |
-| `CHECK_UPDATE`              | Enable version update check on page load (`false` to disable).                                                       | `true`               |
-| `LOG_LEVEL`                 | Logging output level. Set to `DEBUG` for detailed debug logs.                                                        | `INFO`               |
+| Variable                    | Description                                                                                                                                                                 | Default              |
+| :-------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------------------- |
+| `API_KEYS`                  | Comma-separated list of valid API keys for authentication.                                                                                                                  | `123456`             |
+| `WEB_CONSOLE_USERNAME`      | Username for web console login (optional). If both username and password are set, both are required to login.                                                               | None                 |
+| `WEB_CONSOLE_PASSWORD`      | Password for web console login (optional). If only password is set, login requires password only. If neither is set, the system falls back to `API_KEYS` for console login. | None                 |
+| `PORT`                      | API server port.                                                                                                                                                            | `7860`               |
+| `HOST`                      | Server listening host address.                                                                                                                                              | `0.0.0.0`            |
+| `ICON_URL`                  | Custom favicon URL for the console. Supports ICO, PNG, SVG, etc.                                                                                                            | `/AIStudio_logo.svg` |
+| `SECURE_COOKIES`            | Enable secure cookies. `true` for HTTPS only, `false` for both HTTP and HTTPS.                                                                                              | `false`              |
+| `RATE_LIMIT_MAX_ATTEMPTS`   | Maximum failed login attempts allowed within the time window (`0` to disable).                                                                                              | `5`                  |
+| `RATE_LIMIT_WINDOW_MINUTES` | Time window for rate limiting in minutes.                                                                                                                                   | `15`                 |
+| `CHECK_UPDATE`              | Enable version update check on page load (`false` to disable).                                                                                                              | `true`               |
+| `LOG_LEVEL`                 | Logging output level. Set to `DEBUG` for detailed debug logs.                                                                                                               | `INFO`               |
 
 #### 🌐 Proxy Configuration
 
