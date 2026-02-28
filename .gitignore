@@ -24,6 +24,7 @@ camoufox*.zip
 # Authentication files
 configs/auth/
 auth-*.json
+users.csv
 cache/
 
 # Temporary files

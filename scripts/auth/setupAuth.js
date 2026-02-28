@@ -50,6 +50,90 @@ const selectLanguage = () =>
         });
     });
 
+// Select account from users.csv
+const selectAccountFromCSV = () =>
+    new Promise(resolve => {
+        const csvPath = path.join(PROJECT_ROOT, "users.csv");
+        if (!fs.existsSync(csvPath)) {
+            resolve(null);
+            return;
+        }
+
+        const content = fs.readFileSync(csvPath, "utf-8");
+        const lines = content.split(/\r?\n/).filter(line => line.trim() !== "");
+
+        // CSV parser that handles double quotes
+        const parseCSVLine = line => {
+            const parts = [];
+            let current = "";
+            let inQuotes = false;
+            for (let i = 0; i < line.length; i++) {
+                const char = line[i];
+                if (char === '"') {
+                    if (inQuotes && line[i + 1] === '"') {
+                        current += '"';
+                        i++;
+                    } else {
+                        inQuotes = !inQuotes;
+                    }
+                } else if (char === "," && !inQuotes) {
+                    parts.push(current.trim());
+                    current = "";
+                } else {
+                    current += char;
+                }
+            }
+            parts.push(current.trim());
+            return parts;
+        };
+
+        // Filter out headers (lines without @)
+        const accounts = lines
+            .map(line => parseCSVLine(line))
+            .filter(parts => parts.some(p => p.includes("@")))
+            .map(parts => {
+                const email = parts.find(p => p.includes("@"));
+                // Default: Email first, then Password
+                // Based on user's instruction: default is email, password
+                const emailIdx = parts.indexOf(email);
+                const password =
+                    parts[emailIdx + 1] || parts.find(p => p !== email && p.length > 5 && !p.includes("@"));
+                return { email, password };
+            })
+            .filter(acc => acc.email);
+
+        if (accounts.length === 0) {
+            resolve(null);
+            return;
+        }
+
+        const rl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout,
+        });
+
+        console.log("");
+        console.log("==========================================");
+        console.log(
+            getText("检测到 users.csv，请选择要预填的账号:", "Detected users.csv, select account to auto-fill:")
+        );
+        console.log(getText("  0. 不预填 (手动输入)", "  0. Do not auto-fill (manual)"));
+        accounts.forEach((acc, i) => {
+            console.log(`  ${i + 1}. ${acc.email}`);
+        });
+        console.log("==========================================");
+
+        rl.question("> ", answer => {
+            rl.close();
+            const idx = parseInt(answer.trim());
+            if (!isNaN(idx) && idx > 0 && idx <= accounts.length) {
+                resolve({ ...accounts[idx - 1], index: idx });
+            } else {
+                resolve(null);
+            }
+        });
+    });
+
 const execOrThrow = (command, args, options) => {
     const result = spawnSync(command, args, {
         stdio: "inherit",
@@ -447,7 +531,7 @@ const loadEnvConfig = () => {
     require("dotenv").config({ path: path.resolve(__dirname, "..", "..", ".env") });
 };
 
-const runSaveAuth = camoufoxExecutablePath => {
+const runSaveAuth = (camoufoxExecutablePath, selectedAccount) => {
     console.log(getText("[4/4] 启动认证保存工具...", "[4/4] Starting auth save tool..."));
     console.log("");
     console.log("==========================================");
@@ -460,6 +544,12 @@ const runSaveAuth = camoufoxExecutablePath => {
         CAMOUFOX_EXECUTABLE_PATH: camoufoxExecutablePath,
         SETUP_AUTH_LANG: lang, // Pass selected language to saveAuth.js
     };
+
+    if (selectedAccount) {
+        env.AUTO_FILL_EMAIL = selectedAccount.email;
+        env.AUTO_FILL_PWD = selectedAccount.password;
+        env.AUTH_INDEX_OVERRIDE = (selectedAccount.index + 100).toString();
+    }
 
     const result = spawnSync(process.execPath, [path.join("scripts", "auth", "saveAuth.js")], {
         cwd: PROJECT_ROOT,
@@ -490,6 +580,9 @@ const main = async () => {
     // Ask user to select language first
     await selectLanguage();
 
+    // Check for users.csv and ask for account selection
+    const selectedAccount = await selectAccountFromCSV();
+
     console.log("");
     console.log("==========================================");
     console.log(getText("  AI Studio To API - 认证设置", "  AI Studio To API - Auth Setup"));
@@ -519,7 +612,7 @@ const main = async () => {
         );
     }
 
-    runSaveAuth(camoufoxExecutablePath);
+    runSaveAuth(camoufoxExecutablePath, selectedAccount);
 
     console.log("");
     console.log("==========================================");
