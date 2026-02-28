@@ -1224,21 +1224,25 @@ class RequestHandler {
     }
 
     _handleClaudeRequestError(error, res) {
+        // Normalize error message to handle non-Error objects and missing/non-string messages
+        const errorMsg = String(error?.message ?? error);
+        const errorMsgLower = errorMsg.toLowerCase();
+
         if (res.headersSent) {
-            this.logger.error(`[Request] Claude request error (headers already sent): ${error.message}`);
+            this.logger.error(`[Request] Claude request error (headers already sent): ${errorMsg}`);
             if (!res.writableEnded) res.end();
         } else {
-            this.logger.error(`[Request] Claude request error: ${error.message}`);
+            this.logger.error(`[Request] Claude request error: ${errorMsg}`);
             let status = 500;
             let errorType = "api_error";
-            if (error.message.toLowerCase().includes("timeout")) {
+            if (errorMsgLower.includes("timeout")) {
                 status = 504;
                 errorType = "timeout_error";
             } else if (this._isConnectionResetError(error)) {
                 status = 503;
                 errorType = "overloaded_error";
             }
-            this._sendClaudeErrorResponse(res, status, errorType, `Proxy error: ${error.message}`);
+            this._sendClaudeErrorResponse(res, status, errorType, `Proxy error: ${errorMsg}`);
         }
     }
 
@@ -1857,8 +1861,12 @@ class RequestHandler {
     }
 
     _handleRequestError(error, res) {
+        // Normalize error message to handle non-Error objects and missing/non-string messages
+        const errorMsg = String(error?.message ?? error);
+        const errorMsgLower = errorMsg.toLowerCase();
+
         if (res.headersSent) {
-            this.logger.error(`[Request] Request processing error (headers already sent): ${error.message}`);
+            this.logger.error(`[Request] Request processing error (headers already sent): ${errorMsg}`);
 
             // Try to send error in the stream format
             if (!res.writableEnded) {
@@ -1867,51 +1875,51 @@ class RequestHandler {
                 if (contentType && contentType.includes("text/event-stream")) {
                     // SSE format - send error event
                     try {
-                        const errorMessage = error.message.toLowerCase().includes("timeout")
-                            ? `Stream timeout: ${error.message}`
-                            : `Processing failed: ${error.message}`;
+                        const errorMessage = errorMsgLower.includes("timeout")
+                            ? `Stream timeout: ${errorMsg}`
+                            : `Processing failed: ${errorMsg}`;
 
                         res.write(
                             `data: ${JSON.stringify({
                                 error: {
-                                    code: error.message.toLowerCase().includes("timeout") ? 504 : 500,
+                                    code: errorMsgLower.includes("timeout") ? 504 : 500,
                                     message: errorMessage,
-                                    type: error.message.toLowerCase().includes("timeout")
-                                        ? "timeout_error"
-                                        : "api_error",
+                                    type: errorMsgLower.includes("timeout") ? "timeout_error" : "api_error",
                                 },
                             })}\n\n`
                         );
                         this.logger.info("[Request] Error event sent to SSE stream");
                     } catch (writeError) {
-                        this.logger.error(`[Request] Failed to write error to stream: ${writeError.message}`);
+                        const writeErrorMsg = String(writeError?.message ?? writeError);
+                        this.logger.error(`[Request] Failed to write error to stream: ${writeErrorMsg}`);
                     }
                 } else if (this.serverSystem.streamingMode === "fake") {
                     // Fake streaming mode - try to send error chunk
                     try {
-                        this._sendErrorChunkToClient(res, `Processing failed: ${error.message}`);
+                        this._sendErrorChunkToClient(res, `Processing failed: ${errorMsg}`);
                     } catch (writeError) {
-                        this.logger.error(`[Request] Failed to write error chunk: ${writeError.message}`);
+                        const writeErrorMsg = String(writeError?.message ?? writeError);
+                        this.logger.error(`[Request] Failed to write error chunk: ${writeErrorMsg}`);
                     }
                 }
 
                 res.end();
             }
         } else {
-            this.logger.error(`[Request] Request processing error: ${error.message}`);
+            this.logger.error(`[Request] Request processing error: ${errorMsg}`);
             let status = 500;
-            if (error.message.toLowerCase().includes("timeout")) {
+            if (errorMsgLower.includes("timeout")) {
                 status = 504;
             } else if (this._isConnectionResetError(error)) {
                 status = 503;
                 // Only log as debug for client disconnect, log as info for other connection resets
-                if (error.message.includes("Queue closed")) {
+                if (errorMsgLower.includes("queue closed")) {
                     this.logger.debug("[Request] Client disconnect detected, returning 503 Service Unavailable.");
                 } else {
                     this.logger.info("[Request] Connection reset detected, returning 503 Service Unavailable.");
                 }
             }
-            this._sendErrorResponse(res, status, `Proxy error: ${error.message}`);
+            this._sendErrorResponse(res, status, `Proxy error: ${errorMsg}`);
         }
     }
 
