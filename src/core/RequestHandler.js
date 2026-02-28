@@ -17,7 +17,6 @@ const { QueueClosedError } = require("../utils/MessageQueue");
 // Timeout constants (in milliseconds)
 const TIMEOUTS = {
     FAKE_STREAM: 300000, // 300 seconds (5 minutes) - timeout for fake streaming (buffered response)
-    MESSAGE_QUEUE_DEFAULT: 300000, // 300 seconds (5 minutes) - default queue timeout
     STREAM_CHUNK: 60000, // 60 seconds - timeout between stream chunks
 };
 
@@ -659,6 +658,9 @@ class RequestHandler {
                         this.authSwitcher.failureCount = 0;
                     }
 
+                    // Use the queue that successfully received the initial message
+                    const activeQueue = result.queue;
+
                     if (isOpenAIStream) {
                         // Fake stream - ensure headers are set before sending data
                         if (!res.headersSent) {
@@ -676,7 +678,7 @@ class RequestHandler {
                         try {
                             // eslint-disable-next-line no-constant-condition
                             while (true) {
-                                const message = await messageQueue.dequeue(this.timeouts.FAKE_STREAM);
+                                const message = await activeQueue.dequeue(this.timeouts.FAKE_STREAM);
                                 if (message.type === "STREAM_END") {
                                     break;
                                 }
@@ -721,7 +723,7 @@ class RequestHandler {
                         }
                     } else {
                         // Non-stream
-                        await this._sendOpenAINonStreamResponse(messageQueue, res, model);
+                        await this._sendOpenAINonStreamResponse(activeQueue, res, model);
                     }
                 } finally {
                     if (connectionMaintainer) clearTimeout(connectionMaintainer);
@@ -910,6 +912,9 @@ class RequestHandler {
                         this.authSwitcher.failureCount = 0;
                     }
 
+                    // Use the queue that successfully received the initial message
+                    const activeQueue = result.queue;
+
                     if (isClaudeStream) {
                         // Fake stream
                         if (!res.headersSent) {
@@ -926,7 +931,7 @@ class RequestHandler {
                         try {
                             // eslint-disable-next-line no-constant-condition
                             while (true) {
-                                const message = await messageQueue.dequeue(this.timeouts.FAKE_STREAM);
+                                const message = await activeQueue.dequeue(this.timeouts.FAKE_STREAM);
                                 if (message.type === "STREAM_END") {
                                     break;
                                 }
@@ -982,7 +987,7 @@ class RequestHandler {
                         }
                     } else {
                         // Non-stream
-                        await this._sendClaudeNonStreamResponse(messageQueue, res, model);
+                        await this._sendClaudeNonStreamResponse(activeQueue, res, model);
                     }
                 } finally {
                     if (connectionMaintainer) clearTimeout(connectionMaintainer);
@@ -1362,6 +1367,9 @@ class RequestHandler {
                 this.authSwitcher.failureCount = 0;
             }
 
+            // Use the queue that successfully received the initial message
+            const activeQueue = result.queue;
+
             if (!res.headersSent) {
                 res.setHeader("Content-Type", "text/event-stream");
                 res.setHeader("Cache-Control", "no-cache");
@@ -1375,7 +1383,7 @@ class RequestHandler {
             try {
                 // eslint-disable-next-line no-constant-condition
                 while (true) {
-                    const message = await messageQueue.dequeue(); // 5 min timeout for fake streaming
+                    const message = await activeQueue.dequeue(); // 5 min timeout for fake streaming
                     if (message.type === "STREAM_END") {
                         break;
                     }
@@ -1646,11 +1654,14 @@ class RequestHandler {
                 this.authSwitcher.failureCount = 0;
             }
 
+            // Use the queue that successfully received the initial message
+            const activeQueue = result.queue;
+
             const headerMessage = result.message;
             const chunks = [];
             let receiving = true;
             while (receiving) {
-                const message = await messageQueue.dequeue();
+                const message = await activeQueue.dequeue();
                 if (message.type === "STREAM_END") {
                     this.logger.info("[Request] Received end signal, data reception complete.");
                     receiving = false;
@@ -1756,8 +1767,8 @@ class RequestHandler {
                     throw new Error(JSON.stringify(initialMessage));
                 }
 
-                // Success, return the initial message
-                return { message: initialMessage, success: true };
+                // Success, return the initial message and the queue that received it
+                return { message: initialMessage, queue: currentQueue, success: true };
             } catch (error) {
                 // Parse the structured error message
                 let errorPayload;
