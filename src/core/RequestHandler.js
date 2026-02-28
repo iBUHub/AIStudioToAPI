@@ -666,10 +666,17 @@ class RequestHandler {
                                     this.logger.error(
                                         `[Request] Error received during OpenAI fake stream: ${message.message}`
                                     );
-                                    if (!res.writableEnded) {
-                                        res.write(
-                                            `data: ${JSON.stringify({ error: { code: 500, message: message.message, type: "api_error" } })}\n\n`
-                                        );
+                                    // Check if response is still writable before attempting to write
+                                    if (!res.writableEnded && !res.destroyed && res.socket && !res.socket.destroyed) {
+                                        try {
+                                            res.write(
+                                                `data: ${JSON.stringify({ error: { code: 500, message: message.message, type: "api_error" } })}\n\n`
+                                            );
+                                        } catch (writeError) {
+                                            this.logger.debug(
+                                                `[Request] Failed to write error to OpenAI fake stream: ${writeError.message}`
+                                            );
+                                        }
                                     }
                                     break;
                                 }
@@ -909,16 +916,23 @@ class RequestHandler {
                                     this.logger.error(
                                         `[Request] Error received during Claude fake stream: ${message.message}`
                                     );
-                                    if (!res.writableEnded) {
-                                        res.write(
-                                            `event: error\ndata: ${JSON.stringify({
-                                                error: {
-                                                    message: message.message,
-                                                    type: "api_error",
-                                                },
-                                                type: "error",
-                                            })}\n\n`
-                                        );
+                                    // Check if response is still writable before attempting to write
+                                    if (!res.writableEnded && !res.destroyed && res.socket && !res.socket.destroyed) {
+                                        try {
+                                            res.write(
+                                                `event: error\ndata: ${JSON.stringify({
+                                                    error: {
+                                                        message: message.message,
+                                                        type: "api_error",
+                                                    },
+                                                    type: "error",
+                                                })}\n\n`
+                                            );
+                                        } catch (writeError) {
+                                            this.logger.debug(
+                                                `[Request] Failed to write error to Claude fake stream: ${writeError.message}`
+                                            );
+                                        }
                                     }
                                     break;
                                 }
@@ -1134,16 +1148,23 @@ class RequestHandler {
                 if (message.event_type === "error") {
                     this.logger.error(`[Request] Error received during Claude stream: ${message.message}`);
                     // Attempt to send error event to client if headers allowed, then close
-                    if (!res.writableEnded) {
-                        res.write(
-                            `event: error\ndata: ${JSON.stringify({
-                                error: {
-                                    message: message.message,
-                                    type: "api_error",
-                                },
-                                type: "error",
-                            })}\n\n`
-                        );
+                    // Check if response is still writable before attempting to write
+                    if (!res.writableEnded && !res.destroyed && res.socket && !res.socket.destroyed) {
+                        try {
+                            res.write(
+                                `event: error\ndata: ${JSON.stringify({
+                                    error: {
+                                        message: message.message,
+                                        type: "api_error",
+                                    },
+                                    type: "error",
+                                })}\n\n`
+                            );
+                        } catch (writeError) {
+                            this.logger.debug(
+                                `[Request] Failed to write error to Claude stream: ${writeError.message}`
+                            );
+                        }
                     }
                     break;
                 }
@@ -1161,16 +1182,29 @@ class RequestHandler {
             }
         } catch (error) {
             // Handle timeout or other errors during streaming
-            if (!res.writableEnded) {
-                res.write(
-                    `event: error\ndata: ${JSON.stringify({
-                        error: {
-                            message: `Stream timeout: ${error.message}`,
-                            type: "timeout_error",
-                        },
-                        type: "error",
-                    })}\n\n`
-                );
+            // Don't attempt to write if it's a connection reset (client disconnect) or if response is destroyed
+            if (this._isConnectionResetError(error)) {
+                this.logger.debug("[Request] Claude stream interrupted by connection reset, skipping error write");
+                return;
+            }
+
+            // Check if response is still writable before attempting to write
+            if (!res.writableEnded && !res.destroyed && res.socket && !res.socket.destroyed) {
+                try {
+                    res.write(
+                        `event: error\ndata: ${JSON.stringify({
+                            error: {
+                                message: `Stream timeout: ${error.message}`,
+                                type: "timeout_error",
+                            },
+                            type: "error",
+                        })}\n\n`
+                    );
+                } catch (writeError) {
+                    this.logger.debug(
+                        `[Request] Failed to write error to Claude stream (connection likely closed): ${writeError.message}`
+                    );
+                }
             }
         }
     }
@@ -1339,9 +1373,23 @@ class RequestHandler {
                 }
             } catch (error) {
                 // Handle timeout or other errors during streaming
-                if (!res.writableEnded) {
-                    res.write(
-                        `data: ${JSON.stringify({ error: { code: 504, message: `Stream timeout: ${error.message}`, status: "TIMEOUT" } })}\n\n`
+                // Don't attempt to write if it's a connection reset or if response is destroyed
+                if (!this._isConnectionResetError(error)) {
+                    // Check if response is still writable before attempting to write
+                    if (!res.writableEnded && !res.destroyed && res.socket && !res.socket.destroyed) {
+                        try {
+                            res.write(
+                                `data: ${JSON.stringify({ error: { code: 504, message: `Stream timeout: ${error.message}`, status: "TIMEOUT" } })}\n\n`
+                            );
+                        } catch (writeError) {
+                            this.logger.debug(
+                                `[Request] Failed to write error to Gemini pseudo-stream: ${writeError.message}`
+                            );
+                        }
+                    }
+                } else {
+                    this.logger.debug(
+                        "[Request] Gemini pseudo-stream interrupted by connection reset, skipping error write"
                     );
                 }
                 throw error; // Re-throw to be caught by outer catch
@@ -1501,10 +1549,17 @@ class RequestHandler {
 
                 if (dataMessage.event_type === "error") {
                     this.logger.error(`[Request] Error received during Gemini real stream: ${dataMessage.message}`);
-                    if (!res.writableEnded) {
-                        res.write(
-                            `data: ${JSON.stringify({ error: { code: 500, message: dataMessage.message, status: "INTERNAL_ERROR" } })}\n\n`
-                        );
+                    // Check if response is still writable before attempting to write
+                    if (!res.writableEnded && !res.destroyed && res.socket && !res.socket.destroyed) {
+                        try {
+                            res.write(
+                                `data: ${JSON.stringify({ error: { code: 500, message: dataMessage.message, status: "INTERNAL_ERROR" } })}\n\n`
+                            );
+                        } catch (writeError) {
+                            this.logger.debug(
+                                `[Request] Failed to write error to Gemini real stream: ${writeError.message}`
+                            );
+                        }
                     }
                     break;
                 }
@@ -1727,18 +1782,12 @@ class RequestHandler {
                     break;
                 }
 
-                // This prevents stale error messages from blocking the retry attempt
-                this.logger.debug(
-                    `[Request] Cleaning up message queue before retry #${attempt + 1} for request #${proxyRequest.request_id}`
-                );
-                try {
-                    currentQueue.close();
-                } catch (e) {
-                    this.logger.debug(`[Request] Failed to close old queue: ${e.message}`);
-                }
-
                 // Create a new message queue for the retry
                 // Note: We keep the same requestId so the browser response routes to the new queue
+                // createMessageQueue will automatically close and remove any existing queue with the same ID
+                this.logger.debug(
+                    `[Request] Creating new message queue for retry #${attempt + 1} for request #${proxyRequest.request_id}`
+                );
                 currentQueue = this.connectionRegistry.createMessageQueue(proxyRequest.request_id);
 
                 // Wait before the next retry
@@ -1766,10 +1815,17 @@ class RequestHandler {
                 if (message.event_type === "error") {
                     this.logger.error(`[Request] Error received during OpenAI stream: ${message.message}`);
                     // Attempt to send error event to client if headers allowed, then close
-                    if (!res.writableEnded) {
-                        res.write(
-                            `data: ${JSON.stringify({ error: { code: 500, message: message.message, type: "api_error" } })}\n\n`
-                        );
+                    // Check if response is still writable before attempting to write
+                    if (!res.writableEnded && !res.destroyed && res.socket && !res.socket.destroyed) {
+                        try {
+                            res.write(
+                                `data: ${JSON.stringify({ error: { code: 500, message: message.message, type: "api_error" } })}\n\n`
+                            );
+                        } catch (writeError) {
+                            this.logger.debug(
+                                `[Request] Failed to write error to OpenAI stream: ${writeError.message}`
+                            );
+                        }
                     }
                     break;
                 }
@@ -1787,10 +1843,23 @@ class RequestHandler {
             }
         } catch (error) {
             // Handle timeout or other errors during streaming
-            if (!res.writableEnded) {
-                res.write(
-                    `data: ${JSON.stringify({ error: { code: 504, message: `Stream timeout: ${error.message}`, type: "timeout_error" } })}\n\n`
-                );
+            // Don't attempt to write if it's a connection reset (client disconnect) or if response is destroyed
+            if (this._isConnectionResetError(error)) {
+                this.logger.debug("[Request] OpenAI stream interrupted by connection reset, skipping error write");
+                return;
+            }
+
+            // Check if response is still writable before attempting to write
+            if (!res.writableEnded && !res.destroyed && res.socket && !res.socket.destroyed) {
+                try {
+                    res.write(
+                        `data: ${JSON.stringify({ error: { code: 504, message: `Stream timeout: ${error.message}`, type: "timeout_error" } })}\n\n`
+                    );
+                } catch (writeError) {
+                    this.logger.debug(
+                        `[Request] Failed to write error to OpenAI stream (connection likely closed): ${writeError.message}`
+                    );
+                }
             }
         }
     }
@@ -1959,8 +2028,13 @@ class RequestHandler {
             res.setHeader("Cache-Control", "no-cache");
             res.setHeader("Connection", "keep-alive");
         }
-        if (!res.writableEnded) {
-            res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
+        // Check if response is still writable before attempting to write
+        if (!res.writableEnded && !res.destroyed && res.socket && !res.socket.destroyed) {
+            try {
+                res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
+            } catch (writeError) {
+                this.logger.debug(`[Request] Failed to write error chunk to client: ${writeError.message}`);
+            }
         }
     }
 

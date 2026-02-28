@@ -399,6 +399,21 @@ class ConnectionRegistry extends EventEmitter {
     }
 
     createMessageQueue(requestId) {
+        // If a queue with the same requestId already exists, close and remove it first
+        // This prevents stale queues from lingering when retrying failed requests
+        const existingQueue = this.messageQueues.get(requestId);
+        if (existingQueue) {
+            this.logger.debug(
+                `[Registry] Found existing message queue for request ${requestId}, closing it before creating new one`
+            );
+            try {
+                existingQueue.close();
+            } catch (e) {
+                this.logger.debug(`[Registry] Failed to close existing queue for ${requestId}: ${e.message}`);
+            }
+            this.messageQueues.delete(requestId);
+        }
+
         const queue = new MessageQueue();
         this.messageQueues.set(requestId, queue);
         return queue;
