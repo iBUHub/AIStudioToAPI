@@ -1392,7 +1392,7 @@ class RequestHandler {
                         "[Request] Gemini pseudo-stream interrupted by connection reset, skipping error write"
                     );
                 }
-                throw error; // Re-throw to be caught by outer catch
+                // Don't re-throw to avoid duplicate error handling by outer catch
             }
 
             try {
