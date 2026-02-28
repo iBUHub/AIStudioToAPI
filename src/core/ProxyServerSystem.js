@@ -91,6 +91,10 @@ class ProxyServerSystem extends EventEmitter {
             () => this.browserManager.currentAuthIndex,
             this.browserManager
         );
+
+        // Set ConnectionRegistry reference in BrowserManager to avoid circular dependency
+        this.browserManager.setConnectionRegistry(this.connectionRegistry);
+
         this.requestHandler = new RequestHandler(
             this,
             this.connectionRegistry,

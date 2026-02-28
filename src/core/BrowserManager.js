@@ -51,6 +51,9 @@ class BrowserManager {
         // Used by ConnectionRegistry callback to skip unnecessary reconnect attempts
         this.isClosingIntentionally = false;
 
+        // ConnectionRegistry reference (set after construction to avoid circular dependency)
+        this.connectionRegistry = null;
+
         // Background wakeup service status (instance-level, tracks this.page)
         // Prevents multiple BackgroundWakeup instances from running simultaneously
         this.backgroundWakeupRunning = false;
@@ -129,6 +132,14 @@ class BrowserManager {
 
     set currentAuthIndex(value) {
         this._currentAuthIndex = value;
+    }
+
+    /**
+     * Set the ConnectionRegistry reference (called after construction to avoid circular dependency)
+     * @param {ConnectionRegistry} connectionRegistry - The ConnectionRegistry instance
+     */
+    setConnectionRegistry(connectionRegistry) {
+        this.connectionRegistry = connectionRegistry;
     }
 
     /**
@@ -2458,6 +2469,17 @@ class BrowserManager {
         // This ensures that when context.close() triggers WebSocket disconnect,
         // _removeConnection will see that the context is already gone and skip reconnect logic
         this.contexts.delete(authIndex);
+
+        // Proactively close message queues BEFORE closing context to prevent race condition
+        // Race condition: context.close() triggers async WebSocket 'close' event, which calls _removeConnection()
+        // But _removeConnection() executes later in event loop, after switchAccount() may have updated currentAuthIndex
+        // So we must close queues NOW while currentAuthIndex still matches the closing account
+        if (this._currentAuthIndex === authIndex && this.connectionRegistry) {
+            this.logger.info(
+                `[Browser] Closing current account #${authIndex}, proactively closing all message queues to prevent race condition`
+            );
+            this.connectionRegistry.closeAllMessageQueues();
+        }
 
         // If this was the current context, reset current references
         if (this._currentAuthIndex === authIndex) {

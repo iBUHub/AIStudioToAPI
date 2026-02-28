@@ -2028,7 +2028,7 @@ class RequestHandler {
             } else if (this._isConnectionResetError(error)) {
                 status = 503;
                 // Only log as debug for client disconnect, log as info for other connection resets
-                if (errorMsgLower.includes("queue closed")) {
+                if (error.code === "QUEUE_CLOSED" || error instanceof QueueClosedError) {
                     this.logger.debug("[Request] Client disconnect detected, returning 503 Service Unavailable.");
                 } else {
                     this.logger.info("[Request] Connection reset detected, returning 503 Service Unavailable.");
