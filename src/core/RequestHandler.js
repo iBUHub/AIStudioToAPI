@@ -1658,12 +1658,13 @@ class RequestHandler {
 
     async _executeRequestWithRetries(proxyRequest, messageQueue) {
         let lastError = null;
+        let currentQueue = messageQueue;
 
         for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
             try {
                 this._forwardRequest(proxyRequest);
 
-                const initialMessage = await messageQueue.dequeue();
+                const initialMessage = await currentQueue.dequeue();
 
                 if (initialMessage.event_type === "timeout") {
                     throw new Error(
@@ -1725,6 +1726,20 @@ class RequestHandler {
                     );
                     break;
                 }
+
+                // This prevents stale error messages from blocking the retry attempt
+                this.logger.debug(
+                    `[Request] Cleaning up message queue before retry #${attempt + 1} for request #${proxyRequest.request_id}`
+                );
+                try {
+                    currentQueue.close();
+                } catch (e) {
+                    this.logger.debug(`[Request] Failed to close old queue: ${e.message}`);
+                }
+
+                // Create a new message queue for the retry
+                // Note: We keep the same requestId so the browser response routes to the new queue
+                currentQueue = this.connectionRegistry.createMessageQueue(proxyRequest.request_id);
 
                 // Wait before the next retry
                 await new Promise(resolve => setTimeout(resolve, this.retryDelay));
