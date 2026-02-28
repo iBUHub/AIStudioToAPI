@@ -259,6 +259,17 @@ sudo docker compose down
 | `FORCE_WEB_SEARCH`         | 强制为所有请求启用网络搜索。                                                        | `false`  |
 | `FORCE_URL_CONTEXT`        | 强制为所有请求启用 URL 上下文。                                                     | `false`  |
 | `CAMOUFOX_EXECUTABLE_PATH` | Camoufox 浏览器的可执行文件路径（支持绝对或相对路径）。仅在手动下载浏览器时需配置。 | 自动检测 |
+| `AUTH_INDEX_OVERRIDE`      | 强制使用的身份验证索引（通常由自动填充脚本内部使用）。                              | 无       |
+
+### ⚡ 账号自动填充
+
+为了简化多个账号的登录流程，您可以通过配置 `users.csv` 文件来实现自动填充：
+
+1. 在项目根目录创建 `users.csv`。
+2. 格式为：`email,password`（每行一个）。
+3. 运行 `npm run setup-auth` 后按提示选择账号。
+
+> 📖 详细配置说明请参阅：[账号自动填充指南](docs/zh/auto-fill-guide.md)
 
 ### 🧠 模型列表配置
 
