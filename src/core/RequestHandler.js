@@ -384,7 +384,12 @@ class RequestHandler {
                 await this._handleNonStreamResponse(proxyRequest, messageQueue, req, res);
             }
         } catch (error) {
-            this._handleRequestError(error, res);
+            // Don't log as error if it's just a client disconnect (Queue closed)
+            if (error.message && error.message.includes("Queue closed")) {
+                this.logger.info(`[Request] Request terminated: Client disconnected`);
+            } else {
+                this._handleRequestError(error, res);
+            }
         } finally {
             this.connectionRegistry.removeMessageQueue(requestId);
             if (this.needsSwitchingAfterRequest) {
@@ -456,7 +461,12 @@ class RequestHandler {
         try {
             await this._handleNonStreamResponse(proxyRequest, messageQueue, req, res);
         } catch (error) {
-            this._handleRequestError(error, res);
+            // Don't log as error if it's just a client disconnect (Queue closed)
+            if (error.message && error.message.includes("Queue closed")) {
+                this.logger.info(`[Request] Request terminated: Client disconnected`);
+            } else {
+                this._handleRequestError(error, res);
+            }
         } finally {
             this.connectionRegistry.removeMessageQueue(requestId);
             if (!res.writableEnded) res.end();
@@ -692,7 +702,12 @@ class RequestHandler {
                 }
             }
         } catch (error) {
-            this._handleRequestError(error, res);
+            // Don't log as error if it's just a client disconnect (Queue closed)
+            if (error.message && error.message.includes("Queue closed")) {
+                this.logger.info(`[Request] Request terminated: Client disconnected`);
+            } else {
+                this._handleRequestError(error, res);
+            }
         } finally {
             this.connectionRegistry.removeMessageQueue(requestId);
             if (this.needsSwitchingAfterRequest) {
@@ -941,7 +956,12 @@ class RequestHandler {
                 }
             }
         } catch (error) {
-            this._handleClaudeRequestError(error, res);
+            // Don't log as error if it's just a client disconnect (Queue closed)
+            if (error.message && error.message.includes("Queue closed")) {
+                this.logger.info(`[Request] Request terminated: Client disconnected`);
+            } else {
+                this._handleClaudeRequestError(error, res);
+            }
         } finally {
             this.connectionRegistry.removeMessageQueue(requestId);
             if (this.needsSwitchingAfterRequest) {
@@ -1084,7 +1104,12 @@ class RequestHandler {
 
             this.logger.info(`[Request] Claude count tokens completed: ${totalTokens} input tokens`);
         } catch (error) {
-            this._handleClaudeRequestError(error, res);
+            // Don't log as error if it's just a client disconnect (Queue closed)
+            if (error.message && error.message.includes("Queue closed")) {
+                this.logger.info(`[Request] Request terminated: Client disconnected`);
+            } else {
+                this._handleClaudeRequestError(error, res);
+            }
         } finally {
             this.connectionRegistry.removeMessageQueue(requestId);
             if (!res.writableEnded) res.end();
@@ -1406,7 +1431,12 @@ class RequestHandler {
                 `✅ [Request] Response ended, reason: ${finishReason}, request ID: ${proxyRequest.request_id}`
             );
         } catch (error) {
-            this._handleRequestError(error, res);
+            // Don't log as error if it's just a client disconnect (Queue closed)
+            if (error.message && error.message.includes("Queue closed")) {
+                this.logger.info(`[Request] Request terminated: Client disconnected`);
+            } else {
+                this._handleRequestError(error, res);
+            }
         } finally {
             clearTimeout(connectionMaintainer);
             if (!res.writableEnded) {
@@ -1874,7 +1904,12 @@ class RequestHandler {
                 status = 504;
             } else if (this._isConnectionResetError(error)) {
                 status = 503;
-                this.logger.info("[Request] Mapping connection reset error to 503 Service Unavailable.");
+                // Only log as debug for client disconnect, log as info for other connection resets
+                if (error.message.includes("Queue closed")) {
+                    this.logger.debug("[Request] Client disconnect detected, returning 503 Service Unavailable.");
+                } else {
+                    this.logger.info("[Request] Connection reset detected, returning 503 Service Unavailable.");
+                }
             }
             this._sendErrorResponse(res, status, `Proxy error: ${error.message}`);
         }
