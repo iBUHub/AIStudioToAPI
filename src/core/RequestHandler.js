@@ -359,16 +359,11 @@ class RequestHandler {
             }
         }
 
-        res.on("close", () => {
-            if (!res.writableEnded) {
-                this.logger.warn(`[Request] Client closed request #${requestId} connection prematurely.`);
-                this._cancelBrowserRequest(requestId);
-            }
-        });
-
         const proxyRequest = this._buildProxyRequest(req, requestId);
         proxyRequest.is_generative = isGenerativeRequest;
         const messageQueue = this.connectionRegistry.createMessageQueue(requestId);
+
+        this._setupClientDisconnectHandler(res, requestId);
 
         const wantsStreamByHeader = req.headers.accept && req.headers.accept.includes("text/event-stream");
         const wantsStreamByPath = req.path.includes(":streamGenerateContent");
@@ -443,13 +438,6 @@ class RequestHandler {
             this.browserManager.notifyUserActivity();
         }
 
-        res.on("close", () => {
-            if (!res.writableEnded) {
-                this.logger.warn(`[Upload] Client closed request #${requestId} connection prematurely.`);
-                this._cancelBrowserRequest(requestId);
-            }
-        });
-
         const proxyRequest = {
             body_b64: req.rawBody ? req.rawBody.toString("base64") : undefined,
             headers: req.headers,
@@ -462,6 +450,8 @@ class RequestHandler {
         };
 
         const messageQueue = this.connectionRegistry.createMessageQueue(requestId);
+
+        this._setupClientDisconnectHandler(res, requestId);
 
         try {
             await this._handleNonStreamResponse(proxyRequest, messageQueue, req, res);
@@ -510,13 +500,6 @@ class RequestHandler {
             this.browserManager.notifyUserActivity();
         }
 
-        res.on("close", () => {
-            if (!res.writableEnded) {
-                this.logger.warn(`[Request] Client closed request #${requestId} connection prematurely.`);
-                this._cancelBrowserRequest(requestId);
-            }
-        });
-
         const isOpenAIStream = req.body.stream === true;
         const systemStreamMode = this.serverSystem.streamingMode;
         const useRealStream = isOpenAIStream && systemStreamMode === "real";
@@ -558,6 +541,8 @@ class RequestHandler {
         };
 
         const messageQueue = this.connectionRegistry.createMessageQueue(requestId);
+
+        this._setupClientDisconnectHandler(res, requestId);
 
         try {
             if (useRealStream) {
@@ -762,13 +747,6 @@ class RequestHandler {
             this.browserManager.notifyUserActivity();
         }
 
-        res.on("close", () => {
-            if (!res.writableEnded) {
-                this.logger.warn(`[Request] Client closed request #${requestId} connection prematurely.`);
-                this._cancelBrowserRequest(requestId);
-            }
-        });
-
         const isClaudeStream = req.body.stream === true;
         const systemStreamMode = this.serverSystem.streamingMode;
         const useRealStream = isClaudeStream && systemStreamMode === "real";
@@ -810,6 +788,8 @@ class RequestHandler {
         };
 
         const messageQueue = this.connectionRegistry.createMessageQueue(requestId);
+
+        this._setupClientDisconnectHandler(res, requestId);
 
         try {
             if (useRealStream) {
@@ -1016,13 +996,6 @@ class RequestHandler {
             this.browserManager.notifyUserActivity();
         }
 
-        res.on("close", () => {
-            if (!res.writableEnded) {
-                this.logger.warn(`[Request] Client closed request #${requestId} connection prematurely.`);
-                this._cancelBrowserRequest(requestId);
-            }
-        });
-
         // Translate Claude format to Google format
         let googleBody, model;
         try {
@@ -1056,6 +1029,8 @@ class RequestHandler {
         };
 
         const messageQueue = this.connectionRegistry.createMessageQueue(requestId);
+
+        this._setupClientDisconnectHandler(res, requestId);
 
         try {
             this._forwardRequest(proxyRequest);
@@ -1929,6 +1904,20 @@ class RequestHandler {
         if (!res.writableEnded) {
             res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
         }
+    }
+
+    _setupClientDisconnectHandler(res, requestId) {
+        res.on("close", () => {
+            if (!res.writableEnded) {
+                this.logger.warn(`[Request] Client closed request #${requestId} connection prematurely.`);
+                this._cancelBrowserRequest(requestId);
+                // Close the message queue to unblock any waiting dequeue() calls
+                const queue = this.connectionRegistry.messageQueues.get(requestId);
+                if (queue) {
+                    queue.close();
+                }
+            }
+        });
     }
 
     _cancelBrowserRequest(requestId) {
