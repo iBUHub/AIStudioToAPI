@@ -64,7 +64,7 @@ class BrowserManager {
         this._wsInitState = new Map();
 
         // Target URL for AI Studio app
-        this.targetUrl = "https://ai.studio/apps/63257911-1f2c-441d-8022-effaa4ca4580";
+        this.targetUrl = "https://ai.studio/apps/0ca9e275-368c-4c54-9c0f-dd2cbef48aac";
 
         // Firefox/Camoufox does not use Chromium-style command line args.
         // We keep this empty; Camoufox has its own anti-fingerprinting optimizations built-in.

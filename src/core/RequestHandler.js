@@ -659,36 +659,45 @@ class RequestHandler {
 
                         this.logger.info(`[Request] OpenAI streaming response (Fake Mode) started...`);
                         let fullBody = "";
-                        // eslint-disable-next-line no-constant-condition
-                        while (true) {
-                            const message = await messageQueue.dequeue();
-                            if (message.type === "STREAM_END") {
-                                break;
-                            }
-
-                            if (message.event_type === "error") {
-                                this.logger.error(
-                                    `[Request] Error received during OpenAI fake stream: ${message.message}`
-                                );
-                                if (!res.writableEnded) {
-                                    res.write(
-                                        `data: ${JSON.stringify({ error: { code: 500, message: message.message, type: "api_error" } })}\n\n`
-                                    );
+                        try {
+                            // eslint-disable-next-line no-constant-condition
+                            while (true) {
+                                const message = await messageQueue.dequeue(); // 5 min timeout for fake streaming
+                                if (message.type === "STREAM_END") {
+                                    break;
                                 }
-                                break;
-                            }
 
-                            if (message.data) fullBody += message.data;
+                                if (message.event_type === "error") {
+                                    this.logger.error(
+                                        `[Request] Error received during OpenAI fake stream: ${message.message}`
+                                    );
+                                    if (!res.writableEnded) {
+                                        res.write(
+                                            `data: ${JSON.stringify({ error: { code: 500, message: message.message, type: "api_error" } })}\n\n`
+                                        );
+                                    }
+                                    break;
+                                }
+
+                                if (message.data) fullBody += message.data;
+                            }
+                            const streamState = {};
+                            const translatedChunk = this.formatConverter.translateGoogleToOpenAIStream(
+                                fullBody,
+                                model,
+                                streamState
+                            );
+                            if (translatedChunk) res.write(translatedChunk);
+                            res.write("data: [DONE]\n\n");
+                            this.logger.info("[Request] Fake mode: Complete content sent at once.");
+                        } catch (error) {
+                            // Handle timeout or other errors during streaming
+                            if (!res.writableEnded) {
+                                res.write(
+                                    `data: ${JSON.stringify({ error: { code: 504, message: `Stream timeout: ${error.message}`, type: "timeout_error" } })}\n\n`
+                                );
+                            }
                         }
-                        const streamState = {};
-                        const translatedChunk = this.formatConverter.translateGoogleToOpenAIStream(
-                            fullBody,
-                            model,
-                            streamState
-                        );
-                        if (translatedChunk) res.write(translatedChunk);
-                        res.write("data: [DONE]\n\n");
-                        this.logger.info("[Request] Fake mode: Complete content sent at once.");
                     } else {
                         // Non-stream
                         await this._sendOpenAINonStreamResponse(messageQueue, res, model);
@@ -893,41 +902,56 @@ class RequestHandler {
 
                         this.logger.info(`[Request] Claude streaming response (Fake Mode) started...`);
                         let fullBody = "";
-                        // eslint-disable-next-line no-constant-condition
-                        while (true) {
-                            const message = await messageQueue.dequeue();
-                            if (message.type === "STREAM_END") {
-                                break;
-                            }
-
-                            if (message.event_type === "error") {
-                                this.logger.error(
-                                    `[Request] Error received during Claude fake stream: ${message.message}`
-                                );
-                                if (!res.writableEnded) {
-                                    res.write(
-                                        `event: error\ndata: ${JSON.stringify({
-                                            error: {
-                                                message: message.message,
-                                                type: "api_error",
-                                            },
-                                            type: "error",
-                                        })}\n\n`
-                                    );
+                        try {
+                            // eslint-disable-next-line no-constant-condition
+                            while (true) {
+                                const message = await messageQueue.dequeue(); // 5 min timeout for fake streaming
+                                if (message.type === "STREAM_END") {
+                                    break;
                                 }
-                                break;
-                            }
 
-                            if (message.data) fullBody += message.data;
+                                if (message.event_type === "error") {
+                                    this.logger.error(
+                                        `[Request] Error received during Claude fake stream: ${message.message}`
+                                    );
+                                    if (!res.writableEnded) {
+                                        res.write(
+                                            `event: error\ndata: ${JSON.stringify({
+                                                error: {
+                                                    message: message.message,
+                                                    type: "api_error",
+                                                },
+                                                type: "error",
+                                            })}\n\n`
+                                        );
+                                    }
+                                    break;
+                                }
+
+                                if (message.data) fullBody += message.data;
+                            }
+                            const streamState = {};
+                            const translatedChunk = this.formatConverter.translateGoogleToClaudeStream(
+                                fullBody,
+                                model,
+                                streamState
+                            );
+                            if (translatedChunk) res.write(translatedChunk);
+                            this.logger.info("[Request] Claude fake mode: Complete content sent at once.");
+                        } catch (error) {
+                            // Handle timeout or other errors during streaming
+                            if (!res.writableEnded) {
+                                res.write(
+                                    `event: error\ndata: ${JSON.stringify({
+                                        error: {
+                                            message: `Stream timeout: ${error.message}`,
+                                            type: "timeout_error",
+                                        },
+                                        type: "error",
+                                    })}\n\n`
+                                );
+                            }
                         }
-                        const streamState = {};
-                        const translatedChunk = this.formatConverter.translateGoogleToClaudeStream(
-                            fullBody,
-                            model,
-                            streamState
-                        );
-                        if (translatedChunk) res.write(translatedChunk);
-                        this.logger.info("[Request] Claude fake mode: Complete content sent at once.");
                     } else {
                         // Non-stream
                         await this._sendClaudeNonStreamResponse(messageQueue, res, model);
@@ -1097,41 +1121,56 @@ class RequestHandler {
     async _streamClaudeResponse(messageQueue, res, model) {
         const streamState = {};
 
-        // eslint-disable-next-line no-constant-condition
-        while (true) {
-            const message = await messageQueue.dequeue(30000);
+        try {
+            // eslint-disable-next-line no-constant-condition
+            while (true) {
+                const message = await messageQueue.dequeue(60000); // Increased timeout to 60s
 
-            if (message.type === "STREAM_END") {
-                this.logger.info("[Request] Claude stream end signal received.");
-                break;
-            }
+                if (message.type === "STREAM_END") {
+                    this.logger.info("[Request] Claude stream end signal received.");
+                    break;
+                }
 
-            if (message.event_type === "error") {
-                this.logger.error(`[Request] Error received during Claude stream: ${message.message}`);
-                // Attempt to send error event to client if headers allowed, then close
-                if (!res.writableEnded) {
-                    res.write(
-                        `event: error\ndata: ${JSON.stringify({
-                            error: {
-                                message: message.message,
-                                type: "api_error",
-                            },
-                            type: "error",
-                        })}\n\n`
+                if (message.event_type === "error") {
+                    this.logger.error(`[Request] Error received during Claude stream: ${message.message}`);
+                    // Attempt to send error event to client if headers allowed, then close
+                    if (!res.writableEnded) {
+                        res.write(
+                            `event: error\ndata: ${JSON.stringify({
+                                error: {
+                                    message: message.message,
+                                    type: "api_error",
+                                },
+                                type: "error",
+                            })}\n\n`
+                        );
+                    }
+                    break;
+                }
+
+                if (message.data) {
+                    const claudeChunk = this.formatConverter.translateGoogleToClaudeStream(
+                        message.data,
+                        model,
+                        streamState
                     );
+                    if (claudeChunk) {
+                        res.write(claudeChunk);
+                    }
                 }
-                break;
             }
-
-            if (message.data) {
-                const claudeChunk = this.formatConverter.translateGoogleToClaudeStream(
-                    message.data,
-                    model,
-                    streamState
+        } catch (error) {
+            // Handle timeout or other errors during streaming
+            if (!res.writableEnded) {
+                res.write(
+                    `event: error\ndata: ${JSON.stringify({
+                        error: {
+                            message: `Stream timeout: ${error.message}`,
+                            type: "timeout_error",
+                        },
+                        type: "error",
+                    })}\n\n`
                 );
-                if (claudeChunk) {
-                    res.write(claudeChunk);
-                }
             }
         }
     }
@@ -1276,22 +1315,32 @@ class RequestHandler {
 
             // Read all data chunks until STREAM_END to handle potential fragmentation
             let fullData = "";
-            // eslint-disable-next-line no-constant-condition
-            while (true) {
-                const message = await messageQueue.dequeue(); // 5 min timeout
-                if (message.type === "STREAM_END") {
-                    break;
-                }
+            try {
+                // eslint-disable-next-line no-constant-condition
+                while (true) {
+                    const message = await messageQueue.dequeue(); // 5 min timeout for fake streaming
+                    if (message.type === "STREAM_END") {
+                        break;
+                    }
 
-                if (message.event_type === "error") {
-                    this.logger.error(`[Request] Error received during Gemini pseudo-stream: ${message.message}`);
-                    this._sendErrorChunkToClient(res, message.message);
-                    break;
-                }
+                    if (message.event_type === "error") {
+                        this.logger.error(`[Request] Error received during Gemini pseudo-stream: ${message.message}`);
+                        this._sendErrorChunkToClient(res, message.message);
+                        break;
+                    }
 
-                if (message.data) {
-                    fullData += message.data;
+                    if (message.data) {
+                        fullData += message.data;
+                    }
                 }
+            } catch (error) {
+                // Handle timeout or other errors during streaming
+                if (!res.writableEnded) {
+                    res.write(
+                        `data: ${JSON.stringify({ error: { code: 504, message: `Stream timeout: ${error.message}`, status: "TIMEOUT" } })}\n\n`
+                    );
+                }
+                throw error; // Re-throw to be caught by outer catch
             }
 
             try {
@@ -1435,7 +1484,7 @@ class RequestHandler {
             let lastChunk = "";
             // eslint-disable-next-line no-constant-condition
             while (true) {
-                const dataMessage = await messageQueue.dequeue(30000);
+                const dataMessage = await messageQueue.dequeue(60000); // Increased timeout to 60s
                 if (dataMessage.type === "STREAM_END") {
                     this.logger.info("[Request] Received stream end signal.");
                     break;
@@ -1680,35 +1729,44 @@ class RequestHandler {
     async _streamOpenAIResponse(messageQueue, res, model) {
         const streamState = {};
 
-        // eslint-disable-next-line no-constant-condition
-        while (true) {
-            const message = await messageQueue.dequeue(30000);
-            if (message.type === "STREAM_END") {
-                this.logger.info("[Request] OpenAI stream end signal received.");
-                res.write("data: [DONE]\n\n");
-                break;
-            }
+        try {
+            // eslint-disable-next-line no-constant-condition
+            while (true) {
+                const message = await messageQueue.dequeue(60000); // Increased timeout to 60s
+                if (message.type === "STREAM_END") {
+                    this.logger.info("[Request] OpenAI stream end signal received.");
+                    res.write("data: [DONE]\n\n");
+                    break;
+                }
 
-            if (message.event_type === "error") {
-                this.logger.error(`[Request] Error received during OpenAI stream: ${message.message}`);
-                // Attempt to send error event to client if headers allowed, then close
-                if (!res.writableEnded) {
-                    res.write(
-                        `data: ${JSON.stringify({ error: { code: 500, message: message.message, type: "api_error" } })}\n\n`
+                if (message.event_type === "error") {
+                    this.logger.error(`[Request] Error received during OpenAI stream: ${message.message}`);
+                    // Attempt to send error event to client if headers allowed, then close
+                    if (!res.writableEnded) {
+                        res.write(
+                            `data: ${JSON.stringify({ error: { code: 500, message: message.message, type: "api_error" } })}\n\n`
+                        );
+                    }
+                    break;
+                }
+
+                if (message.data) {
+                    const openAIChunk = this.formatConverter.translateGoogleToOpenAIStream(
+                        message.data,
+                        model,
+                        streamState
                     );
+                    if (openAIChunk) {
+                        res.write(openAIChunk);
+                    }
                 }
-                break;
             }
-
-            if (message.data) {
-                const openAIChunk = this.formatConverter.translateGoogleToOpenAIStream(
-                    message.data,
-                    model,
-                    streamState
+        } catch (error) {
+            // Handle timeout or other errors during streaming
+            if (!res.writableEnded) {
+                res.write(
+                    `data: ${JSON.stringify({ error: { code: 504, message: `Stream timeout: ${error.message}`, type: "timeout_error" } })}\n\n`
                 );
-                if (openAIChunk) {
-                    res.write(openAIChunk);
-                }
             }
         }
     }
@@ -1796,9 +1854,44 @@ class RequestHandler {
     _handleRequestError(error, res) {
         if (res.headersSent) {
             this.logger.error(`[Request] Request processing error (headers already sent): ${error.message}`);
-            if (this.serverSystem.streamingMode === "fake")
-                this._sendErrorChunkToClient(res, `Processing failed: ${error.message}`);
-            if (!res.writableEnded) res.end();
+
+            // Try to send error in the stream format
+            if (!res.writableEnded) {
+                const contentType = res.getHeader("content-type");
+
+                if (contentType && contentType.includes("text/event-stream")) {
+                    // SSE format - send error event
+                    try {
+                        const errorMessage = error.message.toLowerCase().includes("timeout")
+                            ? `Stream timeout: ${error.message}`
+                            : `Processing failed: ${error.message}`;
+
+                        res.write(
+                            `data: ${JSON.stringify({
+                                error: {
+                                    code: error.message.toLowerCase().includes("timeout") ? 504 : 500,
+                                    message: errorMessage,
+                                    type: error.message.toLowerCase().includes("timeout")
+                                        ? "timeout_error"
+                                        : "api_error",
+                                },
+                            })}\n\n`
+                        );
+                        this.logger.info("[Request] Error event sent to SSE stream");
+                    } catch (writeError) {
+                        this.logger.error(`[Request] Failed to write error to stream: ${writeError.message}`);
+                    }
+                } else if (this.serverSystem.streamingMode === "fake") {
+                    // Fake streaming mode - try to send error chunk
+                    try {
+                        this._sendErrorChunkToClient(res, `Processing failed: ${error.message}`);
+                    } catch (writeError) {
+                        this.logger.error(`[Request] Failed to write error chunk: ${writeError.message}`);
+                    }
+                }
+
+                res.end();
+            }
         } else {
             this.logger.error(`[Request] Request processing error: ${error.message}`);
             let status = 500;

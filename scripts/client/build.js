@@ -203,7 +203,7 @@ class RequestProcessor {
     }
 
     execute(requestSpec, operationId) {
-        const IDLE_TIMEOUT_DURATION = 600000;
+        const IDLE_TIMEOUT_DURATION = 300000; // 300 seconds (5 minutes)
         const abortController = new AbortController();
         this.activeOperations.set(operationId, abortController);
 
@@ -621,9 +621,21 @@ class ProxySystem extends EventTarget {
             let fullBody = "";
 
             // --- Core modification: Correctly dispatch streaming and non-streaming data inside the loop ---
+            // Add timeout protection for each chunk read
+            const CHUNK_READ_TIMEOUT = 300000; // 300 seconds (5 minutes) timeout for each chunk
             let processing = true;
             while (processing) {
-                const { done, value } = await reader.read();
+                // Wrap reader.read() with timeout protection
+                const readPromise = reader.read();
+                const timeoutPromise = new Promise((_, reject) => {
+                    setTimeout(() => {
+                        reject(
+                            new Error(`Chunk read timeout: no data received for ${CHUNK_READ_TIMEOUT / 1000} seconds`)
+                        );
+                    }, CHUNK_READ_TIMEOUT);
+                });
+
+                const { done, value } = await Promise.race([readPromise, timeoutPromise]);
                 if (done) {
                     processing = false;
                     break;
