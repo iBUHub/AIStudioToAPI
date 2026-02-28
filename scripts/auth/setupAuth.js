@@ -92,12 +92,11 @@ const selectAccountFromCSV = () =>
             .map(line => parseCSVLine(line))
             .filter(parts => parts.some(p => p.includes("@")))
             .map(parts => {
-                const email = parts.find(p => p.includes("@"));
-                // Default: Email first, then Password
-                // Based on user's instruction: default is email, password
-                const emailIdx = parts.indexOf(email);
-                const password =
-                    parts[emailIdx + 1] || parts.find(p => p !== email && p.length > 5 && !p.includes("@"));
+                // Find the first part that looks like an email
+                const emailIdx = parts.findIndex(p => p.includes("@"));
+                const email = parts[emailIdx];
+                // The password is most likely the next column, or the first other non-empty column
+                const password = parts[emailIdx + 1] || parts.find((p, idx) => idx !== emailIdx && p.length > 0);
                 return { email, password };
             })
             .filter(acc => acc.email);
