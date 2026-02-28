@@ -223,6 +223,7 @@ class RequestProcessor {
         const cancelTimeout = () => {
             if (timeoutId) {
                 clearTimeout(timeoutId);
+                timeoutId = null; // Clear reference to prevent memory leaks
                 // Logger.output("Data chunk received, timeout restriction lifted.");
             }
         };
@@ -244,6 +245,8 @@ class RequestProcessor {
                     error.status = response.status;
                     throw error;
                 }
+                // Clear timeout when fetch succeeds to prevent timer leak
+                cancelTimeout();
                 return response;
             } catch (error) {
                 cancelTimeout();
@@ -602,6 +605,7 @@ class ProxySystem extends EventTarget {
         const mode = requestSpec.streaming_mode || "fake";
         Logger.debug(`Browser received request`);
         let cancelTimeout;
+        let reader;
 
         try {
             if (this.requestProcessor.cancelledOperations.has(operationId)) {
@@ -615,7 +619,7 @@ class ProxySystem extends EventTarget {
             }
 
             this._transmitHeaders(response, operationId, requestSpec.headers?.host);
-            const reader = response.body.getReader();
+            reader = response.body.getReader();
             const textDecoder = new TextDecoder();
 
             let fullBody = "";
@@ -626,28 +630,44 @@ class ProxySystem extends EventTarget {
             let processing = true;
             while (processing) {
                 // Wrap reader.read() with timeout protection
+                let chunkTimeoutId;
                 const readPromise = reader.read();
                 const timeoutPromise = new Promise((_, reject) => {
-                    setTimeout(() => {
+                    chunkTimeoutId = setTimeout(() => {
                         reject(
                             new Error(`Chunk read timeout: no data received for ${CHUNK_READ_TIMEOUT / 1000} seconds`)
                         );
                     }, CHUNK_READ_TIMEOUT);
                 });
 
-                const { done, value } = await Promise.race([readPromise, timeoutPromise]);
-                if (done) {
-                    processing = false;
-                    break;
-                }
+                try {
+                    const { done, value } = await Promise.race([readPromise, timeoutPromise]);
+                    clearTimeout(chunkTimeoutId);
 
-                cancelTimeout();
+                    if (done) {
+                        processing = false;
+                        break;
+                    }
 
-                const chunk = textDecoder.decode(value, { stream: true });
-                if (mode === "real") {
-                    this._transmitChunk(chunk, operationId);
-                } else {
-                    fullBody += chunk;
+                    cancelTimeout();
+
+                    const chunk = textDecoder.decode(value, { stream: true });
+                    if (mode === "real") {
+                        this._transmitChunk(chunk, operationId);
+                    } else {
+                        fullBody += chunk;
+                    }
+                } catch (error) {
+                    clearTimeout(chunkTimeoutId);
+                    // If timeout occurred, try to cancel the reader
+                    if (error.message.includes("Chunk read timeout")) {
+                        try {
+                            await reader.cancel();
+                        } catch (cancelError) {
+                            Logger.debug(`Failed to cancel reader: ${cancelError.message}`);
+                        }
+                    }
+                    throw error;
                 }
             }
 
@@ -669,6 +689,14 @@ class ProxySystem extends EventTarget {
         } finally {
             if (cancelTimeout) {
                 cancelTimeout();
+            }
+            // Always cancel reader to stop background stream processing
+            if (reader) {
+                try {
+                    await reader.cancel();
+                } catch (e) {
+                    // Ignore errors if reader is already closed
+                }
             }
             this.requestProcessor.activeOperations.delete(operationId);
             this.requestProcessor.cancelledOperations.delete(operationId);
