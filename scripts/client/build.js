@@ -203,7 +203,8 @@ class RequestProcessor {
     }
 
     execute(requestSpec, operationId) {
-        const IDLE_TIMEOUT_DURATION = 300000; // 300 seconds (5 minutes)
+        // Timeout constants - aligned with server-side timeouts
+        const IDLE_TIMEOUT_DURATION = 300000; // 300 seconds (5 minutes) - matches FAKE_STREAM timeout
         const abortController = new AbortController();
         this.activeOperations.set(operationId, abortController);
 
@@ -625,15 +626,17 @@ class ProxySystem extends EventTarget {
             let fullBody = "";
 
             // --- Core modification: Correctly dispatch streaming and non-streaming data inside the loop ---
-            // Add timeout protection for each chunk read
-            const CHUNK_READ_TIMEOUT = 300000; // 300 seconds (5 minutes) timeout for each chunk
+            // Add timeout protection for each chunk read - aligned with server-side timeouts
+            const CHUNK_READ_TIMEOUT = 300000; // 300 seconds (5 minutes) - matches MESSAGE_QUEUE_DEFAULT timeout
             let processing = true;
             while (processing) {
                 // Wrap reader.read() with timeout protection
                 let chunkTimeoutId;
-                const readPromise = reader.read();
+                let timeoutOccurred = false;
+
                 const timeoutPromise = new Promise((_, reject) => {
                     chunkTimeoutId = setTimeout(() => {
+                        timeoutOccurred = true;
                         reject(
                             new Error(`Chunk read timeout: no data received for ${CHUNK_READ_TIMEOUT / 1000} seconds`)
                         );
@@ -641,8 +644,11 @@ class ProxySystem extends EventTarget {
                 });
 
                 try {
+                    // Start reading the chunk
+                    const readPromise = reader.read();
                     const { done, value } = await Promise.race([readPromise, timeoutPromise]);
                     clearTimeout(chunkTimeoutId);
+                    chunkTimeoutId = null;
 
                     if (done) {
                         processing = false;
@@ -658,9 +664,13 @@ class ProxySystem extends EventTarget {
                         fullBody += chunk;
                     }
                 } catch (error) {
-                    clearTimeout(chunkTimeoutId);
-                    // If timeout occurred, try to cancel the reader
-                    if (error.message.includes("Chunk read timeout")) {
+                    if (chunkTimeoutId) {
+                        clearTimeout(chunkTimeoutId);
+                        chunkTimeoutId = null;
+                    }
+
+                    // If timeout occurred, cancel the reader to stop background processing
+                    if (timeoutOccurred || error.message.includes("Chunk read timeout")) {
                         try {
                             await reader.cancel();
                         } catch (cancelError) {

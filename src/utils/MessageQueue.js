@@ -8,6 +8,28 @@
 const { EventEmitter } = require("events");
 
 /**
+ * Custom error class for queue closed errors
+ */
+class QueueClosedError extends Error {
+    constructor(message = "Queue is closed") {
+        super(message);
+        this.name = "QueueClosedError";
+        this.code = "QUEUE_CLOSED";
+    }
+}
+
+/**
+ * Custom error class for queue timeout errors
+ */
+class QueueTimeoutError extends Error {
+    constructor(message = "Queue timeout") {
+        super(message);
+        this.name = "QueueTimeoutError";
+        this.code = "QUEUE_TIMEOUT";
+    }
+}
+
+/**
  * Message Queue Module
  * Responsible for managing asynchronous message enqueue and dequeue
  */
@@ -33,7 +55,7 @@ class MessageQueue extends EventEmitter {
 
     async dequeue(timeoutMs = this.defaultTimeout) {
         if (this.closed) {
-            throw new Error("Queue is closed");
+            throw new QueueClosedError();
         }
         return new Promise((resolve, reject) => {
             if (this.messages.length > 0) {
@@ -46,7 +68,7 @@ class MessageQueue extends EventEmitter {
                 const index = this.waitingResolvers.indexOf(resolver);
                 if (index !== -1) {
                     this.waitingResolvers.splice(index, 1);
-                    reject(new Error("Queue timeout"));
+                    reject(new QueueTimeoutError());
                 }
             }, timeoutMs);
         });
@@ -56,7 +78,7 @@ class MessageQueue extends EventEmitter {
         this.closed = true;
         this.waitingResolvers.forEach(resolver => {
             clearTimeout(resolver.timeoutId);
-            resolver.reject(new Error("Queue closed"));
+            resolver.reject(new QueueClosedError());
         });
         this.waitingResolvers = [];
         this.messages = [];
@@ -64,3 +86,5 @@ class MessageQueue extends EventEmitter {
 }
 
 module.exports = MessageQueue;
+module.exports.QueueClosedError = QueueClosedError;
+module.exports.QueueTimeoutError = QueueTimeoutError;

@@ -12,6 +12,14 @@
 const AuthSwitcher = require("../auth/AuthSwitcher");
 const FormatConverter = require("./FormatConverter");
 const { isUserAbortedError } = require("../utils/CustomErrors");
+const { QueueClosedError } = require("../utils/MessageQueue");
+
+// Timeout constants (in milliseconds)
+const TIMEOUTS = {
+    FAKE_STREAM: 300000, // 300 seconds (5 minutes) - timeout for fake streaming (buffered response)
+    MESSAGE_QUEUE_DEFAULT: 300000, // 300 seconds (5 minutes) - default queue timeout
+    STREAM_CHUNK: 60000, // 60 seconds - timeout between stream chunks
+};
 
 class RequestHandler {
     constructor(serverSystem, connectionRegistry, logger, browserManager, config, authSource) {
@@ -29,6 +37,9 @@ class RequestHandler {
         this.maxRetries = this.config.maxRetries;
         this.retryDelay = this.config.retryDelay;
         this.needsSwitchingAfterRequest = false;
+
+        // Timeout settings
+        this.timeouts = TIMEOUTS;
     }
 
     // Delegate properties to AuthSwitcher
@@ -70,12 +81,20 @@ class RequestHandler {
     }
 
     _isConnectionResetError(error) {
-        if (!error || !error.message) return false;
-        return (
-            error.message.includes("Queue closed") ||
-            error.message.includes("Queue is closed") ||
-            error.message.includes("Connection lost")
-        );
+        if (!error) return false;
+        // Check for QueueClosedError type
+        if (error instanceof QueueClosedError) return true;
+        // Check for error code
+        if (error.code === "QUEUE_CLOSED") return true;
+        // Fallback to message check for backward compatibility
+        if (error.message) {
+            return (
+                error.message.includes("Queue closed") ||
+                error.message.includes("Queue is closed") ||
+                error.message.includes("Connection lost")
+            );
+        }
+        return false;
     }
 
     /**
@@ -384,8 +403,8 @@ class RequestHandler {
                 await this._handleNonStreamResponse(proxyRequest, messageQueue, req, res);
             }
         } catch (error) {
-            // Don't log as error if it's just a client disconnect (Queue closed)
-            if (error.message && error.message.includes("Queue closed")) {
+            // Don't log as error if it's just a client disconnect
+            if (this._isConnectionResetError(error)) {
                 this.logger.info(`[Request] Request terminated: Client disconnected`);
             } else {
                 this._handleRequestError(error, res);
@@ -461,8 +480,8 @@ class RequestHandler {
         try {
             await this._handleNonStreamResponse(proxyRequest, messageQueue, req, res);
         } catch (error) {
-            // Don't log as error if it's just a client disconnect (Queue closed)
-            if (error.message && error.message.includes("Queue closed")) {
+            // Don't log as error if it's just a client disconnect
+            if (this._isConnectionResetError(error)) {
                 this.logger.info(`[Request] Request terminated: Client disconnected`);
             } else {
                 this._handleRequestError(error, res);
@@ -657,7 +676,7 @@ class RequestHandler {
                         try {
                             // eslint-disable-next-line no-constant-condition
                             while (true) {
-                                const message = await messageQueue.dequeue(); // 5 min timeout for fake streaming
+                                const message = await messageQueue.dequeue(this.timeouts.FAKE_STREAM);
                                 if (message.type === "STREAM_END") {
                                     break;
                                 }
@@ -667,7 +686,7 @@ class RequestHandler {
                                         `[Request] Error received during OpenAI fake stream: ${message.message}`
                                     );
                                     // Check if response is still writable before attempting to write
-                                    if (!res.writableEnded && !res.destroyed && res.socket && !res.socket.destroyed) {
+                                    if (this._isResponseWritable(res)) {
                                         try {
                                             res.write(
                                                 `data: ${JSON.stringify({ error: { code: 500, message: message.message, type: "api_error" } })}\n\n`
@@ -709,8 +728,8 @@ class RequestHandler {
                 }
             }
         } catch (error) {
-            // Don't log as error if it's just a client disconnect (Queue closed)
-            if (error.message && error.message.includes("Queue closed")) {
+            // Don't log as error if it's just a client disconnect
+            if (this._isConnectionResetError(error)) {
                 this.logger.info(`[Request] Request terminated: Client disconnected`);
             } else {
                 this._handleRequestError(error, res);
@@ -907,7 +926,7 @@ class RequestHandler {
                         try {
                             // eslint-disable-next-line no-constant-condition
                             while (true) {
-                                const message = await messageQueue.dequeue(); // 5 min timeout for fake streaming
+                                const message = await messageQueue.dequeue(this.timeouts.FAKE_STREAM);
                                 if (message.type === "STREAM_END") {
                                     break;
                                 }
@@ -917,7 +936,7 @@ class RequestHandler {
                                         `[Request] Error received during Claude fake stream: ${message.message}`
                                     );
                                     // Check if response is still writable before attempting to write
-                                    if (!res.writableEnded && !res.destroyed && res.socket && !res.socket.destroyed) {
+                                    if (this._isResponseWritable(res)) {
                                         try {
                                             res.write(
                                                 `event: error\ndata: ${JSON.stringify({
@@ -970,8 +989,8 @@ class RequestHandler {
                 }
             }
         } catch (error) {
-            // Don't log as error if it's just a client disconnect (Queue closed)
-            if (error.message && error.message.includes("Queue closed")) {
+            // Don't log as error if it's just a client disconnect
+            if (this._isConnectionResetError(error)) {
                 this.logger.info(`[Request] Request terminated: Client disconnected`);
             } else {
                 this._handleClaudeRequestError(error, res);
@@ -1118,8 +1137,8 @@ class RequestHandler {
 
             this.logger.info(`[Request] Claude count tokens completed: ${totalTokens} input tokens`);
         } catch (error) {
-            // Don't log as error if it's just a client disconnect (Queue closed)
-            if (error.message && error.message.includes("Queue closed")) {
+            // Don't log as error if it's just a client disconnect
+            if (this._isConnectionResetError(error)) {
                 this.logger.info(`[Request] Request terminated: Client disconnected`);
             } else {
                 this._handleClaudeRequestError(error, res);
@@ -1138,7 +1157,7 @@ class RequestHandler {
         try {
             // eslint-disable-next-line no-constant-condition
             while (true) {
-                const message = await messageQueue.dequeue(60000); // Increased timeout to 60s
+                const message = await messageQueue.dequeue(this.timeouts.STREAM_CHUNK);
 
                 if (message.type === "STREAM_END") {
                     this.logger.info("[Request] Claude stream end signal received.");
@@ -1149,7 +1168,7 @@ class RequestHandler {
                     this.logger.error(`[Request] Error received during Claude stream: ${message.message}`);
                     // Attempt to send error event to client if headers allowed, then close
                     // Check if response is still writable before attempting to write
-                    if (!res.writableEnded && !res.destroyed && res.socket && !res.socket.destroyed) {
+                    if (this._isResponseWritable(res)) {
                         try {
                             res.write(
                                 `event: error\ndata: ${JSON.stringify({
@@ -1189,7 +1208,7 @@ class RequestHandler {
             }
 
             // Check if response is still writable before attempting to write
-            if (!res.writableEnded && !res.destroyed && res.socket && !res.socket.destroyed) {
+            if (this._isResponseWritable(res)) {
                 try {
                     res.write(
                         `event: error\ndata: ${JSON.stringify({
@@ -1376,7 +1395,7 @@ class RequestHandler {
                 // Don't attempt to write if it's a connection reset or if response is destroyed
                 if (!this._isConnectionResetError(error)) {
                     // Check if response is still writable before attempting to write
-                    if (!res.writableEnded && !res.destroyed && res.socket && !res.socket.destroyed) {
+                    if (this._isResponseWritable(res)) {
                         try {
                             res.write(
                                 `data: ${JSON.stringify({ error: { code: 504, message: `Stream timeout: ${error.message}`, status: "TIMEOUT" } })}\n\n`
@@ -1392,7 +1411,8 @@ class RequestHandler {
                         "[Request] Gemini pseudo-stream interrupted by connection reset, skipping error write"
                     );
                 }
-                // Don't re-throw to avoid duplicate error handling by outer catch
+                // Return early to prevent JSON parsing of incomplete data
+                return;
             }
 
             try {
@@ -1483,8 +1503,8 @@ class RequestHandler {
                 `✅ [Request] Response ended, reason: ${finishReason}, request ID: ${proxyRequest.request_id}`
             );
         } catch (error) {
-            // Don't log as error if it's just a client disconnect (Queue closed)
-            if (error.message && error.message.includes("Queue closed")) {
+            // Don't log as error if it's just a client disconnect
+            if (this._isConnectionResetError(error)) {
                 this.logger.info(`[Request] Request terminated: Client disconnected`);
             } else {
                 this._handleRequestError(error, res);
@@ -1550,7 +1570,7 @@ class RequestHandler {
                 if (dataMessage.event_type === "error") {
                     this.logger.error(`[Request] Error received during Gemini real stream: ${dataMessage.message}`);
                     // Check if response is still writable before attempting to write
-                    if (!res.writableEnded && !res.destroyed && res.socket && !res.socket.destroyed) {
+                    if (this._isResponseWritable(res)) {
                         try {
                             res.write(
                                 `data: ${JSON.stringify({ error: { code: 500, message: dataMessage.message, status: "INTERNAL_ERROR" } })}\n\n`
@@ -1748,11 +1768,11 @@ class RequestHandler {
                 }
 
                 // Stop retrying immediately if the queue is closed (connection reset)
-                if (this._isConnectionResetError(errorPayload)) {
+                if (this._isConnectionResetError(error)) {
                     this.logger.warn(
                         `[Request] Message queue closed unexpectedly (likely due to connection reset), aborting retries.`
                     );
-                    lastError = { message: "Connection lost (Queue closed)", status: 503 };
+                    lastError = { message: "Connection lost (client disconnect)", status: 503 };
                     break;
                 }
 
@@ -1805,7 +1825,7 @@ class RequestHandler {
         try {
             // eslint-disable-next-line no-constant-condition
             while (true) {
-                const message = await messageQueue.dequeue(60000); // Increased timeout to 60s
+                const message = await messageQueue.dequeue(this.timeouts.STREAM_CHUNK);
                 if (message.type === "STREAM_END") {
                     this.logger.info("[Request] OpenAI stream end signal received.");
                     res.write("data: [DONE]\n\n");
@@ -1816,7 +1836,7 @@ class RequestHandler {
                     this.logger.error(`[Request] Error received during OpenAI stream: ${message.message}`);
                     // Attempt to send error event to client if headers allowed, then close
                     // Check if response is still writable before attempting to write
-                    if (!res.writableEnded && !res.destroyed && res.socket && !res.socket.destroyed) {
+                    if (this._isResponseWritable(res)) {
                         try {
                             res.write(
                                 `data: ${JSON.stringify({ error: { code: 500, message: message.message, type: "api_error" } })}\n\n`
@@ -1850,7 +1870,7 @@ class RequestHandler {
             }
 
             // Check if response is still writable before attempting to write
-            if (!res.writableEnded && !res.destroyed && res.socket && !res.socket.destroyed) {
+            if (this._isResponseWritable(res)) {
                 try {
                     res.write(
                         `data: ${JSON.stringify({ error: { code: 504, message: `Stream timeout: ${error.message}`, type: "timeout_error" } })}\n\n`
@@ -2022,6 +2042,13 @@ class RequestHandler {
         }
     }
 
+    _isResponseWritable(res) {
+        // Comprehensive check to ensure response is writable
+        return (
+            !res.writableEnded && !res.destroyed && res.socket && !res.socket.destroyed && res.socket.writable !== false
+        );
+    }
+
     _sendErrorChunkToClient(res, message) {
         if (!res.headersSent) {
             res.setHeader("Content-Type", "text/event-stream");
@@ -2029,7 +2056,7 @@ class RequestHandler {
             res.setHeader("Connection", "keep-alive");
         }
         // Check if response is still writable before attempting to write
-        if (!res.writableEnded && !res.destroyed && res.socket && !res.socket.destroyed) {
+        if (this._isResponseWritable(res)) {
             try {
                 res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
             } catch (writeError) {
