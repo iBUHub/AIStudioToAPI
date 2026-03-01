@@ -8,8 +8,8 @@
 
 ```csv
 email,password
-your-email-1@foo.xyz,your-password-1
-your-email-2@foo.xyz,your-password-2
+your-email-1@gmail.com,your-password-1
+your-email-2@gmail.com,your-password-2
 ```
 
 > 💡 **提示**：第一行的表头（`email,password`）是可选的，脚本会自动识别包含 `@` 符号的列作为账号。
@@ -28,4 +28,3 @@ npm run setup-auth
 
 - **安全**：`users.csv` 包含明文密码，请确保您的计算机安全且不要分享该文件。
 - **2FA**：如果账号启用了双重身份验证（2FA），您仍需在浏览器中手动完成验证。
-- **Git**：该文件已被加入 `.gitignore`，不会被提交。

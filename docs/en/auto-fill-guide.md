@@ -8,8 +8,8 @@ Create a `users.csv` file in the project root and add your account credentials i
 
 ```csv
 email,password
-your-email-1@foo.xyz,your-password-1
-your-email-2@foo.xyz,your-password-2
+your-email-1@gmail.com,your-password-1
+your-email-2@gmail.com,your-password-2
 ```
 
 > 💡 **Tip**: The header in the first line (`email,password`) is optional. The script automatically identifies the column containing the `@` symbol as the account.
@@ -28,4 +28,3 @@ When prompted in the terminal, select the account you want to use. The script wi
 
 - **Security**: The `users.csv` file contains plain-text passwords; ensure your computer is secure and do not share this file.
 - **2FA**: If your account has Two-Factor Authentication (2FA) enabled, you will still need to complete the verification manually in the browser.
-- **Git**: This file has been added to `.gitignore` and will not be committed.
