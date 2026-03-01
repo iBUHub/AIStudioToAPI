@@ -2422,7 +2422,8 @@ class RequestHandler {
 
     _isResponseWritable(res) {
         // Comprehensive check to ensure response is writable
-        return (
+        // Explicitly return boolean to avoid returning null/undefined from res.socket check
+        return Boolean(
             !res.writableEnded && !res.destroyed && res.socket && !res.socket.destroyed && res.socket.writable !== false
         );
     }
