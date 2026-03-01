@@ -2156,9 +2156,20 @@ class RequestHandler {
                 status = 504;
             } else if (this._isConnectionResetError(error)) {
                 status = 503;
-                // Only log as debug for client disconnect, log as info for other connection resets
+                // Distinguish between actual client disconnect and other queue closure reasons
                 if (error.code === "QUEUE_CLOSED" || error instanceof QueueClosedError) {
-                    this.logger.debug("[Request] Client disconnect detected, returning 503 Service Unavailable.");
+                    const reason = error.reason || "unknown";
+                    const isClientDisconnect = reason === "client_disconnect" || !this._isResponseWritable(res);
+
+                    if (isClientDisconnect) {
+                        this.logger.debug(
+                            `[Request] Client disconnect detected (reason: ${reason}), returning 503 Service Unavailable.`
+                        );
+                    } else {
+                        this.logger.info(
+                            `[Request] Queue closed (reason: ${reason}), returning 503 Service Unavailable.`
+                        );
+                    }
                 } else {
                     this.logger.info("[Request] Connection reset detected, returning 503 Service Unavailable.");
                 }
