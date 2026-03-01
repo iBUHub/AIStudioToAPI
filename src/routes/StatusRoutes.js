@@ -132,7 +132,7 @@ class StatusRoutes {
                     this.logger.warn("[System] Closing context for invalid auth.");
                     try {
                         // Terminate pending requests for this account before closing
-                        this.serverSystem.connectionRegistry.closeMessageQueuesForAuth(currentAuthIndex);
+                        this.serverSystem.connectionRegistry.closeMessageQueuesForAuth(currentAuthIndex, "invalid_auth");
                         // Close context (this will trigger WebSocket disconnect)
                         await browserManager.closeContext(currentAuthIndex);
                         // Close WebSocket connection explicitly
