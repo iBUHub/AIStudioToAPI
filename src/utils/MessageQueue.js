@@ -67,12 +67,17 @@ class MessageQueue extends EventEmitter {
             throw new QueueClosedError(`Queue is closed (reason: ${reason})`, reason);
         }
         return new Promise((resolve, reject) => {
+            // Check if there are already queued messages
             if (this.messages.length > 0) {
                 resolve(this.messages.shift());
                 return;
             }
+
+            // Create resolver with timeout BEFORE pushing to waitingResolvers
+            // This prevents race condition where enqueue() sees timeoutId=null
             const resolver = { reject, resolve, timeoutId: null };
-            this.waitingResolvers.push(resolver);
+
+            // Set timeout first to ensure resolver is fully initialized
             resolver.timeoutId = setTimeout(() => {
                 const index = this.waitingResolvers.indexOf(resolver);
                 if (index !== -1) {
@@ -82,6 +87,19 @@ class MessageQueue extends EventEmitter {
                 resolver.timeoutId = null;
                 reject(new QueueTimeoutError());
             }, timeoutMs);
+
+            // Now push to waitingResolvers - resolver is fully initialized
+            this.waitingResolvers.push(resolver);
+
+            // CRITICAL: Check again if messages arrived during initialization
+            // This handles the race where enqueue() was called between the initial
+            // check (line 70) and push (line 89)
+            if (this.messages.length > 0 && this.waitingResolvers[0] === resolver) {
+                // We're still the first waiter, consume the message
+                this.waitingResolvers.shift();
+                clearTimeout(resolver.timeoutId);
+                resolve(this.messages.shift());
+            }
         });
     }
 
