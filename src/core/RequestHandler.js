@@ -97,31 +97,6 @@ class RequestHandler {
     }
 
     /**
-     * Handle queue closed error with proper client disconnect detection
-     * @param {Error} error - The error object
-     * @param {Object} res - Express response object
-     * @returns {boolean} true if error was handled (client disconnect), false if needs error response
-     */
-    _handleQueueClosedError(error, res) {
-        // Only suppress error response if client has actually disconnected
-        // or if the queue was closed due to client disconnect
-        const isClientDisconnect = error.reason === "client_disconnect" || !this._isResponseWritable(res);
-
-        if (isClientDisconnect) {
-            this.logger.info(`[Request] Request terminated: Queue closed (${error.reason || "connection_lost"})`);
-            return true; // Error handled, no response needed
-        } else {
-            // Queue was closed for other reasons (account_switch, system_reset, etc.)
-            // but client is still connected - send proper error response
-            this.logger.warn(
-                `[Request] Queue closed while client connected (reason: ${error.reason || "unknown"}), sending 503`
-            );
-            this._handleRequestError(error, res);
-            return false; // Error response sent
-        }
-    }
-
-    /**
      * Handle queue closed error in real streaming mode with proper SSE error response
      * @param {Error} error - The error object (QueueClosedError)
      * @param {Object} res - Express response object
@@ -602,12 +577,7 @@ class RequestHandler {
             // Handle queue timeout by notifying browser
             this._handleQueueTimeout(error, requestId);
 
-            // Check if this is a queue closed error
-            if (this._isConnectionResetError(error)) {
-                this._handleQueueClosedError(error, res);
-            } else {
-                this._handleRequestError(error, res);
-            }
+            this._handleRequestError(error, res);
         } finally {
             this.connectionRegistry.removeMessageQueue(requestId, "request_complete");
             if (this.needsSwitchingAfterRequest) {
@@ -679,12 +649,7 @@ class RequestHandler {
         try {
             await this._handleNonStreamResponse(proxyRequest, messageQueue, req, res);
         } catch (error) {
-            // Check if this is a queue closed error
-            if (this._isConnectionResetError(error)) {
-                this._handleQueueClosedError(error, res);
-            } else {
-                this._handleRequestError(error, res);
-            }
+            this._handleRequestError(error, res);
         } finally {
             this.connectionRegistry.removeMessageQueue(requestId, "request_complete");
             if (!res.writableEnded) res.end();
@@ -943,12 +908,7 @@ class RequestHandler {
             // Handle queue timeout by notifying browser
             this._handleQueueTimeout(error, requestId);
 
-            // Check if this is a queue closed error
-            if (this._isConnectionResetError(error)) {
-                this._handleQueueClosedError(error, res);
-            } else {
-                this._handleRequestError(error, res);
-            }
+            this._handleRequestError(error, res);
         } finally {
             this.connectionRegistry.removeMessageQueue(requestId, "request_complete");
             if (this.needsSwitchingAfterRequest) {
@@ -1214,12 +1174,7 @@ class RequestHandler {
             // Handle queue timeout by notifying browser
             this._handleQueueTimeout(error, requestId);
 
-            // Don't log as error if it's just a client disconnect
-            if (this._isConnectionResetError(error)) {
-                this.logger.info(`[Request] Request terminated: Queue closed (${error.reason || "connection_lost"})`);
-            } else {
-                this._handleClaudeRequestError(error, res);
-            }
+            this._handleClaudeRequestError(error, res);
         } finally {
             this.connectionRegistry.removeMessageQueue(requestId, "request_complete");
             if (this.needsSwitchingAfterRequest) {
@@ -1362,12 +1317,7 @@ class RequestHandler {
 
             this.logger.info(`[Request] Claude count tokens completed: ${totalTokens} input tokens`);
         } catch (error) {
-            // Don't log as error if it's just a client disconnect
-            if (this._isConnectionResetError(error)) {
-                this.logger.info(`[Request] Request terminated: Queue closed (${error.reason || "connection_lost"})`);
-            } else {
-                this._handleClaudeRequestError(error, res);
-            }
+            this._handleClaudeRequestError(error, res);
         } finally {
             this.connectionRegistry.removeMessageQueue(requestId, "request_complete");
             if (!res.writableEnded) res.end();
@@ -1522,8 +1472,58 @@ class RequestHandler {
         const errorMsg = String(error?.message ?? error);
         const errorMsgLower = errorMsg.toLowerCase();
 
+        // Check if this is a client disconnect - if so, just log and return
+        if (this._isConnectionResetError(error)) {
+            const isClientDisconnect = error.reason === "client_disconnect" || !this._isResponseWritable(res);
+            if (isClientDisconnect) {
+                this.logger.info(`[Request] Request terminated: Queue closed (${error.reason || "connection_lost"})`);
+                if (!res.writableEnded) {
+                    try {
+                        res.end();
+                    } catch (e) {
+                        // Ignore end errors for disconnected clients
+                    }
+                }
+                return;
+            }
+        }
+
         if (res.headersSent) {
             this.logger.error(`[Request] Claude request error (headers already sent): ${errorMsg}`);
+
+            // Try to send error in SSE format if response is still writable
+            if (this._isResponseWritable(res)) {
+                const contentType = res.getHeader("content-type");
+
+                if (contentType && contentType.includes("text/event-stream")) {
+                    try {
+                        let errorType = "api_error";
+                        let errorMessage = `Processing failed: ${errorMsg}`;
+
+                        if (errorMsgLower.includes("timeout")) {
+                            errorType = "timeout_error";
+                            errorMessage = `Stream timeout: ${errorMsg}`;
+                        } else if (this._isConnectionResetError(error)) {
+                            errorType = "overloaded_error";
+                            errorMessage = `Service unavailable: ${errorMsg}`;
+                        }
+
+                        res.write(
+                            `event: error\ndata: ${JSON.stringify({
+                                error: {
+                                    message: errorMessage,
+                                    type: errorType,
+                                },
+                                type: "error",
+                            })}\n\n`
+                        );
+                        this.logger.info("[Request] Claude error event sent to SSE stream");
+                    } catch (writeError) {
+                        this.logger.error(`[Request] Failed to write error to Claude stream: ${writeError.message}`);
+                    }
+                }
+            }
+
             if (!res.writableEnded) res.end();
         } else {
             this.logger.error(`[Request] Claude request error: ${errorMsg}`);
@@ -1535,6 +1535,7 @@ class RequestHandler {
             } else if (this._isConnectionResetError(error)) {
                 status = 503;
                 errorType = "overloaded_error";
+                this.logger.info(`[Request] Queue closed, returning 503 Service Unavailable.`);
             }
             this._sendClaudeErrorResponse(res, status, errorType, `Proxy error: ${errorMsg}`);
         }
@@ -1802,12 +1803,7 @@ class RequestHandler {
                 `✅ [Request] Response ended, reason: ${finishReason}, request ID: ${proxyRequest.request_id}`
             );
         } catch (error) {
-            // Check if this is a queue closed error
-            if (this._isConnectionResetError(error)) {
-                this._handleQueueClosedError(error, res);
-            } else {
-                this._handleRequestError(error, res);
-            }
+            this._handleRequestError(error, res);
         } finally {
             clearTimeout(connectionMaintainer);
             if (!res.writableEnded) {
@@ -2348,6 +2344,22 @@ class RequestHandler {
         const errorMsg = String(error?.message ?? error);
         const errorMsgLower = errorMsg.toLowerCase();
 
+        // Check if this is a client disconnect - if so, just log and return
+        if (this._isConnectionResetError(error)) {
+            const isClientDisconnect = error.reason === "client_disconnect" || !this._isResponseWritable(res);
+            if (isClientDisconnect) {
+                this.logger.info(`[Request] Request terminated: Queue closed (${error.reason || "connection_lost"})`);
+                if (!res.writableEnded) {
+                    try {
+                        res.end();
+                    } catch (e) {
+                        // Ignore end errors for disconnected clients
+                    }
+                }
+                return;
+            }
+        }
+
         if (res.headersSent) {
             this.logger.error(`[Request] Request processing error (headers already sent): ${errorMsg}`);
 
@@ -2358,16 +2370,27 @@ class RequestHandler {
                 if (contentType && contentType.includes("text/event-stream")) {
                     // SSE format - send error event
                     try {
-                        const errorMessage = errorMsgLower.includes("timeout")
-                            ? `Stream timeout: ${errorMsg}`
-                            : `Processing failed: ${errorMsg}`;
+                        // Determine error code and type based on error classification
+                        let errorCode = 500;
+                        let errorType = "api_error";
+                        let errorMessage = `Processing failed: ${errorMsg}`;
+
+                        if (errorMsgLower.includes("timeout")) {
+                            errorCode = 504;
+                            errorType = "timeout_error";
+                            errorMessage = `Stream timeout: ${errorMsg}`;
+                        } else if (this._isConnectionResetError(error)) {
+                            errorCode = 503;
+                            errorType = "service_unavailable";
+                            errorMessage = `Service unavailable: ${errorMsg}`;
+                        }
 
                         res.write(
                             `data: ${JSON.stringify({
                                 error: {
-                                    code: errorMsgLower.includes("timeout") ? 504 : 500,
+                                    code: errorCode,
                                     message: errorMessage,
-                                    type: errorMsgLower.includes("timeout") ? "timeout_error" : "api_error",
+                                    type: errorType,
                                 },
                             })}\n\n`
                         );
@@ -2399,23 +2422,7 @@ class RequestHandler {
                 status = 504;
             } else if (this._isConnectionResetError(error)) {
                 status = 503;
-                // Distinguish between actual client disconnect and other queue closure reasons
-                if (error.code === "QUEUE_CLOSED" || error instanceof QueueClosedError) {
-                    const reason = error.reason || "unknown";
-                    const isClientDisconnect = reason === "client_disconnect" || !this._isResponseWritable(res);
-
-                    if (isClientDisconnect) {
-                        this.logger.debug(
-                            `[Request] Client disconnect detected (reason: ${reason}), returning 503 Service Unavailable.`
-                        );
-                    } else {
-                        this.logger.info(
-                            `[Request] Queue closed (reason: ${reason}), returning 503 Service Unavailable.`
-                        );
-                    }
-                } else {
-                    this.logger.info("[Request] Connection reset detected, returning 503 Service Unavailable.");
-                }
+                this.logger.info(`[Request] Queue closed, returning 503 Service Unavailable.`);
             }
             this._sendErrorResponse(res, status, `Proxy error: ${errorMsg}`);
         }
