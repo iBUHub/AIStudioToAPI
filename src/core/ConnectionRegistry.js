@@ -92,7 +92,7 @@ class ConnectionRegistry extends EventEmitter {
         // Clear message queues for the reconnecting account.
         // When WebSocket disconnects, the browser aborts all in-flight requests for that account.
         // Keeping those queues would cause them to hang until timeout.
-        this.closeMessageQueuesForAuth(authIndex);
+        this.closeMessageQueuesForAuth(authIndex, "reconnect_cleanup");
 
         // Store connection by authIndex
         this.connectionsByAuth.set(authIndex, websocket);
@@ -153,7 +153,7 @@ class ConnectionRegistry extends EventEmitter {
                 }
                 // Close pending message queues for this account to prevent in-flight requests
                 // from hanging until timeout
-                this.closeMessageQueuesForAuth(disconnectedAuthIndex);
+                this.closeMessageQueuesForAuth(disconnectedAuthIndex, "page_closed");
                 // Emit event after all cleanup is done
                 this.emit("connectionRemoved", websocket);
                 return;
@@ -174,7 +174,7 @@ class ConnectionRegistry extends EventEmitter {
             // Close queues belonging to the disconnected account.
             // Since queues are now bound to authIndex, this is safe even if the current account
             // has since switched — only account #disconnectedAuthIndex's queues are affected.
-            this.closeMessageQueuesForAuth(disconnectedAuthIndex);
+            this.closeMessageQueuesForAuth(disconnectedAuthIndex, "grace_period_timeout");
 
             // Attempt lightweight reconnect if callback is provided and this account is not already reconnecting
             const isAccountReconnecting = this.reconnectingAccounts.get(disconnectedAuthIndex) || false;
@@ -423,12 +423,12 @@ class ConnectionRegistry extends EventEmitter {
      * @param {number} authIndex - The account whose queues should be closed
      * @returns {number} Number of queues closed
      */
-    closeMessageQueuesForAuth(authIndex) {
+    closeMessageQueuesForAuth(authIndex, reason = "auth_context_closed") {
         let count = 0;
         for (const [requestId, entry] of this.messageQueues.entries()) {
             if (entry.authIndex === authIndex) {
                 try {
-                    entry.queue.close("account_switch");
+                    entry.queue.close(reason);
                 } catch (e) {
                     this.logger.warn(`[Registry] Failed to close message queue for request ${requestId}: ${e.message}`);
                 }
@@ -437,7 +437,9 @@ class ConnectionRegistry extends EventEmitter {
             }
         }
         if (count > 0) {
-            this.logger.info(`[Registry] Force closed ${count} pending message queue(s) for account #${authIndex}`);
+            this.logger.info(
+                `[Registry] Force closed ${count} pending message queue(s) for account #${authIndex} (reason: ${reason})`
+            );
         }
         return count;
     }

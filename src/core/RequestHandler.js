@@ -125,7 +125,7 @@ class RequestHandler {
      * Classify and handle fake stream errors
      * @param {Error} error - The error object
      * @param {Object} res - Express response object
-     * @param {string} format - Response format ('openai' or 'claude')
+     * @param {string} format - Response format ('openai', 'claude', or 'gemini')
      * @throws {Error} Rethrows unexpected errors for outer handler
      */
     _handleFakeStreamError(error, res, format) {
@@ -147,8 +147,7 @@ class RequestHandler {
                         },
                     };
                     res.write(`data: ${JSON.stringify(errorPayload)}\n\n`);
-                } else {
-                    // claude
+                } else if (format === "claude") {
                     errorPayload = {
                         error: {
                             message: `Stream timeout: ${error.message}`,
@@ -157,6 +156,16 @@ class RequestHandler {
                         type: "error",
                     };
                     res.write(`event: error\ndata: ${JSON.stringify(errorPayload)}\n\n`);
+                } else {
+                    // gemini
+                    errorPayload = {
+                        error: {
+                            code: 504,
+                            message: `Stream timeout: ${error.message}`,
+                            status: "DEADLINE_EXCEEDED",
+                        },
+                    };
+                    res.write(`data: ${JSON.stringify(errorPayload)}\n\n`);
                 }
             } else if (error.code === "QUEUE_CLOSED" || error instanceof QueueClosedError) {
                 // Queue closed (account switch, system reset, etc.) - 503
@@ -169,8 +178,7 @@ class RequestHandler {
                         },
                     };
                     res.write(`data: ${JSON.stringify(errorPayload)}\n\n`);
-                } else {
-                    // claude
+                } else if (format === "claude") {
                     errorPayload = {
                         error: {
                             message: `Service unavailable: ${error.message}`,
@@ -179,6 +187,16 @@ class RequestHandler {
                         type: "error",
                     };
                     res.write(`event: error\ndata: ${JSON.stringify(errorPayload)}\n\n`);
+                } else {
+                    // gemini
+                    errorPayload = {
+                        error: {
+                            code: 503,
+                            message: `Service unavailable: ${error.message}`,
+                            status: "UNAVAILABLE",
+                        },
+                    };
+                    res.write(`data: ${JSON.stringify(errorPayload)}\n\n`);
                 }
             } else {
                 // Other unexpected errors - rethrow to outer handler
@@ -1483,18 +1501,8 @@ class RequestHandler {
                 // Handle timeout or other errors during streaming
                 // Don't attempt to write if it's a connection reset or if response is destroyed
                 if (!this._isConnectionResetError(error)) {
-                    // Check if response is still writable before attempting to write
-                    if (this._isResponseWritable(res)) {
-                        try {
-                            res.write(
-                                `data: ${JSON.stringify({ error: { code: 504, message: `Stream timeout: ${error.message}`, status: "TIMEOUT" } })}\n\n`
-                            );
-                        } catch (writeError) {
-                            this.logger.debug(
-                                `[Request] Failed to write error to Gemini pseudo-stream: ${writeError.message}`
-                            );
-                        }
-                    }
+                    // Classify error type and send appropriate response
+                    this._handleFakeStreamError(error, res, "gemini");
                 } else {
                     this.logger.debug(
                         "[Request] Gemini pseudo-stream interrupted by connection reset, skipping error write"
@@ -1861,12 +1869,24 @@ class RequestHandler {
                     errorPayload = { message: error.message, status: 500 };
                 }
 
-                // Stop retrying immediately if the queue is closed (connection reset)
+                // Stop retrying immediately if the queue is closed
                 if (this._isConnectionResetError(error)) {
-                    this.logger.warn(
-                        `[Request] Message queue closed unexpectedly (likely due to connection reset), aborting retries.`
-                    );
-                    lastError = { message: "Connection lost (client disconnect)", status: 503 };
+                    // Check the actual closure reason to provide accurate error messages
+                    const reason = error.reason || "unknown";
+                    const isClientDisconnect = reason === "client_disconnect";
+
+                    if (isClientDisconnect) {
+                        this.logger.warn(`[Request] Message queue closed due to client disconnect, aborting retries.`);
+                        lastError = { message: "Connection lost (client disconnect)", status: 503 };
+                    } else {
+                        // Queue closed for other reasons (account_switch, system_reset, etc.)
+                        this.logger.warn(`[Request] Message queue closed (reason: ${reason}), aborting retries.`);
+                        lastError = {
+                            message: `Queue closed: ${error.message || reason}`,
+                            reason,
+                            status: 503,
+                        };
+                    }
                     break;
                 }
 
