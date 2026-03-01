@@ -567,8 +567,16 @@ class CreateAuth {
         browser?.removeAllListeners();
 
         // Helper to race a promise against a timeout
-        const withTimeout = (promise, ms) =>
-            Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), ms))]);
+        const withTimeout = (promise, ms) => {
+            // Attach a catch handler to prevent unhandled rejection if timeout wins
+            promise.catch(() => {
+                // Silently ignore - the timeout error is already being handled
+            });
+            return Promise.race([
+                promise,
+                new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), ms)),
+            ]);
+        };
 
         try {
             if (browser) {

@@ -271,6 +271,12 @@ class RequestProcessor {
             }
         })();
 
+        // Attach a catch handler to prevent unhandled rejection if timeout wins the race
+        // and attemptPromise later rejects (e.g., due to abort)
+        attemptPromise.catch(() => {
+            // Silently ignore - the timeout error is already being handled
+        });
+
         const responsePromise = Promise.race([attemptPromise, startIdleTimeout()]);
 
         return { abortController, cancelTimeout, responsePromise };
@@ -682,6 +688,11 @@ class ProxySystem extends EventTarget {
                 try {
                     // Start reading the chunk
                     const readPromise = reader.read();
+                    // Attach a catch handler to prevent unhandled rejection if timeout wins the race
+                    // and readPromise later rejects (e.g., due to abort/cancel)
+                    readPromise.catch(() => {
+                        // Silently ignore - the timeout error is already being handled
+                    });
                     const { done, value } = await Promise.race([readPromise, timeoutPromise]);
                     clearTimeout(chunkTimeoutId);
                     chunkTimeoutId = null;
@@ -849,6 +860,10 @@ const initializeProxySystem = async () => {
         const timeout = new Promise((_, reject) =>
             setTimeout(() => reject(new Error("authIndex postMessage timeout (10s)")), 10000)
         );
+        // Attach a catch handler to prevent unhandled rejection if timeout wins
+        window.__authIndexReady.catch(() => {
+            // Silently ignore - the timeout error is already being handled
+        });
         try {
             const authIndex = await Promise.race([window.__authIndexReady, timeout]);
             Logger.output(`✅ authIndex received from parent: ${authIndex}`);

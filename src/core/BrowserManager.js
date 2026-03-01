@@ -2559,7 +2559,12 @@ class BrowserManager {
             this.logger.debug("[Browser] Closing main browser instance and all contexts...");
             try {
                 // Give close() 5 seconds, otherwise force proceed
-                await Promise.race([this.browser.close(), new Promise(resolve => setTimeout(resolve, 5000))]);
+                const closePromise = this.browser.close();
+                // Attach a catch handler to prevent unhandled rejection if timeout wins
+                closePromise.catch(() => {
+                    // Silently ignore - the timeout will handle this
+                });
+                await Promise.race([closePromise, new Promise(resolve => setTimeout(resolve, 5000))]);
             } catch (e) {
                 this.logger.warn(`[Browser] Error during close (ignored): ${e.message}`);
             }

@@ -198,6 +198,12 @@ class ConnectionRegistry extends EventEmitter {
                     // Store timeout ID and reject function so they can be cleared/resolved if connection is re-established
                     this.lightweightReconnectTimeouts.set(disconnectedAuthIndex, { timeoutId, timeoutReject });
 
+                    // Attach a catch handler to prevent unhandled rejection if timeout wins the race
+                    // and callbackPromise later rejects
+                    callbackPromise.catch(() => {
+                        // Silently ignore - the timeout error is already being handled
+                    });
+
                     await Promise.race([callbackPromise, timeoutPromise]);
                     this.logger.info(
                         `[Server] Lightweight reconnect callback completed for account #${disconnectedAuthIndex}.`
