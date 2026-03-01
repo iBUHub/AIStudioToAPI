@@ -547,7 +547,6 @@ const runSaveAuth = (camoufoxExecutablePath, selectedAccount) => {
     if (selectedAccount) {
         env.AUTO_FILL_EMAIL = selectedAccount.email;
         env.AUTO_FILL_PWD = selectedAccount.password;
-        env.AUTH_INDEX_OVERRIDE = (selectedAccount.index + 100).toString();
     }
 
     const result = spawnSync(process.execPath, [path.join("scripts", "auth", "saveAuth.js")], {

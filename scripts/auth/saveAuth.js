@@ -58,9 +58,6 @@ const ensureDirectoryExists = dirPath => {
  * @returns {number} - The next available index value.
  */
 const getNextAuthIndex = () => {
-    if (process.env.AUTH_INDEX_OVERRIDE) {
-        return parseInt(process.env.AUTH_INDEX_OVERRIDE, 10);
-    }
     const projectRoot = path.join(__dirname, "..", "..");
     const directory = path.join(projectRoot, CONFIG_DIR);
 
@@ -203,6 +200,9 @@ const getNextAuthIndex = () => {
                     const nextButton = page.locator(
                         'button:has(span:text("Next")), button:has(span:text("下一步")), button:has-text("Next"), button:has-text("下一步")'
                     );
+                    const notNowButton = page.locator(
+                        'button:has(span:text("Not now")), button:has(span:text("暂时不")), button:has-text("Not now"), button:has-text("暂时不")'
+                    );
 
                     // Polling for the transition button for a short duration
                     for (let i = 0; i < 10; i++) {
@@ -214,6 +214,15 @@ const getNextAuthIndex = () => {
                                 )
                             );
                             await nextButton.click();
+                            await randomWait();
+                        } else if (await notNowButton.isVisible({ timeout: 1000 })) {
+                            console.log(
+                                getText(
+                                    "🕵️ 检测到「暂时不」按钮，正在点击以跳过...",
+                                    "🕵️ Detected 'Not now' button, clicking to skip..."
+                                )
+                            );
+                            await notNowButton.click();
                             await randomWait();
                         }
                         const title = await page.title();

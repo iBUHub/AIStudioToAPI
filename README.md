@@ -259,7 +259,6 @@ sudo docker compose down
 | `FORCE_WEB_SEARCH`         | 强制为所有请求启用网络搜索。                                                        | `false`  |
 | `FORCE_URL_CONTEXT`        | 强制为所有请求启用 URL 上下文。                                                     | `false`  |
 | `CAMOUFOX_EXECUTABLE_PATH` | Camoufox 浏览器的可执行文件路径（支持绝对或相对路径）。仅在手动下载浏览器时需配置。 | 自动检测 |
-| `AUTH_INDEX_OVERRIDE`      | 强制使用的身份验证索引（通常由自动填充脚本内部使用）。                              | 无       |
 
 ### ⚡ 账号自动填充
 
