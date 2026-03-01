@@ -203,7 +203,17 @@ class RequestProcessor {
     }
 
     execute(requestSpec, operationId) {
-        const IDLE_TIMEOUT_DURATION = 600000;
+        // Abort any existing operation with the same ID to prevent concurrent fetches
+        const existingController = this.activeOperations.get(operationId);
+        if (existingController) {
+            Logger.debug(`Aborting existing operation #${operationId} before starting new attempt`);
+            existingController.abort();
+            // Note: The old operation's finally block will try to delete this operationId,
+            // but we immediately overwrite it below, so the new controller reference is safe
+        }
+
+        // Timeout constants - aligned with server-side timeouts
+        const IDLE_TIMEOUT_DURATION = 300000; // 300 seconds (5 minutes) - matches FAKE_STREAM timeout
         const abortController = new AbortController();
         this.activeOperations.set(operationId, abortController);
 
@@ -223,6 +233,7 @@ class RequestProcessor {
         const cancelTimeout = () => {
             if (timeoutId) {
                 clearTimeout(timeoutId);
+                timeoutId = null; // Clear reference to prevent memory leaks
                 // Logger.output("Data chunk received, timeout restriction lifted.");
             }
         };
@@ -244,6 +255,8 @@ class RequestProcessor {
                     error.status = response.status;
                     throw error;
                 }
+                // Clear timeout when fetch succeeds to prevent timer leak
+                cancelTimeout();
                 return response;
             } catch (error) {
                 cancelTimeout();
@@ -253,7 +266,7 @@ class RequestProcessor {
 
         const responsePromise = Promise.race([attemptPromise, startIdleTimeout()]);
 
-        return { cancelTimeout, responsePromise };
+        return { abortController, cancelTimeout, responsePromise };
     }
 
     cancelAllOperations() {
@@ -602,44 +615,117 @@ class ProxySystem extends EventTarget {
         const mode = requestSpec.streaming_mode || "fake";
         Logger.debug(`Browser received request`);
         let cancelTimeout;
+        let reader;
+        let abortController;
 
         try {
             if (this.requestProcessor.cancelledOperations.has(operationId)) {
                 throw new DOMException("The user aborted a request.", "AbortError");
             }
-            const { responsePromise, cancelTimeout: ct } = this.requestProcessor.execute(requestSpec, operationId);
+            const {
+                responsePromise,
+                cancelTimeout: ct,
+                abortController: ac,
+            } = this.requestProcessor.execute(requestSpec, operationId);
             cancelTimeout = ct;
+            abortController = ac;
             const response = await responsePromise;
             if (this.requestProcessor.cancelledOperations.has(operationId)) {
                 throw new DOMException("The user aborted a request.", "AbortError");
             }
 
             this._transmitHeaders(response, operationId, requestSpec.headers?.host);
-            const reader = response.body.getReader();
+            reader = response.body.getReader();
             const textDecoder = new TextDecoder();
 
             let fullBody = "";
 
             // --- Core modification: Correctly dispatch streaming and non-streaming data inside the loop ---
+            // Add timeout protection for each chunk read - aligned with server-side timeouts
+            const CHUNK_READ_TIMEOUT = 300000; // 300 seconds (5 minutes) - matches MESSAGE_QUEUE_DEFAULT timeout
             let processing = true;
             while (processing) {
-                const { done, value } = await reader.read();
-                if (done) {
+                // Check if WebSocket is still connected
+                if (!this.connectionManager.isConnected) {
+                    Logger.debug(`WebSocket disconnected, stopping stream read for operation #${operationId}`);
                     processing = false;
                     break;
                 }
 
-                cancelTimeout();
+                // Check if operation has been cancelled before creating timeout
+                if (this.requestProcessor.cancelledOperations.has(operationId)) {
+                    Logger.debug(`Operation #${operationId} cancelled, stopping stream read`);
+                    processing = false;
+                    break;
+                }
 
-                const chunk = textDecoder.decode(value, { stream: true });
-                if (mode === "real") {
-                    this._transmitChunk(chunk, operationId);
-                } else {
-                    fullBody += chunk;
+                // Wrap reader.read() with timeout protection
+                let chunkTimeoutId;
+                let timeoutOccurred = false;
+
+                const timeoutPromise = new Promise((_, reject) => {
+                    chunkTimeoutId = setTimeout(() => {
+                        timeoutOccurred = true;
+                        reject(
+                            new Error(`Chunk read timeout: no data received for ${CHUNK_READ_TIMEOUT / 1000} seconds`)
+                        );
+                    }, CHUNK_READ_TIMEOUT);
+                });
+
+                try {
+                    // Start reading the chunk
+                    const readPromise = reader.read();
+                    const { done, value } = await Promise.race([readPromise, timeoutPromise]);
+                    clearTimeout(chunkTimeoutId);
+                    chunkTimeoutId = null;
+
+                    if (done) {
+                        processing = false;
+                        break;
+                    }
+
+                    cancelTimeout();
+
+                    const chunk = textDecoder.decode(value, { stream: true });
+                    if (mode === "real") {
+                        this._transmitChunk(chunk, operationId);
+                    } else {
+                        fullBody += chunk;
+                    }
+                } catch (error) {
+                    if (chunkTimeoutId) {
+                        clearTimeout(chunkTimeoutId);
+                        chunkTimeoutId = null;
+                    }
+
+                    // If timeout occurred, cancel the reader to stop background processing
+                    if (timeoutOccurred || error.message.includes("Chunk read timeout")) {
+                        try {
+                            await reader.cancel();
+                        } catch (cancelError) {
+                            Logger.debug(`Failed to cancel reader: ${cancelError.message}`);
+                        }
+
+                        // Also abort the underlying request to prevent hanging network operations
+                        if (abortController && typeof abortController.abort === "function") {
+                            try {
+                                abortController.abort();
+                            } catch (abortError) {
+                                Logger.debug(`Failed to abort request: ${abortError.message}`);
+                            }
+                        }
+                    }
+                    throw error;
                 }
             }
 
             Logger.output("Data stream read complete.");
+
+            // Check if operation was cancelled during streaming
+            if (this.requestProcessor.cancelledOperations.has(operationId)) {
+                Logger.debug(`Operation #${operationId} was cancelled, skipping final transmission`);
+                return;
+            }
 
             if (mode === "fake") {
                 // In non-streaming mode, after loop ends, forward the concatenated complete response body
@@ -653,13 +739,34 @@ class ProxySystem extends EventTarget {
             } else {
                 Logger.output(`❌ Request processing failed: ${error.message}`);
             }
-            this._sendErrorResponse(error, operationId);
+            // Only send error if we still own this operationId (prevent stale errors from reaching server during retries)
+            if (this.requestProcessor.activeOperations.get(operationId) === abortController) {
+                this._sendErrorResponse(error, operationId);
+            } else {
+                Logger.debug(`[Diagnosis] Suppressing error for superseded operation #${operationId}`);
+            }
         } finally {
-            if (cancelTimeout) {
+            // Clean up timeout - safe to call even if cancelTimeout is undefined
+            if (cancelTimeout && typeof cancelTimeout === "function") {
                 cancelTimeout();
             }
-            this.requestProcessor.activeOperations.delete(operationId);
-            this.requestProcessor.cancelledOperations.delete(operationId);
+            // Always cancel reader to stop background stream processing
+            if (reader && typeof reader.cancel === "function") {
+                try {
+                    await reader.cancel();
+                } catch (e) {
+                    // Only log unexpected errors, ignore "already closed" errors
+                    if (e.name !== "TypeError" && !e.message.includes("closed")) {
+                        Logger.debug(`Reader cancel error: ${e.message}`);
+                    }
+                }
+            }
+            // Only delete if we still own this operationId (prevent race with retries)
+            if (this.requestProcessor.activeOperations.get(operationId) === abortController) {
+                this.requestProcessor.activeOperations.delete(operationId);
+                // Only delete from cancelledOperations if we own the operation
+                this.requestProcessor.cancelledOperations.delete(operationId);
+            }
         }
     }
 

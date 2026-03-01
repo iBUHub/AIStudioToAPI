@@ -91,6 +91,10 @@ class ProxyServerSystem extends EventEmitter {
             () => this.browserManager.currentAuthIndex,
             this.browserManager
         );
+
+        // Set ConnectionRegistry reference in BrowserManager to avoid circular dependency
+        this.browserManager.setConnectionRegistry(this.connectionRegistry);
+
         this.requestHandler = new RequestHandler(
             this,
             this.connectionRegistry,
@@ -110,6 +114,16 @@ class ProxyServerSystem extends EventEmitter {
         await this._startHttpServer();
         await this._startWebSocketServer();
         this.logger.info(`[System] Proxy server system startup complete.`);
+
+        // Start periodic cleanup of stale message queues (every 5 minutes)
+        // This is a safety mechanism to prevent queue leaks from race conditions
+        this.staleQueueCleanupInterval = setInterval(() => {
+            try {
+                this.connectionRegistry.cleanupStaleQueues(600000); // 10 minutes
+            } catch (error) {
+                this.logger.error(`[System] Error during stale queue cleanup: ${error.message}`);
+            }
+        }, 300000); // Run every 5 minutes
 
         const allAvailableIndices = this.authSource.availableIndices;
         const allRotationIndices = this.authSource.getRotationIndices();
@@ -573,6 +587,56 @@ class ProxyServerSystem extends EventEmitter {
                 `[System] WebSocket already closing/closed (readyState=${ws.readyState}), skipping close()`
             );
         }
+    }
+
+    /**
+     * Gracefully shutdown the server system
+     */
+    async shutdown() {
+        this.logger.info("[System] Shutting down server system...");
+
+        // Clear stale queue cleanup interval
+        if (this.staleQueueCleanupInterval) {
+            clearInterval(this.staleQueueCleanupInterval);
+            this.staleQueueCleanupInterval = null;
+            this.logger.info("[System] Stopped stale queue cleanup interval");
+        }
+
+        // Close all message queues
+        if (this.connectionRegistry) {
+            this.connectionRegistry.closeAllMessageQueues();
+        }
+
+        // Close browser
+        if (this.browserManager) {
+            await this.browserManager.closeBrowser();
+        }
+
+        // Close servers and wait for them to finish closing
+        const closeServer = (server, name) =>
+            new Promise((resolve) => {
+                if (!server) {
+                    return resolve();
+                }
+
+                try {
+                    server.close(() => {
+                        this.logger.info(`[System] ${name} closed`);
+                        resolve();
+                    });
+                } catch (error) {
+                    this.logger.warn(
+                        `[System] Error while closing ${name}: ${error.message}`
+                    );
+                    resolve();
+                }
+            });
+
+        await Promise.all([
+            closeServer(this.wsServer, "WebSocket server"),
+            closeServer(this.httpServer, "HTTP server"),
+        ]);
+        this.logger.info("[System] Shutdown complete");
     }
 }
 

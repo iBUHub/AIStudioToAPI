@@ -131,8 +131,8 @@ class StatusRoutes {
                     );
                     this.logger.warn("[System] Closing context for invalid auth.");
                     try {
-                        // Terminate all pending requests first to prevent them from hanging
-                        this.serverSystem.connectionRegistry.closeAllMessageQueues();
+                        // Terminate pending requests for this account before closing
+                        this.serverSystem.connectionRegistry.closeMessageQueuesForAuth(currentAuthIndex);
                         // Close context (this will trigger WebSocket disconnect)
                         await browserManager.closeContext(currentAuthIndex);
                         // Close WebSocket connection explicitly
@@ -373,8 +373,8 @@ class StatusRoutes {
                     this.serverSystem.isSystemBusy = true;
                 }
                 try {
-                    // 1. Terminate all pending requests immediately
-                    this.serverSystem.connectionRegistry.closeAllMessageQueues();
+                    // 1. Terminate pending requests for the current account
+                    this.serverSystem.connectionRegistry.closeMessageQueuesForAuth(currentAuthIndex);
                     // 2. Close context first so page is gone when _removeConnection checks
                     await this.serverSystem.browserManager.closeContext(currentAuthIndex);
                     // 3. Then close WebSocket connection
@@ -558,8 +558,8 @@ class StatusRoutes {
                         this.serverSystem.isSystemBusy = true;
                     }
                     try {
-                        // If deleting the current account, terminate pending requests first
-                        this.serverSystem.connectionRegistry.closeAllMessageQueues();
+                        // If deleting the current account, terminate its pending requests first
+                        this.serverSystem.connectionRegistry.closeMessageQueuesForAuth(targetIndex);
                         // Close context first so page is gone when _removeConnection checks
                         await this.serverSystem.browserManager.closeContext(targetIndex);
                         // Then close WebSocket connection
