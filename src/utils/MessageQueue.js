@@ -41,6 +41,7 @@ class MessageQueue extends EventEmitter {
         this.waitingResolvers = [];
         this.defaultTimeout = timeoutMs;
         this.closed = false;
+        this.closeReason = null;
     }
 
     enqueue(message) {
@@ -56,7 +57,8 @@ class MessageQueue extends EventEmitter {
 
     async dequeue(timeoutMs = this.defaultTimeout) {
         if (this.closed) {
-            throw new QueueClosedError();
+            const reason = this.closeReason || "unknown";
+            throw new QueueClosedError(`Queue is closed (reason: ${reason})`, reason);
         }
         return new Promise((resolve, reject) => {
             if (this.messages.length > 0) {
@@ -77,6 +79,7 @@ class MessageQueue extends EventEmitter {
 
     close(reason = "unknown") {
         this.closed = true;
+        this.closeReason = reason;
         this.waitingResolvers.forEach(resolver => {
             clearTimeout(resolver.timeoutId);
             resolver.reject(new QueueClosedError(`Queue is closed (reason: ${reason})`, reason));

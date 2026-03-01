@@ -1866,7 +1866,12 @@ class RequestHandler {
                 try {
                     errorPayload = JSON.parse(error.message);
                 } catch (e) {
-                    errorPayload = { message: error.message, status: 500 };
+                    // JSON parse failed - check if it's a timeout error
+                    if (error.code === "QUEUE_TIMEOUT" || error instanceof QueueTimeoutError) {
+                        errorPayload = { message: error.message || "Queue timeout", status: 504 };
+                    } else {
+                        errorPayload = { message: error.message, status: 500 };
+                    }
                 }
 
                 // Stop retrying immediately if the queue is closed

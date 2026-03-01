@@ -379,6 +379,14 @@ class ConnectionRegistry extends EventEmitter {
     }
 
     createMessageQueue(requestId, authIndex) {
+        // Validate authIndex: must be a valid non-negative integer
+        if (authIndex === undefined || authIndex < 0 || !Number.isInteger(authIndex)) {
+            this.logger.error(
+                `[Registry] Cannot create message queue with invalid authIndex: ${authIndex} for request ${requestId}`
+            );
+            throw new Error(`Invalid authIndex: ${authIndex}. Must be a non-negative integer.`);
+        }
+
         // If a queue with the same requestId already exists, close and remove it first
         // This prevents stale queues from lingering when retrying failed requests
         const existingEntry = this.messageQueues.get(requestId);
