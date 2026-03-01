@@ -612,14 +612,30 @@ class ProxyServerSystem extends EventEmitter {
             await this.browserManager.closeBrowser();
         }
 
-        // Close servers
-        if (this.wsServer) {
-            this.wsServer.close();
-        }
-        if (this.httpServer) {
-            this.httpServer.close();
-        }
+        // Close servers and wait for them to finish closing
+        const closeServer = (server, name) =>
+            new Promise((resolve) => {
+                if (!server) {
+                    return resolve();
+                }
 
+                try {
+                    server.close(() => {
+                        this.logger.info(`[System] ${name} closed`);
+                        resolve();
+                    });
+                } catch (error) {
+                    this.logger.warn(
+                        `[System] Error while closing ${name}: ${error.message}`
+                    );
+                    resolve();
+                }
+            });
+
+        await Promise.all([
+            closeServer(this.wsServer, "WebSocket server"),
+            closeServer(this.httpServer, "HTTP server"),
+        ]);
         this.logger.info("[System] Shutdown complete");
     }
 }
