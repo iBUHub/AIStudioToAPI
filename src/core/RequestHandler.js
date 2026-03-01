@@ -381,7 +381,7 @@ class RequestHandler {
         proxyRequest.is_generative = isGenerativeRequest;
         const messageQueue = this.connectionRegistry.createMessageQueue(requestId, this.currentAuthIndex);
 
-        this._setupClientDisconnectHandler(res, requestId, this.currentAuthIndex);
+        this._setupClientDisconnectHandler(res, requestId);
 
         const wantsStreamByHeader = req.headers.accept && req.headers.accept.includes("text/event-stream");
         const wantsStreamByPath = req.path.includes(":streamGenerateContent");
@@ -474,7 +474,7 @@ class RequestHandler {
 
         const messageQueue = this.connectionRegistry.createMessageQueue(requestId, this.currentAuthIndex);
 
-        this._setupClientDisconnectHandler(res, requestId, this.currentAuthIndex);
+        this._setupClientDisconnectHandler(res, requestId);
 
         try {
             await this._handleNonStreamResponse(proxyRequest, messageQueue, req, res);
@@ -570,7 +570,7 @@ class RequestHandler {
 
         const messageQueue = this.connectionRegistry.createMessageQueue(requestId, this.currentAuthIndex);
 
-        this._setupClientDisconnectHandler(res, requestId, this.currentAuthIndex);
+        this._setupClientDisconnectHandler(res, requestId);
 
         try {
             if (useRealStream) {
@@ -838,7 +838,7 @@ class RequestHandler {
 
         const messageQueue = this.connectionRegistry.createMessageQueue(requestId, this.currentAuthIndex);
 
-        this._setupClientDisconnectHandler(res, requestId, this.currentAuthIndex);
+        this._setupClientDisconnectHandler(res, requestId);
 
         try {
             if (useRealStream) {
@@ -1100,7 +1100,7 @@ class RequestHandler {
 
         const messageQueue = this.connectionRegistry.createMessageQueue(requestId, this.currentAuthIndex);
 
-        this._setupClientDisconnectHandler(res, requestId, this.currentAuthIndex);
+        this._setupClientDisconnectHandler(res, requestId);
 
         try {
             this._forwardRequest(proxyRequest);
@@ -2111,11 +2111,17 @@ class RequestHandler {
         }
     }
 
-    _setupClientDisconnectHandler(res, requestId, capturedAuthIndex) {
+    _setupClientDisconnectHandler(res, requestId) {
         res.on("close", () => {
             if (!res.writableEnded) {
                 this.logger.warn(`[Request] Client closed request #${requestId} connection prematurely.`);
-                this._cancelBrowserRequest(requestId, capturedAuthIndex);
+
+                // Dynamically look up the current authIndex from messageQueues
+                // This ensures we cancel on the correct account even after retries switch accounts
+                const entry = this.connectionRegistry.messageQueues.get(requestId);
+                const targetAuthIndex = entry ? entry.authIndex : this.currentAuthIndex;
+
+                this._cancelBrowserRequest(requestId, targetAuthIndex);
                 // Close and remove the message queue to unblock any waiting dequeue() calls
                 this.connectionRegistry.removeMessageQueue(requestId);
             }
