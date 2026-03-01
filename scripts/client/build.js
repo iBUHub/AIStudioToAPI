@@ -203,6 +203,15 @@ class RequestProcessor {
     }
 
     execute(requestSpec, operationId) {
+        // Abort any existing operation with the same ID to prevent concurrent fetches
+        const existingController = this.activeOperations.get(operationId);
+        if (existingController) {
+            Logger.debug(`Aborting existing operation #${operationId} before starting new attempt`);
+            existingController.abort();
+            // Note: The old operation's finally block will try to delete this operationId,
+            // but we immediately overwrite it below, so the new controller reference is safe
+        }
+
         // Timeout constants - aligned with server-side timeouts
         const IDLE_TIMEOUT_DURATION = 300000; // 300 seconds (5 minutes) - matches FAKE_STREAM timeout
         const abortController = new AbortController();
@@ -257,7 +266,7 @@ class RequestProcessor {
 
         const responsePromise = Promise.race([attemptPromise, startIdleTimeout()]);
 
-        return { cancelTimeout, responsePromise };
+        return { abortController, cancelTimeout, responsePromise };
     }
 
     cancelAllOperations() {
@@ -607,13 +616,19 @@ class ProxySystem extends EventTarget {
         Logger.debug(`Browser received request`);
         let cancelTimeout;
         let reader;
+        let abortController;
 
         try {
             if (this.requestProcessor.cancelledOperations.has(operationId)) {
                 throw new DOMException("The user aborted a request.", "AbortError");
             }
-            const { responsePromise, cancelTimeout: ct } = this.requestProcessor.execute(requestSpec, operationId);
+            const {
+                responsePromise,
+                cancelTimeout: ct,
+                abortController: ac,
+            } = this.requestProcessor.execute(requestSpec, operationId);
             cancelTimeout = ct;
+            abortController = ac;
             const response = await responsePromise;
             if (this.requestProcessor.cancelledOperations.has(operationId)) {
                 throw new DOMException("The user aborted a request.", "AbortError");
@@ -708,7 +723,10 @@ class ProxySystem extends EventTarget {
                     // Ignore errors if reader is already closed
                 }
             }
-            this.requestProcessor.activeOperations.delete(operationId);
+            // Only delete if we still own this operationId (prevent race with retries)
+            if (this.requestProcessor.activeOperations.get(operationId) === abortController) {
+                this.requestProcessor.activeOperations.delete(operationId);
+            }
             this.requestProcessor.cancelledOperations.delete(operationId);
         }
     }

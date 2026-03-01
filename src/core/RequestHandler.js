@@ -715,10 +715,16 @@ class RequestHandler {
                             this.logger.info("[Request] Fake mode: Complete content sent at once.");
                         } catch (error) {
                             // Handle timeout or other errors during streaming
-                            if (!res.writableEnded) {
-                                res.write(
-                                    `data: ${JSON.stringify({ error: { code: 504, message: `Stream timeout: ${error.message}`, type: "timeout_error" } })}\n\n`
-                                );
+                            if (this._isResponseWritable(res)) {
+                                try {
+                                    res.write(
+                                        `data: ${JSON.stringify({ error: { code: 504, message: `Stream timeout: ${error.message}`, type: "timeout_error" } })}\n\n`
+                                    );
+                                } catch (writeError) {
+                                    this.logger.debug(
+                                        `[Request] Failed to write fake stream timeout error to client: ${writeError.message}`
+                                    );
+                                }
                             }
                         }
                     } else {
@@ -973,16 +979,22 @@ class RequestHandler {
                             this.logger.info("[Request] Claude fake mode: Complete content sent at once.");
                         } catch (error) {
                             // Handle timeout or other errors during streaming
-                            if (!res.writableEnded) {
-                                res.write(
-                                    `event: error\ndata: ${JSON.stringify({
-                                        error: {
-                                            message: `Stream timeout: ${error.message}`,
-                                            type: "timeout_error",
-                                        },
-                                        type: "error",
-                                    })}\n\n`
-                                );
+                            if (this._isResponseWritable(res)) {
+                                try {
+                                    res.write(
+                                        `event: error\ndata: ${JSON.stringify({
+                                            error: {
+                                                message: `Stream timeout: ${error.message}`,
+                                                type: "timeout_error",
+                                            },
+                                            type: "error",
+                                        })}\n\n`
+                                    );
+                                } catch (writeError) {
+                                    this.logger.debug(
+                                        `[Request] Failed to write fake stream timeout error to client: ${writeError.message}`
+                                    );
+                                }
                             }
                         }
                     } else {
@@ -1744,7 +1756,7 @@ class RequestHandler {
 
     async _executeRequestWithRetries(proxyRequest, messageQueue) {
         let lastError = null;
-        let currentQueue = messageQueue;
+        const currentQueue = messageQueue;
 
         for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
             try {
@@ -1815,11 +1827,9 @@ class RequestHandler {
 
                 // Create a new message queue for the retry
                 // Note: We keep the same requestId so the browser response routes to the new queue
-                // createMessageQueue will automatically close and remove any existing queue with the same ID
                 this.logger.debug(
                     `[Request] Creating new message queue for retry #${attempt + 1} for request #${proxyRequest.request_id}`
                 );
-                currentQueue = this.connectionRegistry.createMessageQueue(proxyRequest.request_id);
 
                 // Wait before the next retry
                 await new Promise(resolve => setTimeout(resolve, this.retryDelay));
