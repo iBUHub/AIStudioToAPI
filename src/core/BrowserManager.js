@@ -2479,7 +2479,7 @@ class BrowserManager {
             this.logger.info(
                 `[Browser] Proactively closing message queues for account #${authIndex}${isCurrent ? " (current account)" : ""}`
             );
-            this.connectionRegistry.closeMessageQueuesForAuth(authIndex);
+            this.connectionRegistry.closeMessageQueuesForAuth(authIndex, "context_closed");
         }
 
         // If this was the current context, reset current references
