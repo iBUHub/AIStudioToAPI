@@ -716,8 +716,10 @@ class ProxySystem extends EventTarget {
                         chunkTimeoutId = null;
                     }
 
+                    const errorMessage = String(error?.message ?? error);
+
                     // If timeout occurred, cancel the reader to stop background processing
-                    if (timeoutOccurred || error.message.includes("Chunk read timeout")) {
+                    if (timeoutOccurred || errorMessage.includes("Chunk read timeout")) {
                         try {
                             await reader.cancel();
                         } catch (cancelError) {
