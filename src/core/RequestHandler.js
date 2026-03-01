@@ -409,7 +409,7 @@ class RequestHandler {
                 this._handleRequestError(error, res);
             }
         } finally {
-            this.connectionRegistry.removeMessageQueue(requestId);
+            this.connectionRegistry.removeMessageQueue(requestId, "request_complete");
             if (this.needsSwitchingAfterRequest) {
                 this.logger.info(
                     `[Auth] Rotation count reached switching threshold (${this.authSwitcher.usageCount}/${this.config.switchOnUses}), will automatically switch account in background...`
@@ -486,7 +486,7 @@ class RequestHandler {
                 this._handleRequestError(error, res);
             }
         } finally {
-            this.connectionRegistry.removeMessageQueue(requestId);
+            this.connectionRegistry.removeMessageQueue(requestId, "request_complete");
             if (!res.writableEnded) res.end();
         }
     }
@@ -743,7 +743,7 @@ class RequestHandler {
                 this._handleRequestError(error, res);
             }
         } finally {
-            this.connectionRegistry.removeMessageQueue(requestId);
+            this.connectionRegistry.removeMessageQueue(requestId, "request_complete");
             if (this.needsSwitchingAfterRequest) {
                 this.logger.info(
                     `[Auth] Rotation count reached switching threshold (${this.authSwitcher.usageCount}/${this.config.switchOnUses}), will automatically switch account in background...`
@@ -1013,7 +1013,7 @@ class RequestHandler {
                 this._handleClaudeRequestError(error, res);
             }
         } finally {
-            this.connectionRegistry.removeMessageQueue(requestId);
+            this.connectionRegistry.removeMessageQueue(requestId, "request_complete");
             if (this.needsSwitchingAfterRequest) {
                 this.logger.info(
                     `[Auth] Rotation count reached switching threshold (${this.authSwitcher.usageCount}/${this.config.switchOnUses}), will automatically switch account in background...`
@@ -1161,7 +1161,7 @@ class RequestHandler {
                 this._handleClaudeRequestError(error, res);
             }
         } finally {
-            this.connectionRegistry.removeMessageQueue(requestId);
+            this.connectionRegistry.removeMessageQueue(requestId, "request_complete");
             if (!res.writableEnded) res.end();
         }
     }
@@ -2116,14 +2116,14 @@ class RequestHandler {
             if (!res.writableEnded) {
                 this.logger.warn(`[Request] Client closed request #${requestId} connection prematurely.`);
 
-                // Dynamically look up the current authIndex from messageQueues
+                // Dynamically look up the current authIndex from the connection registry
                 // This ensures we cancel on the correct account even after retries switch accounts
-                const entry = this.connectionRegistry.messageQueues.get(requestId);
-                const targetAuthIndex = entry ? entry.authIndex : this.currentAuthIndex;
+                const targetAuthIndex =
+                    this.connectionRegistry.getAuthIndexForRequest(requestId) ?? this.currentAuthIndex;
 
                 this._cancelBrowserRequest(requestId, targetAuthIndex);
                 // Close and remove the message queue to unblock any waiting dequeue() calls
-                this.connectionRegistry.removeMessageQueue(requestId);
+                this.connectionRegistry.removeMessageQueue(requestId, "client_disconnect");
             }
         });
     }

@@ -27,7 +27,7 @@ class ConnectionRegistry extends EventEmitter {
         this.browserManager = browserManager;
         // Map: authIndex -> WebSocket connection
         this.connectionsByAuth = new Map();
-        // Map: requestId -> { queue: MessageQueue, authIndex: number }
+        // Map: requestId -> { queue: MessageQueue, authIndex: number, createdAt: number }
         this.messageQueues = new Map();
         // Map: authIndex -> timerId, supports independent grace period for each account
         this.reconnectGraceTimers = new Map();
@@ -400,12 +400,22 @@ class ConnectionRegistry extends EventEmitter {
         return queue;
     }
 
-    removeMessageQueue(requestId) {
+    removeMessageQueue(requestId, reason = "handler_cleanup") {
         const entry = this.messageQueues.get(requestId);
         if (entry) {
-            entry.queue.close("client_disconnect");
+            entry.queue.close(reason);
             this.messageQueues.delete(requestId);
         }
+    }
+
+    /**
+     * Get the authIndex associated with a specific request
+     * @param {string} requestId - The request ID to look up
+     * @returns {number|null} The authIndex for the request, or null if not found
+     */
+    getAuthIndexForRequest(requestId) {
+        const entry = this.messageQueues.get(requestId);
+        return entry ? entry.authIndex : null;
     }
 
     /**
