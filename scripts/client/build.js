@@ -212,6 +212,13 @@ class RequestProcessor {
             // but we immediately overwrite it below, so the new controller reference is safe
         }
 
+        // Clear any stale cancellation flag from previous attempts
+        // This prevents retries from being immediately aborted due to old cancellation state
+        if (this.cancelledOperations.has(operationId)) {
+            Logger.debug(`Clearing stale cancellation flag for operation #${operationId}`);
+            this.cancelledOperations.delete(operationId);
+        }
+
         // Timeout constants - aligned with server-side timeouts
         const IDLE_TIMEOUT_DURATION = 300000; // 300 seconds (5 minutes) - matches FAKE_STREAM timeout
         const abortController = new AbortController();
