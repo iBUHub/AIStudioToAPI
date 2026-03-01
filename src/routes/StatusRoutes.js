@@ -559,7 +559,7 @@ class StatusRoutes {
                     }
                     try {
                         // If deleting the current account, terminate its pending requests first
-                        this.serverSystem.connectionRegistry.closeMessageQueuesForAuth(targetIndex);
+                        this.serverSystem.connectionRegistry.closeMessageQueuesForAuth(targetIndex, "account_deleted");
                         // Close context first so page is gone when _removeConnection checks
                         await this.serverSystem.browserManager.closeContext(targetIndex);
                         // Then close WebSocket connection
