@@ -1581,7 +1581,7 @@ class RequestHandler {
             let lastChunk = "";
             // eslint-disable-next-line no-constant-condition
             while (true) {
-                const dataMessage = await messageQueue.dequeue(60000); // Increased timeout to 60s
+                const dataMessage = await messageQueue.dequeue(this.timeouts.STREAM_CHUNK);
                 if (dataMessage.type === "STREAM_END") {
                     this.logger.info("[Request] Received stream end signal.");
                     break;
@@ -1756,7 +1756,7 @@ class RequestHandler {
 
     async _executeRequestWithRetries(proxyRequest, messageQueue) {
         let lastError = null;
-        const currentQueue = messageQueue;
+        let currentQueue = messageQueue;
 
         for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
             try {
@@ -1827,9 +1827,11 @@ class RequestHandler {
 
                 // Create a new message queue for the retry
                 // Note: We keep the same requestId so the browser response routes to the new queue
+                // createMessageQueue will automatically close and remove any existing queue with the same ID
                 this.logger.debug(
                     `[Request] Creating new message queue for retry #${attempt + 1} for request #${proxyRequest.request_id}`
                 );
+                currentQueue = this.connectionRegistry.createMessageQueue(proxyRequest.request_id);
 
                 // Wait before the next retry
                 await new Promise(resolve => setTimeout(resolve, this.retryDelay));
@@ -2091,11 +2093,8 @@ class RequestHandler {
             if (!res.writableEnded) {
                 this.logger.warn(`[Request] Client closed request #${requestId} connection prematurely.`);
                 this._cancelBrowserRequest(requestId);
-                // Close the message queue to unblock any waiting dequeue() calls
-                const queue = this.connectionRegistry.messageQueues.get(requestId);
-                if (queue) {
-                    queue.close();
-                }
+                // Close and remove the message queue to unblock any waiting dequeue() calls
+                this.connectionRegistry.removeMessageQueue(requestId);
             }
         });
     }

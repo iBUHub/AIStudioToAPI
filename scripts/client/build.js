@@ -710,7 +710,12 @@ class ProxySystem extends EventTarget {
             } else {
                 Logger.output(`❌ Request processing failed: ${error.message}`);
             }
-            this._sendErrorResponse(error, operationId);
+            // Only send error if we still own this operationId (prevent stale errors from reaching server during retries)
+            if (this.requestProcessor.activeOperations.get(operationId) === abortController) {
+                this._sendErrorResponse(error, operationId);
+            } else {
+                Logger.debug(`[Diagnosis] Suppressing error for superseded operation #${operationId}`);
+            }
         } finally {
             if (cancelTimeout) {
                 cancelTimeout();
