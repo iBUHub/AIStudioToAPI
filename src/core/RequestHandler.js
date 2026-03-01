@@ -12,7 +12,7 @@
 const AuthSwitcher = require("../auth/AuthSwitcher");
 const FormatConverter = require("./FormatConverter");
 const { isUserAbortedError } = require("../utils/CustomErrors");
-const { QueueClosedError } = require("../utils/MessageQueue");
+const { QueueClosedError, QueueTimeoutError } = require("../utils/MessageQueue");
 
 // Timeout constants (in milliseconds)
 const TIMEOUTS = {
@@ -118,6 +118,76 @@ class RequestHandler {
             );
             this._handleRequestError(error, res);
             return false; // Error response sent
+        }
+    }
+
+    /**
+     * Classify and handle fake stream errors
+     * @param {Error} error - The error object
+     * @param {Object} res - Express response object
+     * @param {string} format - Response format ('openai' or 'claude')
+     * @throws {Error} Rethrows unexpected errors for outer handler
+     */
+    _handleFakeStreamError(error, res, format) {
+        if (!this._isResponseWritable(res)) {
+            return; // Client disconnected, no need to send error
+        }
+
+        try {
+            let errorPayload;
+
+            if (error.code === "QUEUE_TIMEOUT" || error instanceof QueueTimeoutError) {
+                // True timeout error - 504
+                if (format === "openai") {
+                    errorPayload = {
+                        error: {
+                            code: 504,
+                            message: `Stream timeout: ${error.message}`,
+                            type: "timeout_error",
+                        },
+                    };
+                    res.write(`data: ${JSON.stringify(errorPayload)}\n\n`);
+                } else {
+                    // claude
+                    errorPayload = {
+                        error: {
+                            message: `Stream timeout: ${error.message}`,
+                            type: "timeout_error",
+                        },
+                        type: "error",
+                    };
+                    res.write(`event: error\ndata: ${JSON.stringify(errorPayload)}\n\n`);
+                }
+            } else if (error.code === "QUEUE_CLOSED" || error instanceof QueueClosedError) {
+                // Queue closed (account switch, system reset, etc.) - 503
+                if (format === "openai") {
+                    errorPayload = {
+                        error: {
+                            code: 503,
+                            message: `Service unavailable: ${error.message}`,
+                            type: "service_unavailable",
+                        },
+                    };
+                    res.write(`data: ${JSON.stringify(errorPayload)}\n\n`);
+                } else {
+                    // claude
+                    errorPayload = {
+                        error: {
+                            message: `Service unavailable: ${error.message}`,
+                            type: "overloaded_error",
+                        },
+                        type: "error",
+                    };
+                    res.write(`event: error\ndata: ${JSON.stringify(errorPayload)}\n\n`);
+                }
+            } else {
+                // Other unexpected errors - rethrow to outer handler
+                throw error;
+            }
+        } catch (writeError) {
+            this.logger.debug(`[Request] Failed to write fake stream error to client: ${writeError.message}`);
+            // If write failed or unexpected error, rethrow original error
+            throw error;
         }
     }
 
@@ -739,18 +809,8 @@ class RequestHandler {
                             res.write("data: [DONE]\n\n");
                             this.logger.info("[Request] Fake mode: Complete content sent at once.");
                         } catch (error) {
-                            // Handle timeout or other errors during streaming
-                            if (this._isResponseWritable(res)) {
-                                try {
-                                    res.write(
-                                        `data: ${JSON.stringify({ error: { code: 504, message: `Stream timeout: ${error.message}`, type: "timeout_error" } })}\n\n`
-                                    );
-                                } catch (writeError) {
-                                    this.logger.debug(
-                                        `[Request] Failed to write fake stream timeout error to client: ${writeError.message}`
-                                    );
-                                }
-                            }
+                            // Classify error type and send appropriate response
+                            this._handleFakeStreamError(error, res, "openai");
                         }
                     } else {
                         // Non-stream
@@ -1003,24 +1063,8 @@ class RequestHandler {
                             if (translatedChunk) res.write(translatedChunk);
                             this.logger.info("[Request] Claude fake mode: Complete content sent at once.");
                         } catch (error) {
-                            // Handle timeout or other errors during streaming
-                            if (this._isResponseWritable(res)) {
-                                try {
-                                    res.write(
-                                        `event: error\ndata: ${JSON.stringify({
-                                            error: {
-                                                message: `Stream timeout: ${error.message}`,
-                                                type: "timeout_error",
-                                            },
-                                            type: "error",
-                                        })}\n\n`
-                                    );
-                                } catch (writeError) {
-                                    this.logger.debug(
-                                        `[Request] Failed to write fake stream timeout error to client: ${writeError.message}`
-                                    );
-                                }
-                            }
+                            // Classify error type and send appropriate response
+                            this._handleFakeStreamError(error, res, "claude");
                         }
                     } else {
                         // Non-stream
