@@ -1757,6 +1757,8 @@ class RequestHandler {
     async _executeRequestWithRetries(proxyRequest, messageQueue) {
         let lastError = null;
         let currentQueue = messageQueue;
+        // Track the authIndex for the current queue to ensure proper cleanup
+        let currentQueueAuthIndex = this.currentAuthIndex;
 
         for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
             try {
@@ -1825,19 +1827,30 @@ class RequestHandler {
                     break;
                 }
 
-                // Create a new message queue for the retry
+                // CRITICAL FIX: Cancel browser request on the ORIGINAL account that owns this queue
+                // If account has switched, currentAuthIndex may differ from currentQueueAuthIndex
+                this._cancelBrowserRequest(proxyRequest.request_id, currentQueueAuthIndex);
+
+                // CRITICAL FIX: Explicitly close the old queue before creating a new one
+                // This ensures waitingResolvers are properly rejected even if authIndex changed
+                try {
+                    currentQueue.close("retry_creating_new_queue");
+                } catch (e) {
+                    this.logger.debug(`[Request] Failed to close old queue before retry: ${e.message}`);
+                }
+
+                // Create a new message queue for the retry with CURRENT account
                 // Note: We keep the same requestId so the browser response routes to the new queue
-                // Cancel the previous browser request first to prevent stale in-flight responses
-                // from interleaving with the new attempt's responses in the new queue
-                this._cancelBrowserRequest(proxyRequest.request_id, this.currentAuthIndex);
-                // createMessageQueue will automatically close and remove any existing queue with the same ID
+                // createMessageQueue will automatically close and remove any existing queue with the same ID from the registry
                 this.logger.debug(
-                    `[Request] Creating new message queue for retry #${attempt + 1} for request #${proxyRequest.request_id}`
+                    `[Request] Creating new message queue for retry #${attempt + 1} for request #${proxyRequest.request_id} (switching from account #${currentQueueAuthIndex} to #${this.currentAuthIndex})`
                 );
                 currentQueue = this.connectionRegistry.createMessageQueue(
                     proxyRequest.request_id,
                     this.currentAuthIndex
                 );
+                // Update tracked authIndex for the new queue
+                currentQueueAuthIndex = this.currentAuthIndex;
 
                 // Wait before the next retry
                 await new Promise(resolve => setTimeout(resolve, this.retryDelay));

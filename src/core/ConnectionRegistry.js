@@ -384,7 +384,7 @@ class ConnectionRegistry extends EventEmitter {
         const existingEntry = this.messageQueues.get(requestId);
         if (existingEntry) {
             this.logger.debug(
-                `[Registry] Found existing message queue for request ${requestId}, closing it before creating new one`
+                `[Registry] Found existing message queue for request ${requestId} (authIndex=${existingEntry.authIndex}), closing it before creating new one`
             );
             try {
                 existingEntry.queue.close("retry_replaced");
@@ -395,7 +395,8 @@ class ConnectionRegistry extends EventEmitter {
         }
 
         const queue = new MessageQueue();
-        this.messageQueues.set(requestId, { authIndex, queue });
+        // Add timestamp for stale queue detection
+        this.messageQueues.set(requestId, { authIndex, createdAt: Date.now(), queue });
         return queue;
     }
 
@@ -447,6 +448,39 @@ class ConnectionRegistry extends EventEmitter {
             });
             this.messageQueues.clear();
         }
+    }
+
+    /**
+     * Clean up stale message queues that have been waiting too long
+     * This is a safety mechanism to prevent queue leaks from race conditions
+     * @param {number} maxAgeMs - Maximum age in milliseconds (default: 10 minutes)
+     * @returns {number} Number of stale queues cleaned up
+     */
+    cleanupStaleQueues(maxAgeMs = 600000) {
+        const now = Date.now();
+        let cleanedCount = 0;
+
+        for (const [requestId, entry] of this.messageQueues.entries()) {
+            const age = now - entry.createdAt;
+            if (age > maxAgeMs) {
+                this.logger.warn(
+                    `[Registry] Cleaning up stale message queue for request ${requestId} (age: ${Math.round(age / 1000)}s, authIndex: ${entry.authIndex})`
+                );
+                try {
+                    entry.queue.close("stale_cleanup");
+                } catch (e) {
+                    this.logger.debug(`[Registry] Failed to close stale queue for ${requestId}: ${e.message}`);
+                }
+                this.messageQueues.delete(requestId);
+                cleanedCount++;
+            }
+        }
+
+        if (cleanedCount > 0) {
+            this.logger.info(`[Registry] Cleaned up ${cleanedCount} stale message queue(s)`);
+        }
+
+        return cleanedCount;
     }
 
     /**

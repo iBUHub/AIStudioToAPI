@@ -2473,10 +2473,11 @@ class BrowserManager {
         // Proactively close message queues BEFORE closing context to prevent race condition
         // Race condition: context.close() triggers async WebSocket 'close' event, which calls _removeConnection()
         // But _removeConnection() executes later in event loop, after switchAccount() may have updated currentAuthIndex
-        // So we must close queues NOW while currentAuthIndex still matches the closing account
-        if (this._currentAuthIndex === authIndex && this.connectionRegistry) {
+        // So we must close queues NOW for ANY account being closed (current or not)
+        if (this.connectionRegistry) {
+            const isCurrent = this._currentAuthIndex === authIndex;
             this.logger.info(
-                `[Browser] Closing current account #${authIndex}, proactively closing message queues to prevent race condition`
+                `[Browser] Proactively closing message queues for account #${authIndex}${isCurrent ? " (current account)" : ""} to prevent race condition`
             );
             this.connectionRegistry.closeMessageQueuesForAuth(authIndex);
         }

@@ -21,6 +21,21 @@ const initializeServer = async () => {
     try {
         const serverSystem = new ProxyServerSystem();
         await serverSystem.start(initialAuthIndex);
+
+        // Handle graceful shutdown
+        const shutdownHandler = async signal => {
+            console.log(`\n${signal} received, shutting down gracefully...`);
+            try {
+                await serverSystem.shutdown();
+                process.exit(0);
+            } catch (error) {
+                console.error("Error during shutdown:", error);
+                process.exit(1);
+            }
+        };
+
+        process.on("SIGTERM", () => shutdownHandler("SIGTERM"));
+        process.on("SIGINT", () => shutdownHandler("SIGINT"));
     } catch (error) {
         console.error("❌ Server startup failed:", error.message);
         process.exit(1);

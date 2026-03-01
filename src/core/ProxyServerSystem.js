@@ -115,6 +115,16 @@ class ProxyServerSystem extends EventEmitter {
         await this._startWebSocketServer();
         this.logger.info(`[System] Proxy server system startup complete.`);
 
+        // Start periodic cleanup of stale message queues (every 5 minutes)
+        // This is a safety mechanism to prevent queue leaks from race conditions
+        this.staleQueueCleanupInterval = setInterval(() => {
+            try {
+                this.connectionRegistry.cleanupStaleQueues(600000); // 10 minutes
+            } catch (error) {
+                this.logger.error(`[System] Error during stale queue cleanup: ${error.message}`);
+            }
+        }, 300000); // Run every 5 minutes
+
         const allAvailableIndices = this.authSource.availableIndices;
         const allRotationIndices = this.authSource.getRotationIndices();
 
@@ -577,6 +587,40 @@ class ProxyServerSystem extends EventEmitter {
                 `[System] WebSocket already closing/closed (readyState=${ws.readyState}), skipping close()`
             );
         }
+    }
+
+    /**
+     * Gracefully shutdown the server system
+     */
+    async shutdown() {
+        this.logger.info("[System] Shutting down server system...");
+
+        // Clear stale queue cleanup interval
+        if (this.staleQueueCleanupInterval) {
+            clearInterval(this.staleQueueCleanupInterval);
+            this.staleQueueCleanupInterval = null;
+            this.logger.info("[System] Stopped stale queue cleanup interval");
+        }
+
+        // Close all message queues
+        if (this.connectionRegistry) {
+            this.connectionRegistry.closeAllMessageQueues();
+        }
+
+        // Close browser
+        if (this.browserManager) {
+            await this.browserManager.closeBrowser();
+        }
+
+        // Close servers
+        if (this.wsServer) {
+            this.wsServer.close();
+        }
+        if (this.httpServer) {
+            this.httpServer.close();
+        }
+
+        this.logger.info("[System] Shutdown complete");
     }
 }
 
