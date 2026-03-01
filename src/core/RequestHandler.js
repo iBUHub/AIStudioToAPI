@@ -1391,31 +1391,15 @@ class RequestHandler {
                 }
             }
         } catch (error) {
-            // Handle timeout or other errors during streaming
-            // Don't attempt to write if it's a connection reset (client disconnect) or if response is destroyed
+            // Only handle connection reset errors here (client disconnect)
+            // Let other errors (timeout, parsing, logic errors) propagate to outer catch
             if (this._isConnectionResetError(error)) {
                 this._handleRealStreamQueueClosedError(error, res, "claude");
                 return;
             }
 
-            // Check if response is still writable before attempting to write
-            if (this._isResponseWritable(res)) {
-                try {
-                    res.write(
-                        `event: error\ndata: ${JSON.stringify({
-                            error: {
-                                message: `Stream timeout: ${error.message}`,
-                                type: "timeout_error",
-                            },
-                            type: "error",
-                        })}\n\n`
-                    );
-                } catch (writeError) {
-                    this.logger.debug(
-                        `[Request] Failed to write error to Claude stream (connection likely closed): ${writeError.message}`
-                    );
-                }
-            }
+            // Re-throw all other errors to be handled by outer catch block
+            throw error;
         }
     }
 
@@ -1470,7 +1454,6 @@ class RequestHandler {
     _handleClaudeRequestError(error, res) {
         // Normalize error message to handle non-Error objects and missing/non-string messages
         const errorMsg = String(error?.message ?? error);
-        const errorMsgLower = errorMsg.toLowerCase();
 
         // Check if this is a client disconnect - if so, just log and return
         if (this._isConnectionResetError(error)) {
@@ -1500,7 +1483,8 @@ class RequestHandler {
                         let errorType = "api_error";
                         let errorMessage = `Processing failed: ${errorMsg}`;
 
-                        if (errorMsgLower.includes("timeout")) {
+                        // Use precise error type checking instead of string matching
+                        if (error instanceof QueueTimeoutError || error.code === "QUEUE_TIMEOUT") {
                             errorType = "timeout_error";
                             errorMessage = `Stream timeout: ${errorMsg}`;
                         } else if (this._isConnectionResetError(error)) {
@@ -1529,7 +1513,8 @@ class RequestHandler {
             this.logger.error(`[Request] Claude request error: ${errorMsg}`);
             let status = 500;
             let errorType = "api_error";
-            if (errorMsgLower.includes("timeout")) {
+            // Use precise error type checking instead of string matching
+            if (error instanceof QueueTimeoutError || error.code === "QUEUE_TIMEOUT") {
                 status = 504;
                 errorType = "timeout_error";
             } else if (this._isConnectionResetError(error)) {
@@ -1915,7 +1900,7 @@ class RequestHandler {
             // Handle queue closed errors (account switch, context closed, etc.)
             if (this._isConnectionResetError(error)) {
                 this._handleRealStreamQueueClosedError(error, res, "gemini");
-            } else if (error.message === "Queue timeout") {
+            } else if (error instanceof QueueTimeoutError || error.code === "QUEUE_TIMEOUT") {
                 this.logger.warn("[Request] Real stream response timeout, stream may have ended normally.");
             } else {
                 // Unexpected error - rethrow to outer handler
@@ -2237,25 +2222,15 @@ class RequestHandler {
                 }
             }
         } catch (error) {
-            // Handle timeout or other errors during streaming
-            // Don't attempt to write if it's a connection reset (client disconnect) or if response is destroyed
+            // Only handle connection reset errors here (client disconnect)
+            // Let other errors (timeout, parsing, logic errors) propagate to outer catch
             if (this._isConnectionResetError(error)) {
                 this._handleRealStreamQueueClosedError(error, res, "openai");
                 return;
             }
 
-            // Check if response is still writable before attempting to write
-            if (this._isResponseWritable(res)) {
-                try {
-                    res.write(
-                        `data: ${JSON.stringify({ error: { code: 504, message: `Stream timeout: ${error.message}`, type: "timeout_error" } })}\n\n`
-                    );
-                } catch (writeError) {
-                    this.logger.debug(
-                        `[Request] Failed to write error to OpenAI stream (connection likely closed): ${writeError.message}`
-                    );
-                }
-            }
+            // Re-throw all other errors to be handled by outer catch block
+            throw error;
         }
     }
 
@@ -2342,7 +2317,6 @@ class RequestHandler {
     _handleRequestError(error, res) {
         // Normalize error message to handle non-Error objects and missing/non-string messages
         const errorMsg = String(error?.message ?? error);
-        const errorMsgLower = errorMsg.toLowerCase();
 
         // Check if this is a client disconnect - if so, just log and return
         if (this._isConnectionResetError(error)) {
@@ -2375,7 +2349,8 @@ class RequestHandler {
                         let errorType = "api_error";
                         let errorMessage = `Processing failed: ${errorMsg}`;
 
-                        if (errorMsgLower.includes("timeout")) {
+                        // Use precise error type checking instead of string matching
+                        if (error instanceof QueueTimeoutError || error.code === "QUEUE_TIMEOUT") {
                             errorCode = 504;
                             errorType = "timeout_error";
                             errorMessage = `Stream timeout: ${errorMsg}`;
@@ -2418,7 +2393,8 @@ class RequestHandler {
         } else {
             this.logger.error(`[Request] Request processing error: ${errorMsg}`);
             let status = 500;
-            if (errorMsgLower.includes("timeout")) {
+            // Use precise error type checking instead of string matching
+            if (error instanceof QueueTimeoutError || error.code === "QUEUE_TIMEOUT") {
                 status = 504;
             } else if (this._isConnectionResetError(error)) {
                 status = 503;
