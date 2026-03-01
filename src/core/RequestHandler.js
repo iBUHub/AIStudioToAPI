@@ -1395,7 +1395,7 @@ class RequestHandler {
             try {
                 // eslint-disable-next-line no-constant-condition
                 while (true) {
-                    const message = await activeQueue.dequeue(); // 5 min timeout for fake streaming
+                    const message = await activeQueue.dequeue(this.timeouts.FAKE_STREAM); // 5 min timeout for fake streaming
                     if (message.type === "STREAM_END") {
                         break;
                     }
