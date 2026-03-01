@@ -645,6 +645,13 @@ class ProxySystem extends EventTarget {
             const CHUNK_READ_TIMEOUT = 300000; // 300 seconds (5 minutes) - matches MESSAGE_QUEUE_DEFAULT timeout
             let processing = true;
             while (processing) {
+                // Check if WebSocket is still connected
+                if (!this.connectionManager.isConnected) {
+                    Logger.debug(`WebSocket disconnected, stopping stream read for operation #${operationId}`);
+                    processing = false;
+                    break;
+                }
+
                 // Check if operation has been cancelled before creating timeout
                 if (this.requestProcessor.cancelledOperations.has(operationId)) {
                     Logger.debug(`Operation #${operationId} cancelled, stopping stream read`);
