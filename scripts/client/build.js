@@ -691,6 +691,15 @@ class ProxySystem extends EventTarget {
                         } catch (cancelError) {
                             Logger.debug(`Failed to cancel reader: ${cancelError.message}`);
                         }
+
+                        // Also abort the underlying request to prevent hanging network operations
+                        if (abortController && typeof abortController.abort === "function") {
+                            try {
+                                abortController.abort();
+                            } catch (abortError) {
+                                Logger.debug(`Failed to abort request: ${abortError.message}`);
+                            }
+                        }
                     }
                     throw error;
                 }
