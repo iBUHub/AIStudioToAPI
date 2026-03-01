@@ -2477,7 +2477,7 @@ class BrowserManager {
         if (this.connectionRegistry) {
             const isCurrent = this._currentAuthIndex === authIndex;
             this.logger.info(
-                `[Browser] Proactively closing message queues for account #${authIndex}${isCurrent ? " (current account)" : ""} to prevent race condition`
+                `[Browser] Proactively closing message queues for account #${authIndex}${isCurrent ? " (current account)" : ""}`
             );
             this.connectionRegistry.closeMessageQueuesForAuth(authIndex);
         }

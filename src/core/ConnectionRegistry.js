@@ -378,6 +378,13 @@ class ConnectionRegistry extends EventEmitter {
         }
     }
 
+    /**
+     * Create a new message queue for a request
+     * @param {string} requestId - The unique request ID
+     * @param {number} authIndex - The account index (must be a non-negative integer)
+     * @returns {MessageQueue} The created message queue
+     * @throws {Error} If authIndex is invalid (undefined, negative, or not an integer)
+     */
     createMessageQueue(requestId, authIndex) {
         // Validate authIndex: must be a valid non-negative integer
         if (authIndex === undefined || authIndex < 0 || !Number.isInteger(authIndex)) {
@@ -408,6 +415,11 @@ class ConnectionRegistry extends EventEmitter {
         return queue;
     }
 
+    /**
+     * Remove a message queue for a specific request
+     * @param {string} requestId - The request ID whose queue should be removed
+     * @param {string} [reason="handler_cleanup"] - The reason for removing the queue (e.g., "request_complete", "client_disconnect")
+     */
     removeMessageQueue(requestId, reason = "handler_cleanup") {
         const entry = this.messageQueues.get(requestId);
         if (entry) {
@@ -429,6 +441,7 @@ class ConnectionRegistry extends EventEmitter {
     /**
      * Close all message queues belonging to a specific account
      * @param {number} authIndex - The account whose queues should be closed
+     * @param {string} [reason="auth_context_closed"] - The reason for closing the queues (e.g., "reconnect_cleanup", "page_closed", "grace_period_timeout")
      * @returns {number} Number of queues closed
      */
     closeMessageQueuesForAuth(authIndex, reason = "auth_context_closed") {

@@ -658,6 +658,13 @@ class ProxySystem extends EventTarget {
                     }, CHUNK_READ_TIMEOUT);
                 });
 
+                // Check if operation has been cancelled before reading next chunk
+                if (this.requestProcessor.cancelledOperations.has(operationId)) {
+                    Logger.debug(`Operation #${operationId} cancelled, stopping stream read`);
+                    processing = false;
+                    break;
+                }
+
                 try {
                     // Start reading the chunk
                     const readPromise = reader.read();
@@ -706,6 +713,12 @@ class ProxySystem extends EventTarget {
             }
 
             Logger.output("Data stream read complete.");
+
+            // Check if operation was cancelled during streaming
+            if (this.requestProcessor.cancelledOperations.has(operationId)) {
+                Logger.debug(`Operation #${operationId} was cancelled, skipping final transmission`);
+                return;
+            }
 
             if (mode === "fake") {
                 // In non-streaming mode, after loop ends, forward the concatenated complete response body

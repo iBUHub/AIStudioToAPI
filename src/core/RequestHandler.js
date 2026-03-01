@@ -122,6 +122,78 @@ class RequestHandler {
     }
 
     /**
+     * Handle queue closed error in real streaming mode with proper SSE error response
+     * @param {Error} error - The error object (QueueClosedError)
+     * @param {Object} res - Express response object
+     * @param {string} format - Response format ('openai', 'claude', or 'gemini')
+     * @returns {boolean} true if error was handled, false otherwise
+     */
+    _handleRealStreamQueueClosedError(error, res, format) {
+        const isClientDisconnect = error.reason === "client_disconnect" || !this._isResponseWritable(res);
+
+        if (isClientDisconnect) {
+            // Client disconnected or queue closed due to client disconnect - no error needed
+            this.logger.debug(
+                `[Request] ${format} stream interrupted by client disconnect (reason: ${error.reason || "connection_lost"})`
+            );
+            return true;
+        }
+
+        // Queue was closed for other reasons (account switch, page_closed, etc.)
+        // but client is still connected - send proper error SSE
+        this.logger.warn(
+            `[Request] ${format} stream interrupted: Queue closed (reason: ${error.reason || "unknown"}), sending error SSE`
+        );
+
+        if (!this._isResponseWritable(res)) {
+            return true;
+        }
+
+        try {
+            const errorMessage = `Stream interrupted: ${error.reason === "page_closed" ? "Account context closed" : error.reason || "Connection lost"}`;
+
+            if (format === "claude") {
+                // Claude format: event: error\ndata: {...}
+                res.write(
+                    `event: error\ndata: ${JSON.stringify({
+                        error: {
+                            message: errorMessage,
+                            type: "api_error",
+                        },
+                        type: "error",
+                    })}\n\n`
+                );
+            } else if (format === "openai") {
+                // OpenAI format: data: {"error": {...}}
+                res.write(
+                    `data: ${JSON.stringify({
+                        error: {
+                            code: 503,
+                            message: errorMessage,
+                            type: "api_error",
+                        },
+                    })}\n\n`
+                );
+            } else if (format === "gemini") {
+                // Gemini format: data: {"error": {...}}
+                res.write(
+                    `data: ${JSON.stringify({
+                        error: {
+                            code: 503,
+                            message: errorMessage,
+                            status: "UNAVAILABLE",
+                        },
+                    })}\n\n`
+                );
+            }
+        } catch (writeError) {
+            this.logger.debug(`[Request] Failed to write error to ${format} stream: ${writeError.message}`);
+        }
+
+        return true;
+    }
+
+    /**
      * Classify and handle fake stream errors
      * @param {Error} error - The error object
      * @param {Object} res - Express response object
@@ -1307,7 +1379,7 @@ class RequestHandler {
             // Handle timeout or other errors during streaming
             // Don't attempt to write if it's a connection reset (client disconnect) or if response is destroyed
             if (this._isConnectionResetError(error)) {
-                this.logger.debug("[Request] Claude stream interrupted by connection reset, skipping error write");
+                this._handleRealStreamQueueClosedError(error, res, "claude");
                 return;
             }
 
@@ -1701,8 +1773,15 @@ class RequestHandler {
                 // Ignore JSON parsing errors for finish reason
             }
         } catch (error) {
-            if (error.message !== "Queue timeout") throw error;
-            this.logger.warn("[Request] Real stream response timeout, stream may have ended normally.");
+            // Handle queue closed errors (account switch, context closed, etc.)
+            if (this._isConnectionResetError(error)) {
+                this._handleRealStreamQueueClosedError(error, res, "gemini");
+            } else if (error.message === "Queue timeout") {
+                this.logger.warn("[Request] Real stream response timeout, stream may have ended normally.");
+            } else {
+                // Unexpected error - rethrow to outer handler
+                throw error;
+            }
         } finally {
             if (!res.writableEnded) res.end();
             this.logger.info(
@@ -2001,7 +2080,7 @@ class RequestHandler {
             // Handle timeout or other errors during streaming
             // Don't attempt to write if it's a connection reset (client disconnect) or if response is destroyed
             if (this._isConnectionResetError(error)) {
-                this.logger.debug("[Request] OpenAI stream interrupted by connection reset, skipping error write");
+                this._handleRealStreamQueueClosedError(error, res, "openai");
                 return;
             }
 
