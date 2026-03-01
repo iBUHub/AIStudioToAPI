@@ -645,6 +645,13 @@ class ProxySystem extends EventTarget {
             const CHUNK_READ_TIMEOUT = 300000; // 300 seconds (5 minutes) - matches MESSAGE_QUEUE_DEFAULT timeout
             let processing = true;
             while (processing) {
+                // Check if operation has been cancelled before creating timeout
+                if (this.requestProcessor.cancelledOperations.has(operationId)) {
+                    Logger.debug(`Operation #${operationId} cancelled, stopping stream read`);
+                    processing = false;
+                    break;
+                }
+
                 // Wrap reader.read() with timeout protection
                 let chunkTimeoutId;
                 let timeoutOccurred = false;
@@ -657,13 +664,6 @@ class ProxySystem extends EventTarget {
                         );
                     }, CHUNK_READ_TIMEOUT);
                 });
-
-                // Check if operation has been cancelled before reading next chunk
-                if (this.requestProcessor.cancelledOperations.has(operationId)) {
-                    Logger.debug(`Operation #${operationId} cancelled, stopping stream read`);
-                    processing = false;
-                    break;
-                }
 
                 try {
                     // Start reading the chunk
