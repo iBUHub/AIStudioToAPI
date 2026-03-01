@@ -140,38 +140,40 @@ const getNextAuthIndex = () => {
     const context = await browser.newContext(proxyConfig ? { proxy: proxyConfig } : {});
     const page = await context.newPage();
 
-    console.log("");
-    console.log(
-        getText(
-            "--- 请在新打开的 Camoufox 窗口中完成以下步骤 ---",
-            "--- Please complete the following steps in the newly opened Camoufox window ---"
-        )
-    );
-    console.log(
-        getText(
-            "1. 浏览器将打开 Google AI Studio。请在弹出的页面上完整登录您的 Google 账号。",
-            "1. The browser will open Google AI Studio. Please log in to your Google account completely on the popup page."
-        )
-    );
-    console.log(
-        getText(
-            "2. 登录成功并看到 AI Studio 界面后，请不要关闭浏览器窗口。",
-            "2. After successful login and seeing the AI Studio interface, do not close the browser window."
-        )
-    );
-    console.log(
-        getText(
-            '3. 返回此终端，然后按 "回车键" 继续...',
-            '3. Return to this terminal, then press "Enter" to continue...'
-        )
-    );
-
-    // <<< This is the only modification point: updated to Google AI Studio address >>>
-    await page.goto("https://aistudio.google.com/u/0/prompts/new_chat");
-
     // Auto-fill logic
     const autoFillEmail = process.env.AUTO_FILL_EMAIL;
     const autoFillPwd = process.env.AUTO_FILL_PWD;
+
+    if (!autoFillEmail) {
+        console.log("");
+        console.log(
+            getText(
+                "--- 请在新打开的 Camoufox 窗口中完成以下步骤 ---",
+                "--- Please complete the following steps in the newly opened Camoufox window ---"
+            )
+        );
+        console.log(
+            getText(
+                "1. 浏览器将打开 Google AI Studio。请在弹出的页面上完整登录您的 Google 账号。",
+                "1. The browser will open Google AI Studio. Please log in to your Google account completely on the popup page."
+            )
+        );
+        console.log(
+            getText(
+                "2. 登录成功并看到 AI Studio 界面后，请不要关闭浏览器窗口。",
+                "2. After successful login and seeing the AI Studio interface, do not close the browser window."
+            )
+        );
+        console.log(
+            getText(
+                '3. 返回此终端，然后按 "回车键" 继续...',
+                '3. Return to this terminal, then press "Enter" to continue...'
+            )
+        );
+    }
+
+    // <<< This is the only modification point: updated to Google AI Studio address >>>
+    await page.goto("https://aistudio.google.com/u/0/prompts/new_chat");
 
     if (autoFillEmail) {
         try {
@@ -270,10 +272,18 @@ const getNextAuthIndex = () => {
     }
 
     if (!loginDetected) {
+        if (autoFillEmail) {
+            console.log(
+                getText(
+                    "⚠️ 未能自动检测到登录成功状态。请在浏览器中手动完成登录。",
+                    "⚠️ Could not automatically detect login success. Please complete login manually in the browser."
+                )
+            );
+        }
         console.log(
             getText(
-                '3. 返回此终端，然后按 "回车键" 继续...',
-                '3. Return to this terminal, then press "Enter" to continue...'
+                '▶️  返回此终端，然后按 "回车键" 继续...',
+                '▶️  Return to this terminal, then press "Enter" to continue...'
             )
         );
         await new Promise(resolve => process.stdin.once("data", resolve));
