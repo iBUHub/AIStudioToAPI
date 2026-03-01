@@ -551,15 +551,16 @@ class RequestHandler {
 
         const proxyRequest = this._buildProxyRequest(req, requestId);
         proxyRequest.is_generative = isGenerativeRequest;
-        const messageQueue = this.connectionRegistry.createMessageQueue(requestId, this.currentAuthIndex);
-
-        this._setupClientDisconnectHandler(res, requestId);
 
         const wantsStreamByHeader = req.headers.accept && req.headers.accept.includes("text/event-stream");
         const wantsStreamByPath = req.path.includes(":streamGenerateContent");
         const wantsStream = wantsStreamByHeader || wantsStreamByPath;
 
         try {
+            // Create message queue inside try-catch to handle invalid authIndex
+            const messageQueue = this.connectionRegistry.createMessageQueue(requestId, this.currentAuthIndex);
+            this._setupClientDisconnectHandler(res, requestId);
+
             if (wantsStream) {
                 this.logger.info(
                     `[Request] Client enabled streaming (${this.serverSystem.streamingMode}), entering streaming processing mode...`
@@ -642,11 +643,11 @@ class RequestHandler {
             streaming_mode: "fake", // Uploads always return a single JSON response
         };
 
-        const messageQueue = this.connectionRegistry.createMessageQueue(requestId, this.currentAuthIndex);
-
-        this._setupClientDisconnectHandler(res, requestId);
-
         try {
+            // Create message queue inside try-catch to handle invalid authIndex
+            const messageQueue = this.connectionRegistry.createMessageQueue(requestId, this.currentAuthIndex);
+            this._setupClientDisconnectHandler(res, requestId);
+
             await this._handleNonStreamResponse(proxyRequest, messageQueue, req, res);
         } catch (error) {
             this._handleRequestError(error, res);
@@ -733,11 +734,11 @@ class RequestHandler {
             streaming_mode: useRealStream ? "real" : "fake",
         };
 
-        const messageQueue = this.connectionRegistry.createMessageQueue(requestId, this.currentAuthIndex);
-
-        this._setupClientDisconnectHandler(res, requestId);
-
         try {
+            // Create message queue inside try-catch to handle invalid authIndex
+            const messageQueue = this.connectionRegistry.createMessageQueue(requestId, this.currentAuthIndex);
+            this._setupClientDisconnectHandler(res, requestId);
+
             if (useRealStream) {
                 this._forwardRequest(proxyRequest);
                 const initialMessage = await messageQueue.dequeue();
@@ -1003,11 +1004,11 @@ class RequestHandler {
             streaming_mode: useRealStream ? "real" : "fake",
         };
 
-        const messageQueue = this.connectionRegistry.createMessageQueue(requestId, this.currentAuthIndex);
-
-        this._setupClientDisconnectHandler(res, requestId);
-
         try {
+            // Create message queue inside try-catch to handle invalid authIndex
+            const messageQueue = this.connectionRegistry.createMessageQueue(requestId, this.currentAuthIndex);
+            this._setupClientDisconnectHandler(res, requestId);
+
             if (useRealStream) {
                 this._forwardRequest(proxyRequest);
                 const initialMessage = await messageQueue.dequeue();
@@ -1261,11 +1262,11 @@ class RequestHandler {
             request_id: requestId,
         };
 
-        const messageQueue = this.connectionRegistry.createMessageQueue(requestId, this.currentAuthIndex);
-
-        this._setupClientDisconnectHandler(res, requestId);
-
         try {
+            // Create message queue inside try-catch to handle invalid authIndex
+            const messageQueue = this.connectionRegistry.createMessageQueue(requestId, this.currentAuthIndex);
+            this._setupClientDisconnectHandler(res, requestId);
+
             this._forwardRequest(proxyRequest);
             const response = await messageQueue.dequeue();
 
