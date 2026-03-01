@@ -218,7 +218,9 @@ class RequestHandler {
                             type: "timeout_error",
                         },
                     };
-                    res.write(`data: ${JSON.stringify(errorPayload)}\n\n`);
+                    if (this._isResponseWritable(res)) {
+                        res.write(`data: ${JSON.stringify(errorPayload)}\n\n`);
+                    }
                 } else if (format === "claude") {
                     errorPayload = {
                         error: {
@@ -227,7 +229,9 @@ class RequestHandler {
                         },
                         type: "error",
                     };
-                    res.write(`event: error\ndata: ${JSON.stringify(errorPayload)}\n\n`);
+                    if (this._isResponseWritable(res)) {
+                        res.write(`event: error\ndata: ${JSON.stringify(errorPayload)}\n\n`);
+                    }
                 } else {
                     // gemini
                     errorPayload = {
@@ -237,7 +241,9 @@ class RequestHandler {
                             status: "DEADLINE_EXCEEDED",
                         },
                     };
-                    res.write(`data: ${JSON.stringify(errorPayload)}\n\n`);
+                    if (this._isResponseWritable(res)) {
+                        res.write(`data: ${JSON.stringify(errorPayload)}\n\n`);
+                    }
                 }
             } else if (error.code === "QUEUE_CLOSED" || error instanceof QueueClosedError) {
                 // Queue closed (account switch, system reset, etc.) - 503
@@ -249,7 +255,9 @@ class RequestHandler {
                             type: "service_unavailable",
                         },
                     };
-                    res.write(`data: ${JSON.stringify(errorPayload)}\n\n`);
+                    if (this._isResponseWritable(res)) {
+                        res.write(`data: ${JSON.stringify(errorPayload)}\n\n`);
+                    }
                 } else if (format === "claude") {
                     errorPayload = {
                         error: {
@@ -258,7 +266,9 @@ class RequestHandler {
                         },
                         type: "error",
                     };
-                    res.write(`event: error\ndata: ${JSON.stringify(errorPayload)}\n\n`);
+                    if (this._isResponseWritable(res)) {
+                        res.write(`event: error\ndata: ${JSON.stringify(errorPayload)}\n\n`);
+                    }
                 } else {
                     // gemini
                     errorPayload = {
@@ -268,7 +278,9 @@ class RequestHandler {
                             status: "UNAVAILABLE",
                         },
                     };
-                    res.write(`data: ${JSON.stringify(errorPayload)}\n\n`);
+                    if (this._isResponseWritable(res)) {
+                        res.write(`data: ${JSON.stringify(errorPayload)}\n\n`);
+                    }
                 }
             } else {
                 // Other unexpected errors - rethrow to outer handler
@@ -898,8 +910,22 @@ class RequestHandler {
                                 model,
                                 streamState
                             );
-                            if (translatedChunk) res.write(translatedChunk);
-                            res.write("data: [DONE]\n\n");
+                            if (this._isResponseWritable(res)) {
+                                try {
+                                    if (translatedChunk) {
+                                        res.write(translatedChunk);
+                                    }
+                                    res.write("data: [DONE]\n\n");
+                                } catch (writeError) {
+                                    this.logger.debug(
+                                        `[Request] Failed to write final fake OpenAI stream chunks: ${writeError.message}`
+                                    );
+                                }
+                            } else {
+                                this.logger.debug(
+                                    "[Request] Response no longer writable before final fake OpenAI stream chunks."
+                                );
+                            }
                             this.logger.info("[Request] Fake mode: Complete content sent at once.");
                         } catch (error) {
                             // Classify error type and send appropriate response
@@ -1156,7 +1182,21 @@ class RequestHandler {
                                 model,
                                 streamState
                             );
-                            if (translatedChunk) res.write(translatedChunk);
+                            if (this._isResponseWritable(res)) {
+                                try {
+                                    if (translatedChunk) {
+                                        res.write(translatedChunk);
+                                    }
+                                } catch (writeError) {
+                                    this.logger.debug(
+                                        `[Request] Failed to write final fake Claude stream chunk: ${writeError.message}`
+                                    );
+                                }
+                            } else {
+                                this.logger.debug(
+                                    "[Request] Response no longer writable before final fake Claude stream chunk."
+                                );
+                            }
                             this.logger.info("[Request] Claude fake mode: Complete content sent at once.");
                         } catch (error) {
                             // Classify error type and send appropriate response
@@ -1380,7 +1420,23 @@ class RequestHandler {
                         streamState
                     );
                     if (claudeChunk) {
-                        res.write(claudeChunk);
+                        // Before writing, ensure the response is still writable to avoid
+                        // throwing if the client disconnected mid-stream.
+                        if (!this._isResponseWritable(res)) {
+                            this.logger.debug(
+                                "[Request] Response no longer writable during Claude stream; stopping stream."
+                            );
+                            break;
+                        }
+                        try {
+                            res.write(claudeChunk);
+                        } catch (writeError) {
+                            this.logger.debug(
+                                `[Request] Failed to write Claude chunk to stream: ${writeError.message}`
+                            );
+                            // Stop streaming on write failure to avoid misclassifying as a timeout.
+                            break;
+                        }
                     }
                 }
             }
@@ -1620,7 +1676,20 @@ class RequestHandler {
                             ],
                             // We don't include usageMetadata here
                         };
-                        res.write(`data: ${JSON.stringify(thinkingResponse)}\n\n`);
+                        if (!this._isResponseWritable(res)) {
+                            this.logger.debug(
+                                "[Request] Response no longer writable during Gemini stream (thinking parts); stopping stream."
+                            );
+                            return;
+                        }
+                        try {
+                            res.write(`data: ${JSON.stringify(thinkingResponse)}\n\n`);
+                        } catch (writeError) {
+                            this.logger.debug(
+                                `[Request] Failed to write Gemini thinking chunk to stream: ${writeError.message}`
+                            );
+                            return;
+                        }
                         this.logger.info(`[Request] Sent ${thinkingParts.length} thinking part(s).`);
                     }
 
@@ -1639,7 +1708,20 @@ class RequestHandler {
                             ],
                             usageMetadata: googleResponse.usageMetadata,
                         };
-                        res.write(`data: ${JSON.stringify(contentResponse)}\n\n`);
+                        if (!this._isResponseWritable(res)) {
+                            this.logger.debug(
+                                "[Request] Response no longer writable during Gemini stream (content parts); stopping stream."
+                            );
+                            return;
+                        }
+                        try {
+                            res.write(`data: ${JSON.stringify(contentResponse)}\n\n`);
+                        } catch (writeError) {
+                            this.logger.debug(
+                                `[Request] Failed to write Gemini content chunk to stream: ${writeError.message}`
+                            );
+                            return;
+                        }
                         this.logger.info(`[Request] Sent ${contentParts.length} content part(s).`);
                     } else if (candidate.finishReason) {
                         // If there's no content but a finish reason, send an empty content message with it
@@ -1652,21 +1734,60 @@ class RequestHandler {
                             ],
                             usageMetadata: googleResponse.usageMetadata,
                         };
-                        res.write(`data: ${JSON.stringify(finalResponse)}\n\n`);
+                        if (!this._isResponseWritable(res)) {
+                            this.logger.debug(
+                                "[Request] Response no longer writable during Gemini stream (final response); stopping stream."
+                            );
+                            return;
+                        }
+                        try {
+                            res.write(`data: ${JSON.stringify(finalResponse)}\n\n`);
+                        } catch (writeError) {
+                            this.logger.debug(
+                                `[Request] Failed to write Gemini final chunk to stream: ${writeError.message}`
+                            );
+                            return;
+                        }
                     }
                 } else if (fullData) {
                     // Fallback for responses without candidates or parts, or if parsing fails
                     this.logger.warn(
                         "[Request] Response structure not recognized for splitting, sending as a single chunk."
                     );
-                    res.write(`data: ${fullData}\n\n`);
+                    if (!this._isResponseWritable(res)) {
+                        this.logger.debug(
+                            "[Request] Response no longer writable during Gemini stream (fallback); stopping stream."
+                        );
+                        return;
+                    }
+                    try {
+                        res.write(`data: ${fullData}\n\n`);
+                    } catch (writeError) {
+                        this.logger.debug(
+                            `[Request] Failed to write Gemini fallback chunk to stream: ${writeError.message}`
+                        );
+                        return;
+                    }
                 }
             } catch (e) {
                 this.logger.error(
                     `[Request] Failed to parse and split Gemini response: ${e.message}. Sending raw data.`
                 );
                 if (fullData) {
-                    res.write(`data: ${fullData}\n\n`);
+                    if (!this._isResponseWritable(res)) {
+                        this.logger.debug(
+                            "[Request] Response no longer writable during Gemini stream (error fallback); stopping stream."
+                        );
+                        return;
+                    }
+                    try {
+                        res.write(`data: ${fullData}\n\n`);
+                    } catch (writeError) {
+                        this.logger.debug(
+                            `[Request] Failed to write Gemini error fallback chunk to stream: ${writeError.message}`
+                        );
+                        return;
+                    }
                 }
             }
 
@@ -1763,8 +1884,21 @@ class RequestHandler {
                 }
 
                 if (dataMessage.data) {
-                    res.write(dataMessage.data);
-                    lastChunk = dataMessage.data;
+                    if (!this._isResponseWritable(res)) {
+                        this.logger.debug(
+                            "[Request] Response no longer writable during Gemini real stream; stopping stream."
+                        );
+                        break;
+                    }
+                    try {
+                        res.write(dataMessage.data);
+                        lastChunk = dataMessage.data;
+                    } catch (writeError) {
+                        this.logger.debug(
+                            `[Request] Failed to write Gemini data chunk to stream: ${writeError.message}`
+                        );
+                        break;
+                    }
                 }
             }
             try {
@@ -2052,7 +2186,15 @@ class RequestHandler {
                 const message = await messageQueue.dequeue(this.timeouts.STREAM_CHUNK);
                 if (message.type === "STREAM_END") {
                     this.logger.info("[Request] OpenAI stream end signal received.");
-                    res.write("data: [DONE]\n\n");
+                    if (this._isResponseWritable(res)) {
+                        try {
+                            res.write("data: [DONE]\n\n");
+                        } catch (writeError) {
+                            this.logger.debug(
+                                `[Request] Failed to write final [DONE] to OpenAI stream (connection likely closed): ${writeError.message}`
+                            );
+                        }
+                    }
                     break;
                 }
 
@@ -2081,7 +2223,20 @@ class RequestHandler {
                         streamState
                     );
                     if (openAIChunk) {
-                        res.write(openAIChunk);
+                        if (!this._isResponseWritable(res)) {
+                            this.logger.debug(
+                                "[Request] Response no longer writable during OpenAI stream; stopping stream."
+                            );
+                            break;
+                        }
+                        try {
+                            res.write(openAIChunk);
+                        } catch (writeError) {
+                            this.logger.debug(
+                                `[Request] Failed to write OpenAI chunk to stream: ${writeError.message}`
+                            );
+                            break;
+                        }
                     }
                 }
             }
