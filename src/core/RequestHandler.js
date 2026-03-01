@@ -1996,7 +1996,7 @@ class RequestHandler {
             this.logger.error(`[Request] Request processing error (headers already sent): ${errorMsg}`);
 
             // Try to send error in the stream format
-            if (!res.writableEnded) {
+            if (this._isResponseWritable(res)) {
                 const contentType = res.getHeader("content-type");
 
                 if (contentType && contentType.includes("text/event-stream")) {
@@ -2030,7 +2030,11 @@ class RequestHandler {
                     }
                 }
 
-                res.end();
+                try {
+                    res.end();
+                } catch (endError) {
+                    this.logger.debug(`[Request] Failed to end response: ${endError.message}`);
+                }
             }
         } else {
             this.logger.error(`[Request] Request processing error: ${errorMsg}`);
