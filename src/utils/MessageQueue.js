@@ -48,8 +48,14 @@ class MessageQueue extends EventEmitter {
         if (this.closed) return;
         if (this.waitingResolvers.length > 0) {
             const resolver = this.waitingResolvers.shift();
-            clearTimeout(resolver.timeoutId);
-            resolver.resolve(message);
+            // Check if resolver is still valid (not timed out)
+            if (resolver && resolver.timeoutId) {
+                clearTimeout(resolver.timeoutId);
+                resolver.resolve(message);
+            } else {
+                // Resolver already timed out, push message to queue instead
+                this.messages.push(message);
+            }
         } else {
             this.messages.push(message);
         }
@@ -65,14 +71,16 @@ class MessageQueue extends EventEmitter {
                 resolve(this.messages.shift());
                 return;
             }
-            const resolver = { reject, resolve };
+            const resolver = { reject, resolve, timeoutId: null };
             this.waitingResolvers.push(resolver);
             resolver.timeoutId = setTimeout(() => {
                 const index = this.waitingResolvers.indexOf(resolver);
                 if (index !== -1) {
                     this.waitingResolvers.splice(index, 1);
-                    reject(new QueueTimeoutError());
                 }
+                // Clear timeoutId to mark resolver as invalid
+                resolver.timeoutId = null;
+                reject(new QueueTimeoutError());
             }, timeoutMs);
         });
     }

@@ -103,7 +103,7 @@ class ConnectionRegistry extends EventEmitter {
         // Store authIndex on websocket for cleanup
         websocket._authIndex = authIndex;
 
-        websocket.on("message", data => this._handleIncomingMessage(data.toString()));
+        websocket.on("message", data => this._handleIncomingMessage(data.toString(), authIndex));
         websocket.on("close", () => this._removeConnection(websocket));
         websocket.on("error", error =>
             this.logger.error(`[Server] Internal WebSocket connection error: ${error.message}`)
@@ -233,7 +233,7 @@ class ConnectionRegistry extends EventEmitter {
         this.emit("connectionRemoved", websocket);
     }
 
-    _handleIncomingMessage(messageData) {
+    _handleIncomingMessage(messageData, messageAuthIndex) {
         try {
             const parsedMessage = JSON.parse(messageData);
             const requestId = parsedMessage.request_id;
@@ -243,6 +243,15 @@ class ConnectionRegistry extends EventEmitter {
             }
             const entry = this.messageQueues.get(requestId);
             if (entry) {
+                // Verify that the message comes from the correct authIndex
+                if (messageAuthIndex !== entry.authIndex) {
+                    this.logger.warn(
+                        `[Server] Received message for request ${requestId} from wrong account: ` +
+                            `expected authIndex=${entry.authIndex}, got authIndex=${messageAuthIndex}. ` +
+                            `Message discarded (likely a delayed response after account switch).`
+                    );
+                    return;
+                }
                 this._routeMessage(parsedMessage, entry.queue);
             } else {
                 this.logger.warn(`[Server] Received message for unknown or outdated request ID: ${requestId}`);

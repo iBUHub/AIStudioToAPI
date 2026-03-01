@@ -739,22 +739,27 @@ class ProxySystem extends EventTarget {
                 Logger.debug(`[Diagnosis] Suppressing error for superseded operation #${operationId}`);
             }
         } finally {
-            if (cancelTimeout) {
+            // Clean up timeout - safe to call even if cancelTimeout is undefined
+            if (cancelTimeout && typeof cancelTimeout === "function") {
                 cancelTimeout();
             }
             // Always cancel reader to stop background stream processing
-            if (reader) {
+            if (reader && typeof reader.cancel === "function") {
                 try {
                     await reader.cancel();
                 } catch (e) {
-                    // Ignore errors if reader is already closed
+                    // Only log unexpected errors, ignore "already closed" errors
+                    if (e.name !== "TypeError" && !e.message.includes("closed")) {
+                        Logger.debug(`Reader cancel error: ${e.message}`);
+                    }
                 }
             }
             // Only delete if we still own this operationId (prevent race with retries)
             if (this.requestProcessor.activeOperations.get(operationId) === abortController) {
                 this.requestProcessor.activeOperations.delete(operationId);
+                // Only delete from cancelledOperations if we own the operation
+                this.requestProcessor.cancelledOperations.delete(operationId);
             }
-            this.requestProcessor.cancelledOperations.delete(operationId);
         }
     }
 

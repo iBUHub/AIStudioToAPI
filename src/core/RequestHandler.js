@@ -587,6 +587,9 @@ class RequestHandler {
                 await this._handleNonStreamResponse(proxyRequest, messageQueue, req, res);
             }
         } catch (error) {
+            // Handle queue timeout by notifying browser
+            this._handleQueueTimeout(error, requestId);
+
             // Check if this is a queue closed error
             if (this._isConnectionResetError(error)) {
                 this._handleQueueClosedError(error, res);
@@ -911,6 +914,9 @@ class RequestHandler {
                 }
             }
         } catch (error) {
+            // Handle queue timeout by notifying browser
+            this._handleQueueTimeout(error, requestId);
+
             // Check if this is a queue closed error
             if (this._isConnectionResetError(error)) {
                 this._handleQueueClosedError(error, res);
@@ -1165,6 +1171,9 @@ class RequestHandler {
                 }
             }
         } catch (error) {
+            // Handle queue timeout by notifying browser
+            this._handleQueueTimeout(error, requestId);
+
             // Don't log as error if it's just a client disconnect
             if (this._isConnectionResetError(error)) {
                 this.logger.info(`[Request] Request terminated: Queue closed (${error.reason || "connection_lost"})`);
@@ -2327,6 +2336,28 @@ class RequestHandler {
             this.logger.warn(
                 `[Request] Unable to send cancel instruction: No available WebSocket connection for account #${targetAuthIndex}.`
             );
+        }
+    }
+
+    /**
+     * Handle queue timeout by notifying browser to cancel the request
+     * @param {Error} error - The timeout error
+     * @param {string} requestId - The request ID
+     */
+    _handleQueueTimeout(error, requestId) {
+        if (error.code === "QUEUE_TIMEOUT" || error instanceof QueueTimeoutError) {
+            // Get the authIndex for this request from the registry
+            const authIndex = this.connectionRegistry.getAuthIndexForRequest(requestId);
+            if (authIndex !== null) {
+                this.logger.debug(
+                    `[Request] Queue timeout for request #${requestId}, notifying browser on account #${authIndex} to cancel`
+                );
+                this._cancelBrowserRequest(requestId, authIndex);
+            } else {
+                this.logger.debug(
+                    `[Request] Queue timeout for request #${requestId}, but queue already removed (authIndex not found)`
+                );
+            }
         }
     }
 
