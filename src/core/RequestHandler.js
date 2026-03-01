@@ -97,6 +97,31 @@ class RequestHandler {
     }
 
     /**
+     * Handle queue closed error with proper client disconnect detection
+     * @param {Error} error - The error object
+     * @param {Object} res - Express response object
+     * @returns {boolean} true if error was handled (client disconnect), false if needs error response
+     */
+    _handleQueueClosedError(error, res) {
+        // Only suppress error response if client has actually disconnected
+        // or if the queue was closed due to client disconnect
+        const isClientDisconnect = error.reason === "client_disconnect" || !this._isResponseWritable(res);
+
+        if (isClientDisconnect) {
+            this.logger.info(`[Request] Request terminated: Queue closed (${error.reason || "connection_lost"})`);
+            return true; // Error handled, no response needed
+        } else {
+            // Queue was closed for other reasons (account_switch, system_reset, etc.)
+            // but client is still connected - send proper error response
+            this.logger.warn(
+                `[Request] Queue closed while client connected (reason: ${error.reason || "unknown"}), sending 503`
+            );
+            this._handleRequestError(error, res);
+            return false; // Error response sent
+        }
+    }
+
+    /**
      * Wait for WebSocket connection to be established for current account
      * @param {number} timeoutMs - Maximum time to wait in milliseconds
      * @returns {Promise<boolean>} true if connection established, false if timeout
@@ -402,9 +427,9 @@ class RequestHandler {
                 await this._handleNonStreamResponse(proxyRequest, messageQueue, req, res);
             }
         } catch (error) {
-            // Don't log as error if it's just a client disconnect
+            // Check if this is a queue closed error
             if (this._isConnectionResetError(error)) {
-                this.logger.info(`[Request] Request terminated: Queue closed (${error.reason || "connection_lost"})`);
+                this._handleQueueClosedError(error, res);
             } else {
                 this._handleRequestError(error, res);
             }
@@ -479,9 +504,9 @@ class RequestHandler {
         try {
             await this._handleNonStreamResponse(proxyRequest, messageQueue, req, res);
         } catch (error) {
-            // Don't log as error if it's just a client disconnect
+            // Check if this is a queue closed error
             if (this._isConnectionResetError(error)) {
-                this.logger.info(`[Request] Request terminated: Queue closed (${error.reason || "connection_lost"})`);
+                this._handleQueueClosedError(error, res);
             } else {
                 this._handleRequestError(error, res);
             }
@@ -736,9 +761,9 @@ class RequestHandler {
                 }
             }
         } catch (error) {
-            // Don't log as error if it's just a client disconnect
+            // Check if this is a queue closed error
             if (this._isConnectionResetError(error)) {
-                this.logger.info(`[Request] Request terminated: Queue closed (${error.reason || "connection_lost"})`);
+                this._handleQueueClosedError(error, res);
             } else {
                 this._handleRequestError(error, res);
             }
@@ -1523,9 +1548,9 @@ class RequestHandler {
                 `✅ [Request] Response ended, reason: ${finishReason}, request ID: ${proxyRequest.request_id}`
             );
         } catch (error) {
-            // Don't log as error if it's just a client disconnect
+            // Check if this is a queue closed error
             if (this._isConnectionResetError(error)) {
-                this.logger.info(`[Request] Request terminated: Queue closed (${error.reason || "connection_lost"})`);
+                this._handleQueueClosedError(error, res);
             } else {
                 this._handleRequestError(error, res);
             }
