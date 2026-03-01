@@ -11,10 +11,11 @@ const { EventEmitter } = require("events");
  * Custom error class for queue closed errors
  */
 class QueueClosedError extends Error {
-    constructor(message = "Queue is closed") {
+    constructor(message = "Queue is closed", reason = "unknown") {
         super(message);
         this.name = "QueueClosedError";
         this.code = "QUEUE_CLOSED";
+        this.reason = reason;
     }
 }
 
@@ -74,11 +75,11 @@ class MessageQueue extends EventEmitter {
         });
     }
 
-    close() {
+    close(reason = "unknown") {
         this.closed = true;
         this.waitingResolvers.forEach(resolver => {
             clearTimeout(resolver.timeoutId);
-            resolver.reject(new QueueClosedError());
+            resolver.reject(new QueueClosedError(`Queue is closed (reason: ${reason})`, reason));
         });
         this.waitingResolvers = [];
         this.messages = [];

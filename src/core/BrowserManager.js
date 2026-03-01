@@ -2476,9 +2476,9 @@ class BrowserManager {
         // So we must close queues NOW while currentAuthIndex still matches the closing account
         if (this._currentAuthIndex === authIndex && this.connectionRegistry) {
             this.logger.info(
-                `[Browser] Closing current account #${authIndex}, proactively closing all message queues to prevent race condition`
+                `[Browser] Closing current account #${authIndex}, proactively closing message queues to prevent race condition`
             );
-            this.connectionRegistry.closeAllMessageQueues();
+            this.connectionRegistry.closeMessageQueuesForAuth(authIndex);
         }
 
         // If this was the current context, reset current references

@@ -27,6 +27,7 @@ class ConnectionRegistry extends EventEmitter {
         this.browserManager = browserManager;
         // Map: authIndex -> WebSocket connection
         this.connectionsByAuth = new Map();
+        // Map: requestId -> { queue: MessageQueue, authIndex: number }
         this.messageQueues = new Map();
         // Map: authIndex -> timerId, supports independent grace period for each account
         this.reconnectGraceTimers = new Map();
@@ -88,19 +89,10 @@ class ConnectionRegistry extends EventEmitter {
             this.logger.debug(`[Server] Cleared lightweight reconnect timeout for reconnected authIndex=${authIndex}`);
         }
 
-        // Clear message queues for reconnected current account
-        // IMPORTANT: This must be done regardless of whether grace timer existed
-        // Scenario: If WebSocket reconnects after grace period timeout (>10s),
-        // grace timer is already deleted, but new message queues may have been created
-        // When WebSocket disconnects, browser aborts all in-flight requests
-        // Keeping these queues would cause them to hang until timeout
-        const currentAuthIndex = this.getCurrentAuthIndex ? this.getCurrentAuthIndex() : -1;
-        if (authIndex === currentAuthIndex && this.messageQueues.size > 0) {
-            this.logger.info(
-                `[Server] Reconnected current account #${authIndex}, clearing ${this.messageQueues.size} stale message queues...`
-            );
-            this.closeAllMessageQueues();
-        }
+        // Clear message queues for the reconnecting account.
+        // When WebSocket disconnects, the browser aborts all in-flight requests for that account.
+        // Keeping those queues would cause them to hang until timeout.
+        this.closeMessageQueuesForAuth(authIndex);
 
         // Store connection by authIndex
         this.connectionsByAuth.set(authIndex, websocket);
@@ -159,12 +151,9 @@ class ConnectionRegistry extends EventEmitter {
                     }
                     this.lightweightReconnectTimeouts.delete(disconnectedAuthIndex);
                 }
-                // Close pending message queues if this is the current account
-                // to prevent in-flight requests from hanging until timeout
-                const currentAuthIndex = this.getCurrentAuthIndex ? this.getCurrentAuthIndex() : -1;
-                if (disconnectedAuthIndex === currentAuthIndex) {
-                    this.closeAllMessageQueues();
-                }
+                // Close pending message queues for this account to prevent in-flight requests
+                // from hanging until timeout
+                this.closeMessageQueuesForAuth(disconnectedAuthIndex);
                 // Emit event after all cleanup is done
                 this.emit("connectionRemoved", websocket);
                 return;
@@ -177,24 +166,15 @@ class ConnectionRegistry extends EventEmitter {
         }
 
         this.logger.info(`[Server] Starting 10-second reconnect grace period for account #${disconnectedAuthIndex}...`);
-        // Capture current auth index at disconnection time to avoid race condition
-        const currentAuthIndexAtDisconnect = this.getCurrentAuthIndex ? this.getCurrentAuthIndex() : -1;
         const graceTimerId = setTimeout(async () => {
             this.logger.debug(
                 `[Server] Grace period ended for account #${disconnectedAuthIndex}, no reconnection detected.`
             );
 
-            // Use the auth index captured at disconnection time, not the current one
-            const isCurrentAccount = disconnectedAuthIndex === currentAuthIndexAtDisconnect;
-
-            // Only clear message queues if this is the current account
-            if (isCurrentAccount) {
-                this.closeAllMessageQueues();
-            } else {
-                this.logger.debug(
-                    `[Server] Non-current account #${disconnectedAuthIndex} disconnected, keeping message queues intact.`
-                );
-            }
+            // Close queues belonging to the disconnected account.
+            // Since queues are now bound to authIndex, this is safe even if the current account
+            // has since switched — only account #disconnectedAuthIndex's queues are affected.
+            this.closeMessageQueuesForAuth(disconnectedAuthIndex);
 
             // Attempt lightweight reconnect if callback is provided and this account is not already reconnecting
             const isAccountReconnecting = this.reconnectingAccounts.get(disconnectedAuthIndex) || false;
@@ -261,9 +241,9 @@ class ConnectionRegistry extends EventEmitter {
                 this.logger.warn("[Server] Received invalid message: missing request_id");
                 return;
             }
-            const queue = this.messageQueues.get(requestId);
-            if (queue) {
-                this._routeMessage(parsedMessage, queue);
+            const entry = this.messageQueues.get(requestId);
+            if (entry) {
+                this._routeMessage(parsedMessage, entry.queue);
             } else {
                 this.logger.warn(`[Server] Received message for unknown or outdated request ID: ${requestId}`);
             }
@@ -398,16 +378,16 @@ class ConnectionRegistry extends EventEmitter {
         }
     }
 
-    createMessageQueue(requestId) {
+    createMessageQueue(requestId, authIndex) {
         // If a queue with the same requestId already exists, close and remove it first
         // This prevents stale queues from lingering when retrying failed requests
-        const existingQueue = this.messageQueues.get(requestId);
-        if (existingQueue) {
+        const existingEntry = this.messageQueues.get(requestId);
+        if (existingEntry) {
             this.logger.debug(
                 `[Registry] Found existing message queue for request ${requestId}, closing it before creating new one`
             );
             try {
-                existingQueue.close();
+                existingEntry.queue.close("retry_replaced");
             } catch (e) {
                 this.logger.debug(`[Registry] Failed to close existing queue for ${requestId}: ${e.message}`);
             }
@@ -415,28 +395,52 @@ class ConnectionRegistry extends EventEmitter {
         }
 
         const queue = new MessageQueue();
-        this.messageQueues.set(requestId, queue);
+        this.messageQueues.set(requestId, { authIndex, queue });
         return queue;
     }
 
     removeMessageQueue(requestId) {
-        const queue = this.messageQueues.get(requestId);
-        if (queue) {
-            queue.close();
+        const entry = this.messageQueues.get(requestId);
+        if (entry) {
+            entry.queue.close("client_disconnect");
             this.messageQueues.delete(requestId);
         }
     }
 
     /**
-     * Force close all message queues
-     * Used when the active account is deleted/reset and we want to terminate all pending requests immediately
+     * Close all message queues belonging to a specific account
+     * @param {number} authIndex - The account whose queues should be closed
+     * @returns {number} Number of queues closed
+     */
+    closeMessageQueuesForAuth(authIndex) {
+        let count = 0;
+        for (const [requestId, entry] of this.messageQueues.entries()) {
+            if (entry.authIndex === authIndex) {
+                try {
+                    entry.queue.close("account_switch");
+                } catch (e) {
+                    this.logger.warn(`[Registry] Failed to close message queue for request ${requestId}: ${e.message}`);
+                }
+                this.messageQueues.delete(requestId);
+                count++;
+            }
+        }
+        if (count > 0) {
+            this.logger.info(`[Registry] Force closed ${count} pending message queue(s) for account #${authIndex}`);
+        }
+        return count;
+    }
+
+    /**
+     * Force close all message queues regardless of account
+     * Used when the entire system is being reset
      */
     closeAllMessageQueues() {
         if (this.messageQueues.size > 0) {
             this.logger.info(`[Registry] Force closing ${this.messageQueues.size} pending message queues...`);
-            this.messageQueues.forEach((queue, requestId) => {
+            this.messageQueues.forEach((entry, requestId) => {
                 try {
-                    queue.close();
+                    entry.queue.close("system_reset");
                 } catch (e) {
                     this.logger.warn(`[Registry] Failed to close message queue for request ${requestId}: ${e.message}`);
                 }

@@ -379,9 +379,9 @@ class RequestHandler {
 
         const proxyRequest = this._buildProxyRequest(req, requestId);
         proxyRequest.is_generative = isGenerativeRequest;
-        const messageQueue = this.connectionRegistry.createMessageQueue(requestId);
+        const messageQueue = this.connectionRegistry.createMessageQueue(requestId, this.currentAuthIndex);
 
-        this._setupClientDisconnectHandler(res, requestId);
+        this._setupClientDisconnectHandler(res, requestId, this.currentAuthIndex);
 
         const wantsStreamByHeader = req.headers.accept && req.headers.accept.includes("text/event-stream");
         const wantsStreamByPath = req.path.includes(":streamGenerateContent");
@@ -404,7 +404,7 @@ class RequestHandler {
         } catch (error) {
             // Don't log as error if it's just a client disconnect
             if (this._isConnectionResetError(error)) {
-                this.logger.info(`[Request] Request terminated: Client disconnected`);
+                this.logger.info(`[Request] Request terminated: Queue closed (${error.reason || "connection_lost"})`);
             } else {
                 this._handleRequestError(error, res);
             }
@@ -472,16 +472,16 @@ class RequestHandler {
             streaming_mode: "fake", // Uploads always return a single JSON response
         };
 
-        const messageQueue = this.connectionRegistry.createMessageQueue(requestId);
+        const messageQueue = this.connectionRegistry.createMessageQueue(requestId, this.currentAuthIndex);
 
-        this._setupClientDisconnectHandler(res, requestId);
+        this._setupClientDisconnectHandler(res, requestId, this.currentAuthIndex);
 
         try {
             await this._handleNonStreamResponse(proxyRequest, messageQueue, req, res);
         } catch (error) {
             // Don't log as error if it's just a client disconnect
             if (this._isConnectionResetError(error)) {
-                this.logger.info(`[Request] Request terminated: Client disconnected`);
+                this.logger.info(`[Request] Request terminated: Queue closed (${error.reason || "connection_lost"})`);
             } else {
                 this._handleRequestError(error, res);
             }
@@ -568,9 +568,9 @@ class RequestHandler {
             streaming_mode: useRealStream ? "real" : "fake",
         };
 
-        const messageQueue = this.connectionRegistry.createMessageQueue(requestId);
+        const messageQueue = this.connectionRegistry.createMessageQueue(requestId, this.currentAuthIndex);
 
-        this._setupClientDisconnectHandler(res, requestId);
+        this._setupClientDisconnectHandler(res, requestId, this.currentAuthIndex);
 
         try {
             if (useRealStream) {
@@ -738,7 +738,7 @@ class RequestHandler {
         } catch (error) {
             // Don't log as error if it's just a client disconnect
             if (this._isConnectionResetError(error)) {
-                this.logger.info(`[Request] Request terminated: Client disconnected`);
+                this.logger.info(`[Request] Request terminated: Queue closed (${error.reason || "connection_lost"})`);
             } else {
                 this._handleRequestError(error, res);
             }
@@ -836,9 +836,9 @@ class RequestHandler {
             streaming_mode: useRealStream ? "real" : "fake",
         };
 
-        const messageQueue = this.connectionRegistry.createMessageQueue(requestId);
+        const messageQueue = this.connectionRegistry.createMessageQueue(requestId, this.currentAuthIndex);
 
-        this._setupClientDisconnectHandler(res, requestId);
+        this._setupClientDisconnectHandler(res, requestId, this.currentAuthIndex);
 
         try {
             if (useRealStream) {
@@ -1008,7 +1008,7 @@ class RequestHandler {
         } catch (error) {
             // Don't log as error if it's just a client disconnect
             if (this._isConnectionResetError(error)) {
-                this.logger.info(`[Request] Request terminated: Client disconnected`);
+                this.logger.info(`[Request] Request terminated: Queue closed (${error.reason || "connection_lost"})`);
             } else {
                 this._handleClaudeRequestError(error, res);
             }
@@ -1098,9 +1098,9 @@ class RequestHandler {
             request_id: requestId,
         };
 
-        const messageQueue = this.connectionRegistry.createMessageQueue(requestId);
+        const messageQueue = this.connectionRegistry.createMessageQueue(requestId, this.currentAuthIndex);
 
-        this._setupClientDisconnectHandler(res, requestId);
+        this._setupClientDisconnectHandler(res, requestId, this.currentAuthIndex);
 
         try {
             this._forwardRequest(proxyRequest);
@@ -1156,7 +1156,7 @@ class RequestHandler {
         } catch (error) {
             // Don't log as error if it's just a client disconnect
             if (this._isConnectionResetError(error)) {
-                this.logger.info(`[Request] Request terminated: Client disconnected`);
+                this.logger.info(`[Request] Request terminated: Queue closed (${error.reason || "connection_lost"})`);
             } else {
                 this._handleClaudeRequestError(error, res);
             }
@@ -1525,7 +1525,7 @@ class RequestHandler {
         } catch (error) {
             // Don't log as error if it's just a client disconnect
             if (this._isConnectionResetError(error)) {
-                this.logger.info(`[Request] Request terminated: Client disconnected`);
+                this.logger.info(`[Request] Request terminated: Queue closed (${error.reason || "connection_lost"})`);
             } else {
                 this._handleRequestError(error, res);
             }
@@ -1827,11 +1827,17 @@ class RequestHandler {
 
                 // Create a new message queue for the retry
                 // Note: We keep the same requestId so the browser response routes to the new queue
+                // Cancel the previous browser request first to prevent stale in-flight responses
+                // from interleaving with the new attempt's responses in the new queue
+                this._cancelBrowserRequest(proxyRequest.request_id, this.currentAuthIndex);
                 // createMessageQueue will automatically close and remove any existing queue with the same ID
                 this.logger.debug(
                     `[Request] Creating new message queue for retry #${attempt + 1} for request #${proxyRequest.request_id}`
                 );
-                currentQueue = this.connectionRegistry.createMessageQueue(proxyRequest.request_id);
+                currentQueue = this.connectionRegistry.createMessageQueue(
+                    proxyRequest.request_id,
+                    this.currentAuthIndex
+                );
 
                 // Wait before the next retry
                 await new Promise(resolve => setTimeout(resolve, this.retryDelay));
@@ -2092,21 +2098,22 @@ class RequestHandler {
         }
     }
 
-    _setupClientDisconnectHandler(res, requestId) {
+    _setupClientDisconnectHandler(res, requestId, capturedAuthIndex) {
         res.on("close", () => {
             if (!res.writableEnded) {
                 this.logger.warn(`[Request] Client closed request #${requestId} connection prematurely.`);
-                this._cancelBrowserRequest(requestId);
+                this._cancelBrowserRequest(requestId, capturedAuthIndex);
                 // Close and remove the message queue to unblock any waiting dequeue() calls
                 this.connectionRegistry.removeMessageQueue(requestId);
             }
         });
     }
 
-    _cancelBrowserRequest(requestId) {
-        const connection = this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex);
+    _cancelBrowserRequest(requestId, authIndex) {
+        const targetAuthIndex = authIndex !== undefined ? authIndex : this.currentAuthIndex;
+        const connection = this.connectionRegistry.getConnectionByAuth(targetAuthIndex);
         if (connection) {
-            this.logger.info(`[Request] Cancelling request #${requestId}`);
+            this.logger.info(`[Request] Cancelling request #${requestId} on account #${targetAuthIndex}`);
             connection.send(
                 JSON.stringify({
                     event_type: "cancel_request",
@@ -2114,7 +2121,9 @@ class RequestHandler {
                 })
             );
         } else {
-            this.logger.warn(`[Request] Unable to send cancel instruction: No available WebSocket connection.`);
+            this.logger.warn(
+                `[Request] Unable to send cancel instruction: No available WebSocket connection for account #${targetAuthIndex}.`
+            );
         }
     }
 
