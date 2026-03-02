@@ -82,6 +82,13 @@ class BrowserManager {
             "browser.shell.checkDefaultBrowser": false, // Skip default browser check
             "browser.tabs.warnOnClose": false, // No warning on closing tabs
             "datareporting.policy.dataSubmissionEnabled": false, // Disable data reporting
+            "dom.min_background_timeout_value": 1, // Disable background tab timer throttling (default: 1000ms)
+            "dom.min_timeout_value": 1, // Reduce global minimum timer interval (default: 4ms per HTML5 spec)
+            "dom.min_tracking_background_timeout_value": 1, // Disable tracking script background throttling (default: 10000ms)
+            "dom.timeout.background_budget_regeneration_rate": 200, // Increase budget regeneration rate to prevent budget exhaustion
+            "dom.timeout.background_throttling_max_budget": 100, // Increase max timer budget to reduce throttling frequency
+            "dom.timeout.budget_throttling_max_delay": 0, // Disable budget-based forced delay (default: 11250ms)
+            "dom.timeout.throttling_delay": 2147483647, // Prevent throttling from ever activating (default: 50ms)
             "dom.webnotifications.enabled": false, // Disable notifications
             "extensions.update.enabled": false, // Disable extension auto-update
             "general.smoothScroll": false, // Disable smooth scrolling
