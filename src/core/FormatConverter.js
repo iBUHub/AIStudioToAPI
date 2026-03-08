@@ -458,13 +458,19 @@ class FormatConverter {
                 // For Gemini 3: thoughtSignature should only be on the FIRST functionCall part
                 let signatureAttachedToCall = false;
                 for (const toolCall of message.tool_calls) {
-                    if (toolCall.type === "function" && toolCall.function) {
+                    // Avoid accessing Function.prototype.arguments in strict mode (will throw)
+                    if (
+                        toolCall.type === "function" &&
+                        toolCall.function &&
+                        typeof toolCall.function === "object" &&
+                        !Array.isArray(toolCall.function)
+                    ) {
                         let args;
                         try {
-                            args =
-                                typeof toolCall.function.arguments === "string"
-                                    ? JSON.parse(toolCall.function.arguments)
-                                    : toolCall.function.arguments;
+                            const rawArgs = Object.prototype.hasOwnProperty.call(toolCall.function, "arguments")
+                                ? toolCall.function["arguments"]
+                                : undefined;
+                            args = typeof rawArgs === "string" ? JSON.parse(rawArgs) : rawArgs;
                         } catch (e) {
                             this.logger.warn(
                                 `[Adapter] Failed to parse tool function arguments for "${toolCall.function.name}": ${e.message}`
@@ -602,7 +608,7 @@ class FormatConverter {
         if (!thinkingConfig) {
             const effort = openaiBody.reasoning_effort || extraBody.reasoning_effort;
             if (effort) {
-                this.logger.info(
+                this.logger.debug(
                     `[Adapter] Detected OpenAI standard reasoning parameter (reasoning_effort: ${effort}), auto-converting to Google format.`
                 );
                 thinkingConfig = { includeThoughts: true };
@@ -689,7 +695,7 @@ class FormatConverter {
 
             if (Object.keys(functionCallingConfig).length > 0) {
                 googleRequest.toolConfig = { functionCallingConfig };
-                this.logger.info(
+                this.logger.debug(
                     `[Adapter] Converted tool_choice to Gemini toolConfig: ${JSON.stringify(functionCallingConfig)}`
                 );
             }
@@ -980,9 +986,513 @@ class FormatConverter {
     }
 
     /**
+     * Convert Google streaming chunk to OpenAI Response API format
+     * @param {string} googleChunk - Google API streaming chunk
+     * @param {string} modelName - Model name
+     * @param {object} streamState - State object to track stream progress
+     * @returns {string|null} - SSE formatted events for Response API
+     */
+    translateGoogleToResponseAPIStream(googleChunk, modelName = "gemini-2.5-flash-lite", streamState = null) {
+        this.logger.debug(`[Adapter] Debug: Received Google chunk for Response API: ${googleChunk}`);
+
+        // Ensure streamState exists
+        if (!streamState) {
+            this.logger.warn("[Adapter] streamState not provided, creating default state.");
+            streamState = {};
+        }
+
+        if (!googleChunk || googleChunk.trim() === "") {
+            return null;
+        }
+
+        const eventsToSend = [];
+
+        const pushEvent = (eventType, payload) => {
+            if (!streamState.sequenceNumber) streamState.sequenceNumber = 0;
+            streamState.sequenceNumber++;
+
+            const eventPayload = {
+                ...payload,
+                sequence_number: streamState.sequenceNumber,
+                type: eventType,
+            };
+
+            eventsToSend.push(`event: ${eventType}\ndata: ${JSON.stringify(eventPayload)}\n\n`);
+        };
+
+        const ensureInitialized = () => {
+            if (streamState.initialized) return;
+
+            streamState.initialized = true;
+            streamState.id = streamState.id || `resp_${this._generateRequestId()}`;
+            streamState.created_at = streamState.created_at || Math.floor(Date.now() / 1000);
+
+            streamState.outputItemsByIndex = [];
+            streamState.nextOutputIndex = 0;
+            streamState.messageItem = null;
+            streamState.messageText = "";
+            streamState.reasoningItem = null;
+            streamState.reasoningSummaryText = "";
+            streamState.reasoningSummaryPartAdded = false;
+            streamState.completed = false;
+            // Responses API: include obfuscation by default unless explicitly disabled.
+            if (typeof streamState.includeObfuscation !== "boolean") {
+                streamState.includeObfuscation = true;
+            }
+        };
+
+        const buildResponseObject = (overrides = {}) => ({
+            completed_at: null,
+            created_at: streamState.created_at,
+            error: null,
+            id: streamState.id,
+            incomplete_details: null,
+            instructions: null,
+            max_output_tokens: null,
+            metadata: {},
+            model: modelName,
+            object: "response",
+            output: [],
+            parallel_tool_calls: true,
+            previous_response_id: null,
+            reasoning: {
+                effort: null,
+                summary: null,
+            },
+            service_tier: "default",
+            status: "in_progress",
+            temperature: 1.0,
+            text: {
+                format: {
+                    type: "text",
+                },
+            },
+            tool_choice: "auto",
+            tools: [],
+            top_p: 1.0,
+            truncation: "disabled",
+            usage: null,
+            user: null,
+            ...(streamState.responseDefaults || {}),
+            ...overrides,
+            // This proxy does not support OpenAI-side persistence.
+            ...{ store: false },
+        });
+
+        const ensureMessageItem = () => {
+            if (streamState.messageItem) return streamState.messageItem;
+
+            const itemId = `msg_${this._generateRequestId()}`;
+            const outputIndex = streamState.nextOutputIndex++;
+
+            streamState.messageItem = {
+                content: [],
+                content_index: 0,
+                id: itemId,
+                output_index: outputIndex,
+                role: "assistant",
+                status: "in_progress",
+                type: "message",
+            };
+
+            // Reserve the output slot so subsequent items get unique output_index values.
+            streamState.outputItemsByIndex[outputIndex] = {
+                content: [],
+                id: itemId,
+                role: "assistant",
+                status: "in_progress",
+                type: "message",
+            };
+
+            pushEvent("response.output_item.added", {
+                item: {
+                    content: [],
+                    id: itemId,
+                    role: "assistant",
+                    status: "in_progress",
+                    type: "message",
+                },
+                output_index: outputIndex,
+            });
+
+            pushEvent("response.content_part.added", {
+                content_index: 0,
+                item_id: itemId,
+                output_index: outputIndex,
+                part: {
+                    annotations: [],
+                    text: "",
+                    type: "output_text",
+                },
+            });
+
+            return streamState.messageItem;
+        };
+
+        const ensureReasoningItem = () => {
+            if (streamState.reasoningItem) return streamState.reasoningItem;
+
+            const itemId = `rsn_${this._generateRequestId()}`;
+            const outputIndex = streamState.nextOutputIndex++;
+
+            streamState.reasoningItem = {
+                id: itemId,
+                output_index: outputIndex,
+                status: "in_progress",
+                summary_index: 0,
+                type: "reasoning",
+            };
+
+            streamState.outputItemsByIndex[outputIndex] = {
+                id: itemId,
+                status: "in_progress",
+                summary: [],
+                type: "reasoning",
+            };
+
+            pushEvent("response.output_item.added", {
+                item: {
+                    id: itemId,
+                    status: "in_progress",
+                    summary: [],
+                    type: "reasoning",
+                },
+                output_index: outputIndex,
+            });
+
+            return streamState.reasoningItem;
+        };
+
+        const finalizeReasoningItem = () => {
+            if (!streamState.reasoningItem) return;
+            if (streamState.reasoningItem.status === "completed") return;
+
+            const itemId = streamState.reasoningItem.id;
+            const outputIndex = streamState.reasoningItem.output_index;
+            const summaryIndex = streamState.reasoningItem.summary_index ?? 0;
+            const finalText = streamState.reasoningSummaryText || "";
+
+            pushEvent("response.reasoning_summary_text.done", {
+                item_id: itemId,
+                output_index: outputIndex,
+                summary_index: summaryIndex,
+                text: finalText,
+            });
+
+            pushEvent("response.reasoning_summary_part.done", {
+                item_id: itemId,
+                output_index: outputIndex,
+                part: {
+                    text: finalText,
+                    type: "summary_text",
+                },
+                summary_index: summaryIndex,
+            });
+
+            const completedItem = {
+                id: itemId,
+                status: "completed",
+                summary: [
+                    {
+                        text: finalText,
+                        type: "summary_text",
+                    },
+                ],
+                type: "reasoning",
+            };
+
+            streamState.reasoningItem.status = "completed";
+            streamState.outputItemsByIndex[outputIndex] = completedItem;
+
+            pushEvent("response.output_item.done", {
+                item: completedItem,
+                output_index: outputIndex,
+            });
+        };
+
+        const finalizeMessageItem = () => {
+            if (!streamState.messageItem) return;
+            if (streamState.messageItem.status === "completed") return;
+
+            const itemId = streamState.messageItem.id;
+            const outputIndex = streamState.messageItem.output_index;
+            const contentIndex = streamState.messageItem.content_index;
+            const finalText = streamState.messageText || "";
+
+            pushEvent("response.output_text.done", {
+                content_index: contentIndex,
+                item_id: itemId,
+                output_index: outputIndex,
+                text: finalText,
+            });
+
+            pushEvent("response.content_part.done", {
+                content_index: contentIndex,
+                item_id: itemId,
+                output_index: outputIndex,
+                part: {
+                    annotations: [],
+                    text: finalText,
+                    type: "output_text",
+                },
+            });
+
+            const completedItem = {
+                content: [
+                    {
+                        annotations: [],
+                        text: finalText,
+                        type: "output_text",
+                    },
+                ],
+                id: itemId,
+                role: "assistant",
+                status: "completed",
+                type: "message",
+            };
+
+            streamState.messageItem.status = "completed";
+            streamState.messageItem.content = completedItem.content;
+
+            streamState.outputItemsByIndex[outputIndex] = completedItem;
+
+            pushEvent("response.output_item.done", {
+                item: completedItem,
+                output_index: outputIndex,
+            });
+        };
+
+        const handleGoogleResponseObject = googleResponse => {
+            ensureInitialized();
+
+            // Cache usage data if present
+            if (googleResponse?.usageMetadata) {
+                streamState.usage = this._parseUsage(googleResponse);
+            }
+
+            const candidate = googleResponse?.candidates?.[0];
+            if (!candidate) {
+                if (googleResponse?.promptFeedback) {
+                    this.logger.warn(
+                        `[Adapter] Google returned promptFeedback for Response API stream: ${JSON.stringify(
+                            googleResponse.promptFeedback
+                        )}`
+                    );
+                }
+                return;
+            }
+
+            // Emit the initial response state events once
+            if (!streamState.responseSent) {
+                pushEvent("response.created", {
+                    response: buildResponseObject({
+                        output: [],
+                        status: "in_progress",
+                        usage: null,
+                    }),
+                });
+                pushEvent("response.in_progress", {
+                    response: buildResponseObject({
+                        output: [],
+                        status: "in_progress",
+                        usage: null,
+                    }),
+                });
+                streamState.responseSent = true;
+            }
+
+            // Parts -> SSE events
+            if (candidate.content && Array.isArray(candidate.content.parts)) {
+                for (const part of candidate.content.parts) {
+                    // The Responses API exposes reasoning summaries via `summary` + `response.reasoning_summary_text.*`.
+                    // Map Gemini "thought" parts to reasoning *summary* to match official expectations.
+                    if (part?.thought === true) {
+                        if (part?.text) {
+                            const reasoningItem = ensureReasoningItem();
+                            streamState.reasoningSummaryText += part.text;
+
+                            if (!streamState.reasoningSummaryPartAdded) {
+                                streamState.reasoningSummaryPartAdded = true;
+                                pushEvent("response.reasoning_summary_part.added", {
+                                    item_id: reasoningItem.id,
+                                    output_index: reasoningItem.output_index,
+                                    part: {
+                                        text: "",
+                                        type: "summary_text",
+                                    },
+                                    summary_index: reasoningItem.summary_index ?? 0,
+                                });
+                            }
+
+                            pushEvent("response.reasoning_summary_text.delta", {
+                                delta: part.text,
+                                item_id: reasoningItem.id,
+                                output_index: reasoningItem.output_index,
+                                summary_index: reasoningItem.summary_index ?? 0,
+                            });
+                        }
+                        continue;
+                    }
+
+                    if (part?.text) {
+                        const messageItem = ensureMessageItem();
+                        streamState.messageText += part.text;
+
+                        pushEvent("response.output_text.delta", {
+                            content_index: messageItem.content_index,
+                            delta: part.text,
+                            item_id: messageItem.id,
+                            output_index: messageItem.output_index,
+                            ...(streamState.includeObfuscation ? { obfuscation: this._generateObfuscation() } : {}),
+                        });
+                    } else if (part?.inlineData) {
+                        const image = part.inlineData;
+                        const imageMarkdown = `![Generated Image](data:${image.mimeType};base64,${image.data})`;
+
+                        const messageItem = ensureMessageItem();
+                        streamState.messageText += imageMarkdown;
+
+                        pushEvent("response.output_text.delta", {
+                            content_index: messageItem.content_index,
+                            delta: imageMarkdown,
+                            item_id: messageItem.id,
+                            output_index: messageItem.output_index,
+                            ...(streamState.includeObfuscation ? { obfuscation: this._generateObfuscation() } : {}),
+                        });
+
+                        this.logger.info(
+                            `[Adapter] Converted Gemini inlineData image to Response API output_text delta (${image.mimeType})`
+                        );
+                    } else if (part?.functionCall) {
+                        const funcCall = part.functionCall;
+                        const itemId = `fc_${this._generateRequestId()}`;
+                        const callId = `call_${this._generateRequestId()}`;
+                        const outputIndex = streamState.nextOutputIndex++;
+                        const args = JSON.stringify(funcCall.args || {});
+
+                        pushEvent("response.output_item.added", {
+                            item: {
+                                arguments: "",
+                                call_id: callId,
+                                id: itemId,
+                                name: funcCall.name,
+                                status: "in_progress",
+                                type: "function_call",
+                            },
+                            output_index: outputIndex,
+                        });
+
+                        pushEvent("response.function_call_arguments.done", {
+                            arguments: args,
+                            item_id: itemId,
+                            name: funcCall.name,
+                            output_index: outputIndex,
+                        });
+
+                        const completedToolItem = {
+                            arguments: args,
+                            call_id: callId,
+                            id: itemId,
+                            name: funcCall.name,
+                            status: "completed",
+                            type: "function_call",
+                        };
+                        streamState.outputItemsByIndex[outputIndex] = completedToolItem;
+
+                        pushEvent("response.output_item.done", {
+                            item: completedToolItem,
+                            output_index: outputIndex,
+                        });
+
+                        this.logger.info(
+                            `[Adapter] Converted Gemini functionCall to Response API function_call: ${funcCall.name}`
+                        );
+                    }
+                }
+            }
+
+            // Completion
+            if (candidate.finishReason && !streamState.completed) {
+                finalizeReasoningItem();
+                finalizeMessageItem();
+
+                const usage = streamState.usage || {
+                    completion_tokens: 0,
+                    prompt_tokens: 0,
+                    total_tokens: 0,
+                };
+
+                const responseUsage = {
+                    input_tokens: usage.prompt_tokens,
+                    input_tokens_details: {
+                        cached_tokens: 0,
+                    },
+                    output_tokens: usage.completion_tokens,
+                    output_tokens_details: {
+                        reasoning_tokens: usage.completion_tokens_details?.reasoning_tokens || 0,
+                    },
+                    total_tokens: usage.total_tokens,
+                };
+
+                const completedAt = Math.floor(Date.now() / 1000);
+                const finalOutput = (streamState.outputItemsByIndex || []).filter(Boolean);
+
+                pushEvent("response.completed", {
+                    response: buildResponseObject({
+                        completed_at: completedAt,
+                        output: finalOutput,
+                        status: "completed",
+                        usage: responseUsage,
+                    }),
+                });
+
+                streamState.completed = true;
+            }
+        };
+
+        // Google streaming might concatenate multiple SSE frames; handle them safely.
+        const frames = String(googleChunk)
+            .split(/\n\n+/)
+            .map(s => s.trim())
+            .filter(Boolean);
+
+        for (const frame of frames) {
+            let jsonString = frame;
+            if (jsonString.startsWith("data:")) {
+                jsonString = jsonString.replace(/^data:\s*/i, "").trim();
+            }
+
+            if (jsonString === "[DONE]") {
+                continue; // Responses streaming does not use [DONE]
+            }
+
+            try {
+                const googleResponse = JSON.parse(jsonString);
+                handleGoogleResponseObject(googleResponse);
+            } catch (e) {
+                this.logger.warn(`[Adapter] Unable to parse Google JSON chunk for Response API: ${jsonString}`);
+            }
+        }
+
+        return eventsToSend.length > 0 ? eventsToSend.join("") : null;
+    }
+
+    /**
      * Convert Google non-stream response to OpenAI format
      */
     convertGoogleToOpenAINonStream(googleResponse, modelName = "gemini-2.5-flash-lite") {
+        try {
+            this.logger.debug(
+                `[Adapter] Debug: Received Google response for OpenAI non-stream: ${JSON.stringify(googleResponse)}`
+            );
+        } catch (e) {
+            this.logger.debug(
+                `[Adapter] Debug: Received Google response for OpenAI non-stream (non-serializable): ${String(
+                    googleResponse
+                )}`
+            );
+        }
+
         const candidate = googleResponse.candidates?.[0];
 
         if (!candidate) {
@@ -1073,6 +1583,192 @@ class FormatConverter {
     }
 
     /**
+     * Convert Google response to OpenAI Response API format (non-streaming)
+     * @param {object} googleResponse - Google API response
+     * @param {string} modelName - Model name
+     * @returns {object} - OpenAI Response API format response
+     */
+    convertGoogleToResponseAPINonStream(googleResponse, modelName = "gemini-2.5-flash-lite", responseDefaults = {}) {
+        try {
+            this.logger.debug(
+                `[Adapter] Debug: Received Google response for Response API non-stream: ${JSON.stringify(googleResponse)}`
+            );
+        } catch (e) {
+            this.logger.debug(
+                `[Adapter] Debug: Received Google response for Response API non-stream (non-serializable): ${String(
+                    googleResponse
+                )}`
+            );
+        }
+
+        const candidate = googleResponse.candidates?.[0];
+
+        if (!candidate) {
+            this.logger.warn("[Adapter] No candidate found in Google response");
+            return {
+                completed_at: Math.floor(Date.now() / 1000),
+                created_at: Math.floor(Date.now() / 1000),
+                error: null,
+                id: `resp_${this._generateRequestId()}`,
+                incomplete_details: null,
+                instructions: null,
+                max_output_tokens: null,
+                metadata: {},
+                model: modelName,
+                object: "response",
+                output: [],
+                parallel_tool_calls: true,
+                reasoning: {
+                    effort: null,
+                    summary: null,
+                },
+                service_tier: "default",
+                status: "completed",
+                temperature: 1.0,
+                text: {
+                    format: {
+                        type: "text",
+                    },
+                },
+                tool_choice: "auto",
+                tools: [],
+                top_p: 1.0,
+                truncation: "disabled",
+                usage: {
+                    input_tokens: 0,
+                    input_tokens_details: {
+                        cached_tokens: 0,
+                    },
+                    output_tokens: 0,
+                    output_tokens_details: {
+                        reasoning_tokens: 0,
+                    },
+                    total_tokens: 0,
+                },
+                ...(responseDefaults || {}),
+                // This proxy does not support OpenAI-side persistence.
+                ...{ store: false },
+            };
+        }
+
+        const output = [];
+        let messageContent = "";
+        let reasoningContent = "";
+
+        if (candidate.content && Array.isArray(candidate.content.parts)) {
+            for (const part of candidate.content.parts) {
+                // Responses API supports reasoning output items; map Gemini "thought" parts into a reasoning *summary*.
+                if (part?.thought === true) {
+                    if (part?.text) reasoningContent += part.text;
+                    continue;
+                } else if (part.text) {
+                    // Regular text content
+                    messageContent += part.text;
+                } else if (part.inlineData) {
+                    // Image content (not typical in Response API but handle it)
+                    const image = part.inlineData;
+                    messageContent += `![Generated Image](data:${image.mimeType};base64,${image.data})`;
+                } else if (part.functionCall) {
+                    // Function call
+                    const funcCall = part.functionCall;
+                    const callId = `call_${this._generateRequestId()}`;
+                    output.push({
+                        arguments: JSON.stringify(funcCall.args || {}),
+                        call_id: callId,
+                        id: `fc-${this._generateRequestId()}`,
+                        name: funcCall.name,
+                        status: "completed",
+                        type: "function_call",
+                    });
+                    this.logger.info(
+                        `[Adapter] Converted Gemini functionCall to Response API function_call: ${funcCall.name}`
+                    );
+                }
+            }
+        }
+
+        if (reasoningContent) {
+            output.unshift({
+                id: `rsn_${this._generateRequestId()}`,
+                status: "completed",
+                summary: [
+                    {
+                        text: reasoningContent,
+                        type: "summary_text",
+                    },
+                ],
+                type: "reasoning",
+            });
+        }
+
+        // Add message output if present
+        if (messageContent) {
+            output.push({
+                content: [
+                    {
+                        annotations: [],
+                        logprobs: null,
+                        text: messageContent,
+                        type: "output_text",
+                    },
+                ],
+                id: `msg_${this._generateRequestId()}`,
+                role: "assistant",
+                status: "completed",
+                type: "message",
+            });
+        }
+
+        // Parse usage
+        const usage = this._parseUsage(googleResponse);
+
+        return {
+            completed_at: Math.floor(Date.now() / 1000),
+            created_at: Math.floor(Date.now() / 1000),
+            error: null,
+            id: `resp_${this._generateRequestId()}`,
+            incomplete_details: null,
+            instructions: null,
+            max_output_tokens: null,
+            metadata: {},
+            model: modelName,
+            object: "response",
+            output,
+            parallel_tool_calls: true,
+            reasoning: {
+                effort: null,
+                summary: null,
+            },
+            service_tier: "default",
+            status: "completed",
+            temperature: 1.0,
+            text: {
+                format: {
+                    type: "text",
+                },
+            },
+            tool_choice: "auto",
+            tools: [],
+            top_p: 1.0,
+            truncation: "disabled",
+            usage: {
+                input_tokens: usage.prompt_tokens,
+                input_tokens_details: {
+                    cached_tokens: 0,
+                },
+                output_tokens: usage.completion_tokens,
+                output_tokens_details: {
+                    reasoning_tokens: usage.completion_tokens_details?.reasoning_tokens || 0,
+                },
+                total_tokens: usage.total_tokens,
+            },
+            ...(responseDefaults || {}),
+            // This proxy does not support OpenAI-side persistence.
+            ...{ store: false },
+        };
+    }
+
+    /**
      * Map Gemini finishReason to OpenAI format
      * @param {string} geminiReason - Gemini finish reason
      * @returns {string} - OpenAI finish reason
@@ -1090,6 +1786,16 @@ class FormatConverter {
 
     _generateRequestId() {
         return `${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+    }
+
+    _generateObfuscation() {
+        const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+        const length = Math.floor(Math.random() * 6) + 10; // 10-15 characters
+        let result = "";
+        for (let i = 0; i < length; i++) {
+            result += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        return result;
     }
 
     _parseUsage(googleResponse) {
@@ -1392,7 +2098,7 @@ class FormatConverter {
             thinkingConfig = { includeThoughts: true };
             if (thinkingParam.budget_tokens) {
                 // Gemini doesn't have budget_tokens, but we can log it
-                this.logger.info(`[Adapter] Claude thinking budget_tokens: ${thinkingParam.budget_tokens}`);
+                this.logger.debug(`[Adapter] Claude thinking budget_tokens: ${thinkingParam.budget_tokens}`);
             }
         }
 
@@ -1799,6 +2505,18 @@ class FormatConverter {
      * Convert Google non-stream response to Claude format
      */
     convertGoogleToClaudeNonStream(googleResponse, modelName = "gemini-2.5-flash-lite") {
+        try {
+            this.logger.debug(
+                `[Adapter] Debug: Received Google response for Claude non-stream: ${JSON.stringify(googleResponse)}`
+            );
+        } catch (e) {
+            this.logger.debug(
+                `[Adapter] Debug: Received Google response for Claude non-stream (non-serializable): ${String(
+                    googleResponse
+                )}`
+            );
+        }
+
         const candidate = googleResponse.candidates?.[0];
         const usage = googleResponse.usageMetadata || {};
 
@@ -1878,6 +2596,456 @@ class FormatConverter {
                 output_tokens: (usage.candidatesTokenCount || 0) + (usage.thoughtsTokenCount || 0),
             },
         };
+    }
+
+    // ==================== OpenAI Response API Format Conversion ====================
+
+    /**
+     * Convert OpenAI Response API request format to Google Gemini format
+     * Response API uses different structure: input instead of messages, instructions instead of system message
+     * @param {object} responseBody - OpenAI Response API format request body
+     * @returns {Promise<{ googleRequest: object, cleanModelName: string }>} - Converted request and cleaned model name
+     */
+    async translateOpenAIResponseToGoogle(responseBody) {
+        this.logger.info("[Adapter] Starting translation of OpenAI Response API request format to Google format...");
+
+        // Parse thinkingLevel suffix from model name
+        const rawModel = responseBody.model || "gemini-2.5-flash-lite";
+        const { cleanModelName, thinkingLevel: modelThinkingLevel } = FormatConverter.parseModelThinkingLevel(rawModel);
+
+        if (modelThinkingLevel) {
+            this.logger.info(
+                `[Adapter] Detected thinkingLevel suffix in model name: "${rawModel}" -> model="${cleanModelName}", thinkingLevel="${modelThinkingLevel}"`
+            );
+        }
+
+        this.logger.debug(
+            `[Adapter] Debug: incoming OpenAI Response API Body = ${JSON.stringify(responseBody, null, 2)}`
+        );
+
+        const googleContents = [];
+        let systemInstructionText = "";
+
+        const safeParseJSON = (str, fallbackKey) => {
+            try {
+                return JSON.parse(str || "{}");
+            } catch (e) {
+                this.logger.warn(`[Adapter] Failed to parse JSON for ${fallbackKey}: ${e.message}`);
+                return { [fallbackKey]: str };
+            }
+        };
+
+        const extractTextContent = content => {
+            if (typeof content === "string") return content;
+            if (!Array.isArray(content)) return "";
+            return content
+                .filter(c => c && typeof c === "object" && (c.type === "text" || c.type === "input_text"))
+                .map(c => c.text)
+                .filter(Boolean)
+                .join("\n");
+        };
+
+        const instructions = responseBody.instructions;
+        if (typeof instructions === "string") {
+            systemInstructionText = instructions;
+        } else if (Array.isArray(instructions)) {
+            const systemItems = instructions.filter(
+                item => item && typeof item === "object" && (item.role === "system" || item.role === "developer")
+            );
+            if (systemItems.length > 0) {
+                const extraContent = systemItems
+                    .map(item => extractTextContent(item.content))
+                    .filter(Boolean)
+                    .join("\n");
+                if (extraContent) systemInstructionText = extraContent;
+            }
+        }
+
+        const input = responseBody.input;
+
+        if (Array.isArray(input)) {
+            const systemItems = input.filter(
+                item => item && typeof item === "object" && (item.role === "system" || item.role === "developer")
+            );
+            if (systemItems.length > 0) {
+                const extraContent = systemItems
+                    .map(item => extractTextContent(item.content))
+                    .filter(t => t.length > 0)
+                    .join("\n");
+
+                if (extraContent) {
+                    systemInstructionText = systemInstructionText
+                        ? `${systemInstructionText}\n${extraContent}`
+                        : extraContent;
+                }
+            }
+        }
+
+        let systemInstruction = null;
+        if (systemInstructionText) {
+            systemInstruction = {
+                parts: [{ text: systemInstructionText }],
+                // Keep consistent with other adapters: systemInstruction is sent as a separate instruction channel,
+                // and Gemini API expects it to be encoded as a "user" role here.
+                role: "user",
+            };
+        }
+
+        if (typeof input === "string") {
+            // Simple string input
+            googleContents.push({
+                parts: [{ text: input }],
+                role: "user",
+            });
+        } else if (Array.isArray(input)) {
+            // Array input - could be strings or message objects
+            const callIdToName = {};
+            for (const item of input) {
+                if (
+                    item &&
+                    typeof item === "object" &&
+                    item.type === "function_call" &&
+                    typeof item.call_id === "string" &&
+                    typeof item.name === "string"
+                ) {
+                    callIdToName[item.call_id] = item.name;
+                }
+            }
+
+            for (const item of input) {
+                if (typeof item === "string") {
+                    // Array of strings
+                    googleContents.push({
+                        parts: [{ text: item }],
+                        role: "user",
+                    });
+                } else if (item && typeof item === "object") {
+                    if (item.role === "system" || item.role === "developer") {
+                        continue;
+                    }
+                    // Handle different message types in Response API
+                    if (item.type === "function_call") {
+                        // Function call from model (assistant message with tool call)
+                        const rawArgs =
+                            item && typeof item === "object" && Object.prototype.hasOwnProperty.call(item, "arguments")
+                                ? item["arguments"]
+                                : undefined;
+                        const functionCallPart = {
+                            functionCall: {
+                                args: safeParseJSON(rawArgs, "unparsed_arguments"),
+                                name: item.name,
+                            },
+                            thoughtSignature: FormatConverter.DUMMY_THOUGHT_SIGNATURE,
+                        };
+                        googleContents.push({
+                            parts: [functionCallPart],
+                            role: "model",
+                        });
+                        this.logger.debug(
+                            `[Adapter] Converted Response API function_call to Gemini functionCall: ${item.name}`
+                        );
+                    } else if (item.type === "function_call_output") {
+                        // Function output (tool result from user)
+                        const functionName =
+                            item.name ||
+                            (typeof item.call_id === "string" ? callIdToName[item.call_id] : undefined) ||
+                            "unknown_function";
+                        const functionResponsePart = {
+                            functionResponse: {
+                                name: functionName,
+                                response: safeParseJSON(item.output, "unparsed_output"),
+                            },
+                        };
+                        googleContents.push({
+                            parts: [functionResponsePart],
+                            role: "user",
+                        });
+                        this.logger.debug(
+                            `[Adapter] Converted Response API function_call_output to Gemini functionResponse: ${item.name || "unknown"}`
+                        );
+                    } else {
+                        // Regular message object with role and content
+                        const googleParts = [];
+
+                        if (typeof item.content === "string") {
+                            googleParts.push({ text: item.content });
+                        } else if (Array.isArray(item.content)) {
+                            // Multi-modal content
+                            for (const contentPart of item.content) {
+                                if (contentPart.type === "text" || contentPart.type === "input_text") {
+                                    googleParts.push({ text: contentPart.text });
+                                } else if (contentPart.type === "image_url" || contentPart.type === "input_image") {
+                                    const imageUrl = contentPart.image_url?.url || contentPart.image_url;
+                                    if (imageUrl.startsWith("data:")) {
+                                        const match = imageUrl.match(/^data:([^;]+);base64,(.+)$/);
+                                        if (match) {
+                                            googleParts.push({
+                                                inlineData: {
+                                                    data: match[2],
+                                                    mimeType: match[1],
+                                                },
+                                            });
+                                        }
+                                    } else if (imageUrl.match(/^https?:\/\//)) {
+                                        try {
+                                            this.logger.info(`[Adapter] Downloading image from URL: ${imageUrl}`);
+                                            const response = await axios.get(imageUrl, {
+                                                responseType: "arraybuffer",
+                                            });
+                                            const imageBuffer = Buffer.from(response.data, "binary");
+                                            const base64Data = imageBuffer.toString("base64");
+                                            let mimeType = response.headers["content-type"];
+                                            if (!mimeType || mimeType === "application/octet-stream") {
+                                                mimeType = mime.lookup(imageUrl) || "image/jpeg";
+                                            }
+                                            googleParts.push({
+                                                inlineData: {
+                                                    data: base64Data,
+                                                    mimeType,
+                                                },
+                                            });
+                                        } catch (error) {
+                                            this.logger.error(
+                                                `[Adapter] Failed to download image from URL: ${imageUrl}`,
+                                                error
+                                            );
+                                            googleParts.push({
+                                                text: `[System Note: Failed to load image from ${imageUrl}]`,
+                                            });
+                                        }
+                                    }
+                                } else if (contentPart.type === "input_file") {
+                                    this.logger.debug(
+                                        "[Adapter] input_file content detected but not supported by Gemini, skipping..."
+                                    );
+                                }
+                            }
+                        }
+
+                        if (googleParts.length > 0) {
+                            googleContents.push({
+                                parts: googleParts,
+                                role: item.role === "assistant" ? "model" : "user",
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Build Google request
+        const googleRequest = {
+            contents: googleContents,
+            ...(systemInstruction && {
+                systemInstruction,
+            }),
+        };
+
+        // Generation config
+        const generationConfig = {
+            maxOutputTokens: responseBody.max_output_tokens,
+            temperature: responseBody.temperature,
+            topP: responseBody.top_p,
+        };
+
+        // Handle reasoning config (for o-series models)
+        const reasoning = responseBody.reasoning;
+        let thinkingConfig = null;
+
+        if (reasoning) {
+            thinkingConfig = { includeThoughts: true };
+        }
+
+        // Force thinking mode
+        if (this.serverSystem.forceThinking && !thinkingConfig) {
+            this.logger.info(
+                "[Adapter] ⚠️ Force thinking enabled, injecting thinkingConfig for OpenAI Response API request."
+            );
+            thinkingConfig = { includeThoughts: true };
+        }
+
+        // If model name suffix specifies thinkingLevel, override directly (highest priority)
+        if (modelThinkingLevel) {
+            if (!thinkingConfig) {
+                thinkingConfig = {};
+            }
+            thinkingConfig.thinkingLevel = modelThinkingLevel;
+            this.logger.info(
+                `[Adapter] Applied thinkingLevel from model name suffix: ${modelThinkingLevel} (overriding any existing value)`
+            );
+        }
+
+        if (thinkingConfig) {
+            generationConfig.thinkingConfig = thinkingConfig;
+        }
+
+        googleRequest.generationConfig = generationConfig;
+
+        // Convert tools
+        const tools = responseBody.tools;
+        if (tools && Array.isArray(tools) && tools.length > 0) {
+            const functionDeclarations = [];
+            let hasWebSearch = false;
+
+            for (const tool of tools) {
+                if (tool.type === "web_search_preview" || tool.type === "web_search") {
+                    hasWebSearch = true;
+                } else if (tool.type === "file_search") {
+                    this.logger.debug("[Adapter] file_search tool detected but not supported by Gemini, skipping...");
+                } else if (tool.type === "computer_use_preview") {
+                    this.logger.debug(
+                        "[Adapter] computer_use_preview tool detected but not supported by Gemini, skipping..."
+                    );
+                } else if (tool.type === "function") {
+                    // Custom function tool (Responses API: {type:"function", name, description, parameters})
+                    // Also accept Chat Completions style: {type:"function", function:{name, description, parameters}}
+                    const funcDef = tool.function && typeof tool.function === "object" ? tool.function : tool;
+                    if (!funcDef || !funcDef.name) continue;
+                    const declaration = {
+                        name: funcDef.name,
+                    };
+
+                    if (funcDef.description) {
+                        declaration.description = funcDef.description;
+                    }
+
+                    if (funcDef.parameters) {
+                        declaration.parameters = this._convertSchemaToGemini(funcDef.parameters);
+                    }
+                    functionDeclarations.push(declaration);
+                }
+            }
+
+            // Build tools array
+            if (functionDeclarations.length > 0) {
+                googleRequest.tools = [{ functionDeclarations }];
+                this.logger.info(
+                    `[Adapter] Converted ${functionDeclarations.length} OpenAI Response API tool(s) to Gemini format`
+                );
+            }
+
+            if (hasWebSearch) {
+                if (!googleRequest.tools) {
+                    googleRequest.tools = [];
+                }
+                googleRequest.tools.push({ googleSearch: {} });
+                this.logger.info("[Adapter] Added googleSearch tool for OpenAI Response API web_search_preview");
+            }
+        }
+
+        // Handle tool_choice
+        const toolChoice = responseBody.tool_choice;
+        if (toolChoice) {
+            const functionCallingConfig = {};
+
+            if (toolChoice === "auto") {
+                functionCallingConfig.mode = "AUTO";
+            } else if (toolChoice === "none") {
+                functionCallingConfig.mode = "NONE";
+            } else if (toolChoice === "required") {
+                functionCallingConfig.mode = "ANY";
+            } else if (typeof toolChoice === "object") {
+                // Object type tool_choice
+                if (toolChoice.type === "function") {
+                    // Function tool: { type: "function", name: "function_name" }
+                    const funcName = toolChoice.name;
+                    if (funcName) {
+                        functionCallingConfig.mode = "ANY";
+                        functionCallingConfig.allowedFunctionNames = [funcName];
+                    }
+                } else if (
+                    toolChoice.type === "file_search" ||
+                    toolChoice.type === "web_search_preview" ||
+                    toolChoice.type === "computer_use_preview"
+                ) {
+                    // Hosted tool: { type: "web_search_preview" }
+                    // These are handled in the tools section, not in function calling config
+                    // Just log and skip
+                    this.logger.debug(
+                        `[Adapter] tool_choice specified hosted tool: ${toolChoice.type}, skipping (handled separately)`
+                    );
+                }
+            }
+
+            if (Object.keys(functionCallingConfig).length > 0) {
+                googleRequest.toolConfig = { functionCallingConfig };
+                this.logger.debug(
+                    `[Adapter] Converted tool_choice to Gemini toolConfig: ${JSON.stringify(functionCallingConfig)}`
+                );
+            }
+        }
+
+        // Handle text format (structured output)
+        const textFormat = responseBody.text;
+        if (textFormat && textFormat.format) {
+            if (textFormat.format.type === "json_schema" && textFormat.format.json_schema) {
+                const schema = textFormat.format.json_schema.schema;
+                if (schema) {
+                    try {
+                        const convertedSchema = this._convertSchemaToGemini(schema, true);
+                        generationConfig.responseMimeType = "application/json";
+                        generationConfig.responseSchema = convertedSchema;
+                        this.logger.info(
+                            `[Adapter] Converted OpenAI Response API text.format to Gemini responseSchema: ${textFormat.format.json_schema.name || "unnamed"}`
+                        );
+                    } catch (error) {
+                        this.logger.error(
+                            `[Adapter] Failed to convert OpenAI Response API text.format schema: ${error.message}`,
+                            error
+                        );
+                    }
+                }
+            } else if (textFormat.format === "json_object") {
+                generationConfig.responseMimeType = "application/json";
+                this.logger.info(
+                    "[Adapter] Set responseMimeType to application/json for OpenAI Response API json_object format"
+                );
+            }
+        }
+
+        // Force features
+        const toolsToAdd = [];
+        if (!googleRequest.tools) {
+            googleRequest.tools = [];
+        }
+
+        // Handle Web Search
+        if (this.serverSystem.forceWebSearch) {
+            const hasSearch = googleRequest.tools.some(t => t.googleSearch);
+            if (!hasSearch) {
+                googleRequest.tools.push({ googleSearch: {} });
+                toolsToAdd.push("googleSearch");
+            }
+        }
+
+        // Handle URL Context
+        if (this.serverSystem.forceUrlContext) {
+            const hasUrlContext = googleRequest.tools.some(t => t.urlContext);
+            if (!hasUrlContext) {
+                googleRequest.tools.push({ urlContext: {} });
+                toolsToAdd.push("urlContext");
+            }
+        }
+
+        if (toolsToAdd.length > 0) {
+            this.logger.info(
+                `[Adapter] ⚠️ Force features enabled for OpenAI Response API, injecting tools: [${toolsToAdd.join(", ")}]`
+            );
+        }
+
+        // Safety settings
+        googleRequest.safetySettings = [
+            { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+            { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+            { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+            { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
+        ];
+
+        this.logger.debug(
+            `[Adapter] Debug: Final Gemini Request for OpenAI Response API = ${JSON.stringify(googleRequest, null, 2)}`
+        );
+
+        return { cleanModelName, googleRequest };
     }
 }
 

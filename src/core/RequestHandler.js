@@ -207,6 +207,21 @@ class RequestHandler {
                     if (this._isResponseWritable(res)) {
                         res.write(`event: error\ndata: ${JSON.stringify(errorPayload)}\n\n`);
                     }
+                } else if (format === "response_api") {
+                    // OpenAI Response API format
+                    errorPayload = {
+                        code: "timeout_error",
+                        message: `Stream timeout: ${error.message}`,
+                        param: null,
+                        sequence_number: 0,
+                        type: "error",
+                    };
+                    if (res.__responseApiSeq == null) res.__responseApiSeq = 0;
+                    res.__responseApiSeq += 1;
+                    errorPayload.sequence_number = res.__responseApiSeq;
+                    if (this._isResponseWritable(res)) {
+                        res.write(`event: error\ndata: ${JSON.stringify(errorPayload)}\n\n`);
+                    }
                 } else {
                     // gemini
                     errorPayload = {
@@ -241,6 +256,21 @@ class RequestHandler {
                         },
                         type: "error",
                     };
+                    if (this._isResponseWritable(res)) {
+                        res.write(`event: error\ndata: ${JSON.stringify(errorPayload)}\n\n`);
+                    }
+                } else if (format === "response_api") {
+                    // OpenAI Response API format
+                    errorPayload = {
+                        code: "service_unavailable",
+                        message: `Service unavailable: ${error.message}`,
+                        param: null,
+                        sequence_number: 0,
+                        type: "error",
+                    };
+                    if (res.__responseApiSeq == null) res.__responseApiSeq = 0;
+                    res.__responseApiSeq += 1;
+                    errorPayload.sequence_number = res.__responseApiSeq;
                     if (this._isResponseWritable(res)) {
                         res.write(`event: error\ndata: ${JSON.stringify(errorPayload)}\n\n`);
                     }
@@ -763,7 +793,7 @@ class RequestHandler {
                 }
 
                 if (this.authSwitcher.failureCount > 0) {
-                    this.logger.info(
+                    this.logger.debug(
                         `✅ [Auth] OpenAI interface request successful - failure count reset from ${this.authSwitcher.failureCount} to 0`
                     );
                     this.authSwitcher.failureCount = 0;
@@ -820,7 +850,7 @@ class RequestHandler {
                     }
 
                     if (this.authSwitcher.failureCount > 0) {
-                        this.logger.info(`✅ [Auth] OpenAI interface request successful - failure count reset to 0`);
+                        this.logger.debug(`✅ [Auth] OpenAI interface request successful - failure count reset to 0`);
                         this.authSwitcher.failureCount = 0;
                     }
 
@@ -900,6 +930,337 @@ class RequestHandler {
                     } else {
                         // Non-stream
                         await this._sendOpenAINonStreamResponse(activeQueue, res, model);
+                    }
+                } finally {
+                    if (connectionMaintainer) clearTimeout(connectionMaintainer);
+                }
+            }
+        } catch (error) {
+            // Handle queue timeout by notifying browser
+            this._handleQueueTimeout(error, requestId);
+
+            this._handleRequestError(error, res);
+        } finally {
+            this.connectionRegistry.removeMessageQueue(requestId, "request_complete");
+            if (this.needsSwitchingAfterRequest) {
+                this.logger.info(
+                    `[Auth] Rotation count reached switching threshold (${this.authSwitcher.usageCount}/${this.config.switchOnUses}), will automatically switch account in background...`
+                );
+                this.authSwitcher.switchToNextAuth().catch(err => {
+                    this.logger.error(`[Auth] Background account switching task failed: ${err.message}`);
+                });
+                this.needsSwitchingAfterRequest = false;
+            }
+            if (!res.writableEnded) res.end();
+        }
+    }
+
+    // Process OpenAI Response API format requests
+    async processOpenAIResponseRequest(req, res) {
+        const requestId = this._generateRequestId();
+
+        // Check current account's browser connection
+        if (!this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex)) {
+            this.logger.warn(`[Request] No WebSocket connection for current account #${this.currentAuthIndex}`);
+            const recovered = await this._handleBrowserRecovery(res);
+            if (!recovered) return;
+        }
+
+        // Wait for system to become ready if it's busy
+        if (this.authSwitcher.isSystemBusy) {
+            const ready = await this._waitForSystemReady();
+            if (!ready) {
+                return this._sendErrorResponse(
+                    res,
+                    503,
+                    "Server undergoing internal maintenance (account switching/recovery), please try again later."
+                );
+            }
+            // After system ready, ensure connection is available for current account
+            if (!this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex)) {
+                const connectionReady = await this._waitForConnection(10000);
+                if (!connectionReady) {
+                    return this._sendErrorResponse(
+                        res,
+                        503,
+                        "Service temporarily unavailable: Connection not established after switching."
+                    );
+                }
+            }
+        }
+        if (this.browserManager) {
+            this.browserManager.notifyUserActivity();
+        }
+
+        const isOpenAIStream = req.body.stream === true;
+        const includeObfuscation = req.body?.stream_options?.include_obfuscation !== false;
+        const normalizeInstructions = value => {
+            if (typeof value === "string") return value;
+            if (!Array.isArray(value)) return null;
+            const chunks = [];
+            for (const item of value) {
+                if (!item || typeof item !== "object") continue;
+                const content = item.content;
+                if (typeof content === "string") {
+                    chunks.push(content);
+                    continue;
+                }
+                if (!Array.isArray(content)) continue;
+                for (const part of content) {
+                    if (!part || typeof part !== "object") continue;
+                    if (part.type === "text" || part.type === "input_text") {
+                        if (typeof part.text === "string" && part.text) chunks.push(part.text);
+                    }
+                }
+            }
+            return chunks.length > 0 ? chunks.join("\n") : null;
+        };
+        const responseDefaultsRaw = {
+            instructions: normalizeInstructions(req.body?.instructions),
+            max_output_tokens: req.body?.max_output_tokens ?? null,
+            metadata:
+                req.body?.metadata && typeof req.body.metadata === "object" && !Array.isArray(req.body.metadata)
+                    ? req.body.metadata
+                    : {},
+            parallel_tool_calls:
+                typeof req.body?.parallel_tool_calls === "boolean" ? req.body.parallel_tool_calls : true,
+            reasoning:
+                req.body?.reasoning && typeof req.body.reasoning === "object" && !Array.isArray(req.body.reasoning)
+                    ? req.body.reasoning
+                    : undefined,
+            temperature: typeof req.body?.temperature === "number" ? req.body.temperature : undefined,
+            text:
+                req.body?.text && typeof req.body.text === "object" && !Array.isArray(req.body.text)
+                    ? req.body.text
+                    : undefined,
+            tool_choice: req.body?.tool_choice ?? undefined,
+            tools: Array.isArray(req.body?.tools) ? req.body.tools : undefined,
+            top_p: typeof req.body?.top_p === "number" ? req.body.top_p : undefined,
+            truncation: typeof req.body?.truncation === "string" ? req.body.truncation : undefined,
+            user: typeof req.body?.user === "string" ? req.body.user : undefined,
+        };
+        const responseDefaults = Object.fromEntries(
+            Object.entries(responseDefaultsRaw).filter(([, v]) => v !== undefined)
+        );
+        const systemStreamMode = this.serverSystem.streamingMode;
+        const useRealStream = isOpenAIStream && systemStreamMode === "real";
+
+        // Handle usage counting
+        const usageCount = this.authSwitcher.incrementUsageCount();
+        if (usageCount > 0) {
+            const rotationCountText =
+                this.config.switchOnUses > 0 ? `${usageCount}/${this.config.switchOnUses}` : `${usageCount}`;
+            this.logger.info(
+                `[Request] OpenAI Response generation request - account rotation count: ${rotationCountText} (Current account: ${this.currentAuthIndex})`
+            );
+            if (this.authSwitcher.shouldSwitchByUsage()) {
+                this.needsSwitchingAfterRequest = true;
+            }
+        }
+
+        // Translate OpenAI Response format to Google format
+        let googleBody, model;
+        try {
+            const result = await this.formatConverter.translateOpenAIResponseToGoogle(req.body);
+            googleBody = result.googleRequest;
+            model = result.cleanModelName;
+        } catch (error) {
+            this.logger.error(`[Adapter] OpenAI Response request translation failed: ${error.message}`);
+            return this._sendErrorResponse(res, 400, "Invalid OpenAI Response request format.");
+        }
+
+        const googleEndpoint = useRealStream ? "streamGenerateContent" : "generateContent";
+        const proxyRequest = {
+            body: JSON.stringify(googleBody),
+            headers: { "Content-Type": "application/json" },
+            is_generative: true,
+            method: "POST",
+            path: `/v1beta/models/${model}:${googleEndpoint}`,
+            query_params: useRealStream ? { alt: "sse" } : {},
+            request_id: requestId,
+            streaming_mode: useRealStream ? "real" : "fake",
+        };
+
+        try {
+            // Create message queue inside try-catch to handle invalid authIndex
+            const messageQueue = this.connectionRegistry.createMessageQueue(requestId, this.currentAuthIndex);
+            this._setupClientDisconnectHandler(res, requestId);
+
+            if (useRealStream) {
+                this._forwardRequest(proxyRequest);
+                const initialMessage = await messageQueue.dequeue();
+
+                if (initialMessage.event_type === "error") {
+                    this.logger.error(
+                        `[Request] Received error from browser, will trigger switching logic. Status code: ${initialMessage.status}, message: ${initialMessage.message}`
+                    );
+
+                    // Send standard HTTP error response
+                    this._sendErrorResponse(res, initialMessage.status || 500, initialMessage.message);
+
+                    // Avoid switching account if the error is just a connection reset
+                    if (!this._isConnectionResetError(initialMessage)) {
+                        await this.authSwitcher.handleRequestFailureAndSwitch(initialMessage, null);
+                    } else {
+                        this.logger.info(
+                            "[Request] Failure due to connection reset (Real Stream), skipping account switch."
+                        );
+                    }
+                    return;
+                }
+
+                if (this.authSwitcher.failureCount > 0) {
+                    this.logger.debug(
+                        `✅ [Auth] OpenAI Response API request successful - failure count reset from ${this.authSwitcher.failureCount} to 0`
+                    );
+                    this.authSwitcher.failureCount = 0;
+                }
+
+                res.status(200).set({
+                    "Cache-Control": "no-cache",
+                    Connection: "keep-alive",
+                    "Content-Type": "text/event-stream",
+                });
+                this.logger.info(`[Request] OpenAI Response API streaming response (Real Mode) started...`);
+                await this._streamOpenAIResponseAPIResponse(messageQueue, res, model, {
+                    includeObfuscation,
+                    responseDefaults,
+                });
+            } else {
+                // OpenAI Response API Fake Stream / Non-Stream mode
+                // Set up keep-alive timer for fake stream mode to prevent client timeout
+                let connectionMaintainer;
+                if (isOpenAIStream) {
+                    const scheduleNextKeepAlive = () => {
+                        const randomInterval = 12000 + Math.floor(Math.random() * 6000); // 12 - 18 seconds
+                        connectionMaintainer = setTimeout(() => {
+                            if (!res.headersSent) {
+                                res.status(200).set({
+                                    "Cache-Control": "no-cache",
+                                    Connection: "keep-alive",
+                                    "Content-Type": "text/event-stream",
+                                });
+                            }
+                            if (!res.writableEnded) {
+                                res.write(": keep-alive\n\n");
+                                scheduleNextKeepAlive();
+                            }
+                        }, randomInterval);
+                    };
+                    scheduleNextKeepAlive();
+                }
+
+                try {
+                    const result = await this._executeRequestWithRetries(proxyRequest, messageQueue);
+
+                    if (!result.success) {
+                        // Send standard HTTP error response for both streaming and non-streaming
+                        if (connectionMaintainer) clearTimeout(connectionMaintainer);
+                        this._sendErrorResponse(res, result.error.status || 500, result.error.message);
+
+                        // Avoid switching account if the error is just a connection reset
+                        if (!this._isConnectionResetError(result.error)) {
+                            await this.authSwitcher.handleRequestFailureAndSwitch(result.error, null);
+                        } else {
+                            this.logger.info(
+                                "[Request] Failure due to connection reset (Response API), skipping account switch."
+                            );
+                        }
+                        return;
+                    }
+
+                    if (this.authSwitcher.failureCount > 0) {
+                        this.logger.debug(
+                            `✅ [Auth] OpenAI Response API request successful - failure count reset to 0`
+                        );
+                        this.authSwitcher.failureCount = 0;
+                    }
+
+                    // Use the queue that successfully received the initial message
+                    const activeQueue = result.queue;
+
+                    if (isOpenAIStream) {
+                        // Fake stream - ensure headers are set before sending data
+                        if (!res.headersSent) {
+                            res.status(200).set({
+                                "Cache-Control": "no-cache",
+                                Connection: "keep-alive",
+                                "Content-Type": "text/event-stream",
+                            });
+                        }
+                        // Clear keep-alive timer as we are about to send real data
+                        if (connectionMaintainer) clearTimeout(connectionMaintainer);
+
+                        this.logger.info(`[Request] OpenAI Response API streaming response (Fake Mode) started...`);
+                        let fullBody = "";
+                        if (res.__responseApiSeq == null) res.__responseApiSeq = 0;
+                        try {
+                            // eslint-disable-next-line no-constant-condition
+                            while (true) {
+                                const message = await activeQueue.dequeue(this.timeouts.FAKE_STREAM);
+                                if (message.type === "STREAM_END") {
+                                    break;
+                                }
+
+                                if (message.event_type === "error") {
+                                    this.logger.error(
+                                        `[Request] Error received during OpenAI Response API fake stream: ${message.message}`
+                                    );
+                                    // Check if response is still writable before attempting to write
+                                    if (this._isResponseWritable(res)) {
+                                        try {
+                                            res.__responseApiSeq += 1;
+                                            res.write(
+                                                `event: error\ndata: ${JSON.stringify({
+                                                    code: "api_error",
+                                                    message: message.message,
+                                                    param: null,
+                                                    sequence_number: res.__responseApiSeq,
+                                                    type: "error",
+                                                })}\n\n`
+                                            );
+                                        } catch (writeError) {
+                                            this.logger.debug(
+                                                `[Request] Failed to write error to OpenAI Response API fake stream: ${writeError.message}`
+                                            );
+                                        }
+                                    }
+                                    break;
+                                }
+
+                                if (message.data) fullBody += message.data;
+                            }
+                            const streamState = {};
+                            streamState.includeObfuscation = includeObfuscation;
+                            streamState.responseDefaults = responseDefaults;
+                            const translatedChunk = this.formatConverter.translateGoogleToResponseAPIStream(
+                                fullBody,
+                                model,
+                                streamState
+                            );
+                            if (this._isResponseWritable(res)) {
+                                try {
+                                    if (translatedChunk) {
+                                        res.write(translatedChunk);
+                                    }
+                                } catch (writeError) {
+                                    this.logger.debug(
+                                        `[Request] Failed to write final fake OpenAI Response API stream chunks: ${writeError.message}`
+                                    );
+                                }
+                            } else {
+                                this.logger.debug(
+                                    "[Request] Response no longer writable before final fake OpenAI Response API stream chunks."
+                                );
+                            }
+                            this.logger.info("[Request] Fake mode: Complete content sent at once.");
+                        } catch (error) {
+                            // Classify error type and send appropriate response
+                            this._handleFakeStreamError(error, res, "response_api");
+                        }
+                    } else {
+                        // Non-stream
+                        await this._sendOpenAIResponseAPINonStreamResponse(activeQueue, res, model, responseDefaults);
                     }
                 } finally {
                     if (connectionMaintainer) clearTimeout(connectionMaintainer);
@@ -1030,7 +1391,7 @@ class RequestHandler {
                 }
 
                 if (this.authSwitcher.failureCount > 0) {
-                    this.logger.info(`✅ [Auth] Claude request successful - failure count reset to 0`);
+                    this.logger.debug(`✅ [Auth] Claude request successful - failure count reset to 0`);
                     this.authSwitcher.failureCount = 0;
                 }
 
@@ -1082,7 +1443,7 @@ class RequestHandler {
                     }
 
                     if (this.authSwitcher.failureCount > 0) {
-                        this.logger.info(`✅ [Auth] Claude request successful - failure count reset to 0`);
+                        this.logger.debug(`✅ [Auth] Claude request successful - failure count reset to 0`);
                         this.authSwitcher.failureCount = 0;
                     }
 
@@ -1305,7 +1666,7 @@ class RequestHandler {
 
             // Reset failure count on success
             if (this.authSwitcher.failureCount > 0) {
-                this.logger.info(
+                this.logger.debug(
                     `✅ [Auth] Count tokens request successful - failure count reset from ${this.authSwitcher.failureCount} to 0`
                 );
                 this.authSwitcher.failureCount = 0;
@@ -1584,7 +1945,7 @@ class RequestHandler {
             }
 
             if (proxyRequest.is_generative && this.authSwitcher.failureCount > 0) {
-                this.logger.info(
+                this.logger.debug(
                     `✅ [Auth] Generation request successful - failure count reset from ${this.authSwitcher.failureCount} to 0`
                 );
                 this.authSwitcher.failureCount = 0;
@@ -1826,7 +2187,7 @@ class RequestHandler {
         }
 
         if (proxyRequest.is_generative && this.authSwitcher.failureCount > 0) {
-            this.logger.info(
+            this.logger.debug(
                 `✅ [Auth] Generation request successful - failure count reset from ${this.authSwitcher.failureCount} to 0`
             );
             this.authSwitcher.failureCount = 0;
@@ -1941,7 +2302,7 @@ class RequestHandler {
 
             // On success, reset failure count if needed
             if (proxyRequest.is_generative && this.authSwitcher.failureCount > 0) {
-                this.logger.info(
+                this.logger.debug(
                     `✅ [Auth] Non-stream generation request successful - failure count reset from ${this.authSwitcher.failureCount} to 0`
                 );
                 this.authSwitcher.failureCount = 0;
@@ -2159,6 +2520,109 @@ class RequestHandler {
         return { error: lastError, success: false };
     }
 
+    async _streamOpenAIResponseAPIResponse(messageQueue, res, model, streamOptions = {}) {
+        const streamState = {
+            includeObfuscation: streamOptions.includeObfuscation !== false,
+            responseDefaults: streamOptions.responseDefaults || {},
+        };
+
+        try {
+            // eslint-disable-next-line no-constant-condition
+            while (true) {
+                const message = await messageQueue.dequeue(this.timeouts.STREAM_CHUNK);
+                if (message.type === "STREAM_END") {
+                    this.logger.info("[Request] OpenAI Response API stream end signal received.");
+                    break;
+                }
+
+                if (message.event_type === "error") {
+                    this.logger.error(`[Request] Error received during Response API stream: ${message.message}`);
+                    if (this._isResponseWritable(res)) {
+                        try {
+                            if (!streamState.sequenceNumber) streamState.sequenceNumber = 0;
+                            streamState.sequenceNumber++;
+                            res.write(
+                                `event: error\ndata: ${JSON.stringify({
+                                    code: "api_error",
+                                    message: message.message,
+                                    param: null,
+                                    sequence_number: streamState.sequenceNumber,
+                                    type: "error",
+                                })}\n\n`
+                            );
+                        } catch (writeError) {
+                            this.logger.debug(
+                                `[Request] Failed to write error to Response API stream: ${writeError.message}`
+                            );
+                        }
+                    }
+                    break;
+                }
+
+                if (message.data) {
+                    const responseAPIChunk = this.formatConverter.translateGoogleToResponseAPIStream(
+                        message.data,
+                        model,
+                        streamState
+                    );
+                    if (responseAPIChunk) {
+                        if (!this._isResponseWritable(res)) {
+                            this.logger.debug(
+                                "[Request] Response no longer writable during Response API stream; stopping stream."
+                            );
+                            break;
+                        }
+                        try {
+                            res.write(responseAPIChunk);
+                        } catch (writeError) {
+                            this.logger.debug(
+                                `[Request] Failed to write Response API chunk (connection likely closed): ${writeError.message}`
+                            );
+                            break;
+                        }
+                    }
+                }
+            }
+        } catch (error) {
+            // Handle QueueClosedError gracefully
+            if (error instanceof QueueClosedError || error.code === "QUEUE_CLOSED") {
+                this.logger.warn(
+                    `[Request] Response API stream interrupted: Queue closed (${error.reason || "connection_lost"})`
+                );
+                if (this._isResponseWritable(res)) {
+                    try {
+                        if (!streamState.sequenceNumber) streamState.sequenceNumber = 0;
+                        streamState.sequenceNumber++;
+                        res.write(
+                            `event: error\ndata: ${JSON.stringify({
+                                code: "service_unavailable",
+                                message: "Service unavailable: Connection lost",
+                                param: null,
+                                sequence_number: streamState.sequenceNumber,
+                                type: "error",
+                            })}\n\n`
+                        );
+                    } catch (writeError) {
+                        this.logger.debug(
+                            `[Request] Failed to write error to Response API stream: ${writeError.message}`
+                        );
+                    }
+                }
+            } else {
+                // Re-throw other errors to be handled by outer catch
+                throw error;
+            }
+        } finally {
+            if (this._isResponseWritable(res)) {
+                try {
+                    res.end();
+                } catch (endError) {
+                    this.logger.debug(`[Request] Failed to end Response API stream: ${endError.message}`);
+                }
+            }
+        }
+    }
+
     async _streamOpenAIResponse(messageQueue, res, model) {
         const streamState = {};
 
@@ -2232,6 +2696,45 @@ class RequestHandler {
 
             // Re-throw all other errors to be handled by outer catch block
             throw error;
+        }
+    }
+
+    async _sendOpenAIResponseAPINonStreamResponse(messageQueue, res, model, responseDefaults = {}) {
+        let fullBody = "";
+        let receiving = true;
+        while (receiving) {
+            const message = await messageQueue.dequeue();
+            if (message.type === "STREAM_END") {
+                this.logger.info("[Request] OpenAI Response API received end signal.");
+                receiving = false;
+                break;
+            }
+
+            if (message.event_type === "error") {
+                this.logger.error(
+                    `[Adapter] Error during OpenAI Response API non-stream conversion: ${message.message}`
+                );
+                this._sendErrorResponse(res, 500, message.message);
+                return;
+            }
+
+            if (message.event_type === "chunk" && message.data) {
+                fullBody += message.data;
+            }
+        }
+
+        // Parse and convert to OpenAI Response API format
+        try {
+            const googleResponse = JSON.parse(fullBody);
+            const responseAPIResponse = this.formatConverter.convertGoogleToResponseAPINonStream(
+                googleResponse,
+                model,
+                responseDefaults
+            );
+            res.type("application/json").send(JSON.stringify(responseAPIResponse));
+        } catch (e) {
+            this.logger.error(`[Adapter] Failed to parse response for OpenAI Response API: ${e.message}`);
+            this._sendErrorResponse(res, 500, "Failed to parse backend response");
         }
     }
 
