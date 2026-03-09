@@ -2275,7 +2275,7 @@ class RequestHandler {
                     if (this._isResponseWritable(res)) {
                         try {
                             res.write(
-                                `data: ${JSON.stringify({ error: { code: 500, message: dataMessage.message, status: "INTERNAL_ERROR" } })}\n\n`
+                                `data: ${JSON.stringify({ error: { code: 500, message: dataMessage.message, status: "INTERNAL" } })}\n\n`
                             );
                         } catch (writeError) {
                             this.logger.debug(
@@ -2323,7 +2323,8 @@ class RequestHandler {
             if (this._isConnectionResetError(error)) {
                 this._handleRealStreamQueueClosedError(error, res, "gemini");
             } else if (error instanceof QueueTimeoutError || error.code === "QUEUE_TIMEOUT") {
-                this.logger.warn("[Request] Real stream response timeout, stream may have ended normally.");
+                // Keep behavior consistent with other interfaces: treat missing stream chunks as a timeout error.
+                this._handleRequestError(error, res, "gemini");
             } else {
                 // Unexpected error - rethrow to outer handler
                 throw error;
