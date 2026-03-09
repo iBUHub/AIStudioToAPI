@@ -3003,48 +3003,8 @@ class FormatConverter {
             }
         }
 
-        // Force features
-        const toolsToAdd = [];
-        if (!googleRequest.tools) {
-            googleRequest.tools = [];
-        }
-
-        // Handle Web Search
-        if (this.serverSystem.forceWebSearch) {
-            const hasSearch = googleRequest.tools.some(t => t.googleSearch);
-            if (!hasSearch) {
-                googleRequest.tools.push({ googleSearch: {} });
-                toolsToAdd.push("googleSearch");
-            }
-        }
-
-        // Handle URL Context
-        if (this.serverSystem.forceUrlContext) {
-            const hasUrlContext = googleRequest.tools.some(t => t.urlContext);
-            if (!hasUrlContext) {
-                googleRequest.tools.push({ urlContext: {} });
-                toolsToAdd.push("urlContext");
-            }
-        }
-
-        if (toolsToAdd.length > 0) {
-            this.logger.info(
-                `[Adapter] ⚠️ Force features enabled for OpenAI Response API, injecting tools: [${toolsToAdd.join(", ")}]`
-            );
-        }
-
-        // Safety settings
-        googleRequest.safetySettings = [
-            { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-            { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-            { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-            { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
-        ];
-
-        this.logger.debug(
-            `[Adapter] Debug: Final Gemini Request for OpenAI Response API = ${JSON.stringify(googleRequest, null, 2)}`
-        );
-
+        this._finalizeGoogleRequest(googleRequest);
+        this.logger.info("[Adapter] OpenAI Response API to Google translation complete.");
         return { cleanModelName, googleRequest };
     }
 }
