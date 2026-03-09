@@ -1035,9 +1035,9 @@ class FormatConverter {
             streamState.reasoningSummaryText = "";
             streamState.reasoningSummaryPartAdded = false;
             streamState.completed = false;
-            // Responses API: include obfuscation by default unless explicitly disabled.
+            // Responses API: only include obfuscation when explicitly enabled by client.
             if (typeof streamState.includeObfuscation !== "boolean") {
-                streamState.includeObfuscation = true;
+                streamState.includeObfuscation = false;
             }
         };
 
@@ -2881,8 +2881,22 @@ class FormatConverter {
 
         googleRequest.generationConfig = generationConfig;
 
+        const toolChoice = responseBody.tool_choice;
+
         // Convert tools
-        const tools = responseBody.tools;
+        // `tool_choice: {type:"allowed_tools", tools:[...]}` can provide the effective tool set.
+        let effectiveTools = responseBody.tools;
+        if (
+            toolChoice &&
+            typeof toolChoice === "object" &&
+            toolChoice.type === "allowed_tools" &&
+            Array.isArray(toolChoice.tools) &&
+            toolChoice.tools.length > 0
+        ) {
+            effectiveTools = toolChoice.tools;
+        }
+
+        const tools = effectiveTools;
         if (tools && Array.isArray(tools) && tools.length > 0) {
             const functionDeclarations = [];
             let hasWebSearch = false;
@@ -2934,35 +2948,83 @@ class FormatConverter {
         }
 
         // Handle tool_choice
-        const toolChoice = responseBody.tool_choice;
         if (toolChoice) {
             const functionCallingConfig = {};
 
-            if (toolChoice === "auto") {
-                functionCallingConfig.mode = "AUTO";
-            } else if (toolChoice === "none") {
-                functionCallingConfig.mode = "NONE";
-            } else if (toolChoice === "required") {
-                functionCallingConfig.mode = "ANY";
+            const ensureGoogleSearchTool = () => {
+                if (!googleRequest.tools) googleRequest.tools = [];
+                if (
+                    !googleRequest.tools.some(
+                        t => t && typeof t === "object" && Object.prototype.hasOwnProperty.call(t, "googleSearch")
+                    )
+                ) {
+                    googleRequest.tools.push({ googleSearch: {} });
+                }
+            };
+
+            // tool_choice can be a mode string ("none"|"auto"|"required"),
+            // or a tool selector (e.g. "web_search_preview") or an object (allowed_tools/custom/etc).
+            if (typeof toolChoice === "string") {
+                if (toolChoice === "auto") {
+                    functionCallingConfig.mode = "AUTO";
+                } else if (toolChoice === "none") {
+                    functionCallingConfig.mode = "NONE";
+                } else if (toolChoice === "required") {
+                    functionCallingConfig.mode = "ANY";
+                } else if (toolChoice === "web_search_preview" || toolChoice === "web_search") {
+                    ensureGoogleSearchTool();
+                } else if (toolChoice === "file_search" || toolChoice === "computer_use_preview") {
+                    this.logger.debug(
+                        `[Adapter] tool_choice forces unsupported hosted tool (${toolChoice}); ignoring.`
+                    );
+                } else {
+                    this.logger.debug(
+                        `[Adapter] Unsupported tool_choice for Responses API, ignoring: ${JSON.stringify(toolChoice)}`
+                    );
+                }
             } else if (typeof toolChoice === "object") {
-                // Object type tool_choice
-                if (toolChoice.type === "function") {
-                    // Function tool: { type: "function", name: "function_name" }
+                if (toolChoice.type === "allowed_tools") {
+                    // Constrain available tools. We already used toolChoice.tools as effectiveTools above.
+                    if (toolChoice.mode === "auto") {
+                        functionCallingConfig.mode = "AUTO";
+                    } else if (toolChoice.mode === "required") {
+                        functionCallingConfig.mode = "ANY";
+                    }
+
+                    // If the allowed tool set includes functions, restrict to those names.
+                    if (Array.isArray(tools)) {
+                        const names = tools
+                            .filter(
+                                t => t && typeof t === "object" && t.type === "function" && typeof t.name === "string"
+                            )
+                            .map(t => t.name)
+                            .filter(Boolean);
+                        if (names.length > 0) {
+                            functionCallingConfig.allowedFunctionNames = names;
+                        }
+                    }
+                } else if (toolChoice.type === "custom") {
+                    // Force a specific custom tool; map to Gemini "ANY" with allowed function name.
+                    if (typeof toolChoice.name === "string" && toolChoice.name) {
+                        functionCallingConfig.mode = "ANY";
+                        functionCallingConfig.allowedFunctionNames = [toolChoice.name];
+                    }
+                } else if (toolChoice.type === "function") {
+                    // Back-compat with Chat Completions style: { type:"function", name:"..." }
                     const funcName = toolChoice.name;
-                    if (funcName) {
+                    if (typeof funcName === "string" && funcName) {
                         functionCallingConfig.mode = "ANY";
                         functionCallingConfig.allowedFunctionNames = [funcName];
                     }
-                } else if (
-                    toolChoice.type === "file_search" ||
-                    toolChoice.type === "web_search_preview" ||
-                    toolChoice.type === "computer_use_preview"
-                ) {
-                    // Hosted tool: { type: "web_search_preview" }
-                    // These are handled in the tools section, not in function calling config
-                    // Just log and skip
+                } else if (toolChoice.type === "web_search_preview" || toolChoice.type === "web_search") {
+                    ensureGoogleSearchTool();
+                } else if (toolChoice.type === "file_search" || toolChoice.type === "computer_use_preview") {
                     this.logger.debug(
-                        `[Adapter] tool_choice specified hosted tool: ${toolChoice.type}, skipping (handled separately)`
+                        `[Adapter] tool_choice forces unsupported hosted tool (${toolChoice.type}); ignoring.`
+                    );
+                } else {
+                    this.logger.debug(
+                        `[Adapter] Unsupported tool_choice for Responses API, ignoring: ${JSON.stringify(toolChoice)}`
                     );
                 }
             }
@@ -2978,7 +3040,14 @@ class FormatConverter {
         // Handle text format (structured output)
         const textFormat = responseBody.text;
         if (textFormat && textFormat.format) {
-            if (textFormat.format.type === "json_schema" && textFormat.format.json_schema) {
+            const formatType =
+                typeof textFormat.format === "string" ? textFormat.format : textFormat.format?.type || null;
+
+            if (
+                formatType === "json_schema" &&
+                typeof textFormat.format === "object" &&
+                textFormat.format.json_schema
+            ) {
                 const schema = textFormat.format.json_schema.schema;
                 if (schema) {
                     try {
@@ -2995,7 +3064,7 @@ class FormatConverter {
                         );
                     }
                 }
-            } else if (textFormat.format === "json_object") {
+            } else if (formatType === "json_object") {
                 generationConfig.responseMimeType = "application/json";
                 this.logger.info(
                     "[Adapter] Set responseMimeType to application/json for OpenAI Response API json_object format"

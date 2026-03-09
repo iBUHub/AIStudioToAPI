@@ -993,7 +993,8 @@ class RequestHandler {
         }
 
         const isOpenAIStream = req.body.stream === true;
-        const includeObfuscation = req.body?.stream_options?.include_obfuscation !== false;
+        // Project policy: keep Responses streams deterministic (no obfuscation payloads).
+        const includeObfuscation = false;
         const normalizeInstructions = value => {
             if (typeof value === "string") return value;
             if (!Array.isArray(value)) return null;
@@ -1039,6 +1040,7 @@ class RequestHandler {
             truncation: typeof req.body?.truncation === "string" ? req.body.truncation : undefined,
             user: typeof req.body?.user === "string" ? req.body.user : undefined,
         };
+
         const responseDefaults = Object.fromEntries(
             Object.entries(responseDefaultsRaw).filter(([, v]) => v !== undefined)
         );
@@ -1194,6 +1196,7 @@ class RequestHandler {
                         this.logger.info(`[Request] OpenAI Response API streaming response (Fake Mode) started...`);
                         let fullBody = "";
                         if (res.__responseApiSeq == null) res.__responseApiSeq = 0;
+                        let hadStreamError = false;
                         try {
                             // eslint-disable-next-line no-constant-condition
                             while (true) {
@@ -1206,6 +1209,7 @@ class RequestHandler {
                                     this.logger.error(
                                         `[Request] Error received during OpenAI Response API fake stream: ${message.message}`
                                     );
+                                    hadStreamError = true;
                                     // Check if response is still writable before attempting to write
                                     if (this._isResponseWritable(res)) {
                                         try {
@@ -1230,6 +1234,12 @@ class RequestHandler {
 
                                 if (message.data) fullBody += message.data;
                             }
+
+                            // If backend errored, don't attempt to translate/send a "normal" Responses stream afterwards.
+                            if (hadStreamError) {
+                                return;
+                            }
+
                             const streamState = {};
                             streamState.includeObfuscation = includeObfuscation;
                             streamState.responseDefaults = responseDefaults;
@@ -2522,7 +2532,7 @@ class RequestHandler {
 
     async _streamOpenAIResponseAPIResponse(messageQueue, res, model, streamOptions = {}) {
         const streamState = {
-            includeObfuscation: streamOptions.includeObfuscation !== false,
+            includeObfuscation: false,
             responseDefaults: streamOptions.responseDefaults || {},
         };
 
