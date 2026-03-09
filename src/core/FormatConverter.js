@@ -1163,79 +1163,6 @@ class FormatConverter {
             return streamState.reasoningItem;
         };
 
-        const mimeTypeToOutputFormat = mimeType => {
-            if (typeof mimeType !== "string") return null;
-            const lower = mimeType.toLowerCase();
-            if (lower.includes("png")) return "png";
-            if (lower.includes("jpeg") || lower.includes("jpg")) return "jpeg";
-            if (lower.includes("webp")) return "webp";
-            if (lower.includes("gif")) return "gif";
-            return null;
-        };
-
-        const createImageGenerationItem = image => {
-            const itemId = `ig_${this._generateRequestId()}`;
-            const outputIndex = streamState.nextOutputIndex++;
-            const outputFormat = mimeTypeToOutputFormat(image?.mimeType);
-
-            const baseItem = {
-                id: itemId,
-                status: "in_progress",
-                type: "image_generation_call",
-                // Include common fields when known; keep unknowns null to avoid guessing.
-                ...(outputFormat ? { output_format: outputFormat } : {}),
-                result: null,
-                revised_prompt: null,
-            };
-
-            streamState.outputItemsByIndex[outputIndex] = { ...baseItem };
-
-            pushEvent("response.output_item.added", {
-                item: { ...baseItem },
-                output_index: outputIndex,
-            });
-
-            // Image generation lifecycle events.
-            pushEvent("response.image_generation_call.in_progress", {
-                item_id: itemId,
-                output_index: outputIndex,
-            });
-            pushEvent("response.image_generation_call.generating", {
-                item_id: itemId,
-                output_index: outputIndex,
-            });
-
-            if (typeof image?.data === "string" && image.data) {
-                // We only have the final image; emit it as a "partial_image" with index 0 to match streaming schemas.
-                pushEvent("response.image_generation_call.partial_image", {
-                    item_id: itemId,
-                    output_index: outputIndex,
-                    partial_image_b64: image.data,
-                    partial_image_index: 0,
-                });
-            }
-
-            const completedItem = {
-                ...baseItem,
-                result: typeof image?.data === "string" ? image.data : null,
-                status: "completed",
-            };
-            streamState.outputItemsByIndex[outputIndex] = completedItem;
-
-            pushEvent("response.image_generation_call.completed", {
-                item_id: itemId,
-                output_index: outputIndex,
-            });
-            pushEvent("response.output_item.done", {
-                item: completedItem,
-                output_index: outputIndex,
-            });
-
-            this.logger.info(
-                `[Adapter] Converted Gemini inlineData image to Response API image_generation_call (${image?.mimeType || "unknown"})`
-            );
-        };
-
         const finalizeReasoningItem = () => {
             if (!streamState.reasoningItem) return;
             if (streamState.reasoningItem.status === "completed") return;
@@ -1419,7 +1346,24 @@ class FormatConverter {
                             ...(streamState.includeObfuscation ? { obfuscation: this._generateObfuscation() } : {}),
                         });
                     } else if (part?.inlineData) {
-                        createImageGenerationItem(part.inlineData);
+                        // This proxy intentionally does not expose image outputs in Responses API because many
+                        // clients treat `image_generation_call` as a hosted tool call and may initiate a second
+                        // tool-execution roundtrip that Gemini image models cannot support (function calling).
+                        // Emit a one-time text note so clients don't get an empty response.
+                        if (!streamState.imageOutputSuppressedNoticeSent) {
+                            streamState.imageOutputSuppressedNoticeSent = true;
+                            const messageItem = ensureMessageItem();
+                            const note =
+                                "[Image output omitted: Responses API image outputs are disabled by this proxy.]";
+                            streamState.messageText += note;
+                            pushEvent("response.output_text.delta", {
+                                content_index: messageItem.content_index,
+                                delta: note,
+                                item_id: messageItem.id,
+                                output_index: messageItem.output_index,
+                                ...(streamState.includeObfuscation ? { obfuscation: this._generateObfuscation() } : {}),
+                            });
+                        }
                     } else if (part?.functionCall) {
                         const funcCall = part.functionCall;
                         const itemId = `fc_${this._generateRequestId()}`;
@@ -1711,17 +1655,6 @@ class FormatConverter {
         const output = [];
         let messageContent = "";
         let reasoningContent = "";
-
-        const mimeTypeToOutputFormat = mimeType => {
-            if (typeof mimeType !== "string") return null;
-            const lower = mimeType.toLowerCase();
-            if (lower.includes("png")) return "png";
-            if (lower.includes("jpeg") || lower.includes("jpg")) return "jpeg";
-            if (lower.includes("webp")) return "webp";
-            if (lower.includes("gif")) return "gif";
-            return null;
-        };
-
         if (candidate.content && Array.isArray(candidate.content.parts)) {
             for (const part of candidate.content.parts) {
                 // Responses API supports reasoning output items; map Gemini "thought" parts into a reasoning *summary*.
@@ -1732,18 +1665,11 @@ class FormatConverter {
                     // Regular text content
                     messageContent += part.text;
                 } else if (part.inlineData) {
-                    // Image output: align to Responses API image generation tool output shape.
-                    // We do not embed Markdown data URIs in output_text; instead, return a structured image_generation_call item.
-                    const image = part.inlineData;
-                    const outputFormat = mimeTypeToOutputFormat(image?.mimeType);
-                    output.push({
-                        id: `ig_${this._generateRequestId()}`,
-                        status: "completed",
-                        type: "image_generation_call",
-                        ...(outputFormat ? { output_format: outputFormat } : {}),
-                        result: typeof image?.data === "string" ? image.data : null,
-                        revised_prompt: null,
-                    });
+                    // Responses API image outputs are intentionally suppressed by this proxy; preserve a text note.
+                    if (!messageContent) {
+                        messageContent =
+                            "[Image output omitted: Responses API image outputs are disabled by this proxy.]";
+                    }
                 } else if (part.functionCall) {
                     // Function call
                     const funcCall = part.functionCall;
