@@ -2654,12 +2654,20 @@ class FormatConverter {
         const googleContents = [];
         let systemInstructionText = "";
 
-        const safeParseJSON = (str, fallbackKey) => {
+        const safeParseJSON = (value, fallbackKey) => {
+            if (value && typeof value === "object") {
+                return value;
+            }
+
+            if (typeof value !== "string") {
+                return { [fallbackKey]: value };
+            }
+
             try {
-                return JSON.parse(str || "{}");
+                return JSON.parse(value || "{}");
             } catch (e) {
                 this.logger.warn(`[Adapter] Failed to parse JSON for ${fallbackKey}: ${e.message}`);
-                return { [fallbackKey]: str };
+                return { [fallbackKey]: value };
             }
         };
 
