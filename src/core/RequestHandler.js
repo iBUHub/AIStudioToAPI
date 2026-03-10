@@ -1017,8 +1017,6 @@ class RequestHandler {
         }
 
         const isOpenAIStream = req.body.stream === true;
-        // Project policy: keep Responses streams deterministic (no obfuscation payloads).
-        const includeObfuscation = false;
         const normalizeInstructions = value => {
             if (typeof value === "string") return value;
             if (!Array.isArray(value)) return null;
@@ -1149,7 +1147,6 @@ class RequestHandler {
                 });
                 this.logger.info(`[Request] OpenAI Response API streaming response (Real Mode) started...`);
                 await this._streamOpenAIResponseAPIResponse(messageQueue, res, model, {
-                    includeObfuscation,
                     responseDefaults,
                 });
             } else {
@@ -1270,7 +1267,6 @@ class RequestHandler {
                             }
 
                             const streamState = {};
-                            streamState.includeObfuscation = includeObfuscation;
                             streamState.responseDefaults = responseDefaults;
                             const translatedChunk = this.formatConverter.translateGoogleToResponseAPIStream(
                                 fullBody,
@@ -2729,7 +2725,6 @@ class RequestHandler {
 
     async _streamOpenAIResponseAPIResponse(messageQueue, res, model, streamOptions = {}) {
         const streamState = {
-            includeObfuscation: false,
             responseDefaults: streamOptions.responseDefaults || {},
         };
         // Keep Response API sequence numbers consistent across helpers that might write to the same SSE response.

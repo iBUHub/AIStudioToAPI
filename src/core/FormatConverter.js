@@ -1061,10 +1061,6 @@ class FormatConverter {
             streamState.reasoningSummaryText = "";
             streamState.reasoningSummaryPartAdded = false;
             streamState.completed = false;
-            // Responses API: only include obfuscation when explicitly enabled by client.
-            if (typeof streamState.includeObfuscation !== "boolean") {
-                streamState.includeObfuscation = false;
-            }
         };
 
         const buildResponseObject = (overrides = {}) => ({
@@ -1369,7 +1365,6 @@ class FormatConverter {
                             delta: part.text,
                             item_id: messageItem.id,
                             output_index: messageItem.output_index,
-                            ...(streamState.includeObfuscation ? { obfuscation: this._generateObfuscation() } : {}),
                         });
                     } else if (part?.inlineData) {
                         // This proxy intentionally does not expose image outputs in Responses API because many
@@ -1387,7 +1382,6 @@ class FormatConverter {
                                 delta: note,
                                 item_id: messageItem.id,
                                 output_index: messageItem.output_index,
-                                ...(streamState.includeObfuscation ? { obfuscation: this._generateObfuscation() } : {}),
                             });
                         }
                     } else if (part?.functionCall) {
@@ -1814,16 +1808,6 @@ class FormatConverter {
 
     _generateRequestId() {
         return `${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
-    }
-
-    _generateObfuscation() {
-        const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-        const length = Math.floor(Math.random() * 6) + 10; // 10-15 characters
-        let result = "";
-        for (let i = 0; i < length; i++) {
-            result += chars.charAt(Math.floor(Math.random() * chars.length));
-        }
-        return result;
     }
 
     _parseUsage(googleResponse) {
