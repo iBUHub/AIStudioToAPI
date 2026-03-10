@@ -65,6 +65,7 @@
 部署完成后，使用 **Public Address** 配合以下 Base URL 访问 API：
 
 - **OpenAI 兼容 Base URL**: `https://<your-public-address>/v1`
+- **OpenAI Responses 兼容 Base URL**: `https://<your-public-address>/v1`
 - **Gemini 兼容 Base URL**: `https://<your-public-address>/v1beta`
 - **Anthropic 兼容 Base URL**: `https://<your-public-address>/v1`
 

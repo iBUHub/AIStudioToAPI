@@ -70,6 +70,7 @@ After deployment, you need to add Google accounts. There are two methods:
 After deployment, you can access the API using the public domain combined with the following Base URLs:
 
 - **OpenAI Compatible Base URL**: `https://<your-public-domain>/v1`
+- **OpenAI Responses Compatible Base URL**: `https://<your-public-domain>/v1`
 - **Gemini Compatible Base URL**: `https://<your-public-domain>/v1beta`
 - **Anthropic Compatible Base URL**: `https://<your-public-domain>/v1`
 

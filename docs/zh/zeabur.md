@@ -70,6 +70,7 @@
 部署完成后，使用公网域名配合以下 Base URL 访问 API：
 
 - **OpenAI 兼容 Base URL**: `https://<your-public-domain>/v1`
+- **OpenAI Responses 兼容 Base URL**: `https://<your-public-domain>/v1`
 - **Gemini 兼容 Base URL**: `https://<your-public-domain>/v1beta`
 - **Anthropic 兼容 Base URL**: `https://<your-public-domain>/v1`
 
