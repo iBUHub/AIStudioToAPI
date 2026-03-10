@@ -73,6 +73,18 @@ class FormatConverter {
         this.serverSystem = serverSystem;
     }
 
+    normalizeImageUrl(imageSource) {
+        if (typeof imageSource === "string") {
+            return imageSource;
+        }
+
+        if (imageSource && typeof imageSource.url === "string") {
+            return imageSource.url;
+        }
+
+        return null;
+    }
+
     /**
      * Ensure thoughtSignature is present in Gemini native format requests
      * This handles direct Gemini API calls where functionCall may lack thoughtSignature
@@ -509,7 +521,14 @@ class FormatConverter {
                         const textPart = { text: part.text };
                         googleParts.push(textPart);
                     } else if (part.type === "image_url" && part.image_url) {
-                        const dataUrl = part.image_url.url;
+                        const dataUrl = this.normalizeImageUrl(part.image_url);
+                        if (!dataUrl) {
+                            this.logger.warn("[Adapter] Skipping image_url part because no string URL was provided.");
+                            googleParts.push({
+                                text: "[System Note: Skipped an image input because image_url was not a string URL]",
+                            });
+                            continue;
+                        }
                         const match = dataUrl.match(/^data:(image\/.*?);base64,(.*)$/);
                         if (match) {
                             googleParts.push({
@@ -545,6 +564,13 @@ class FormatConverter {
                                 // Optionally, push an error message as text
                                 googleParts.push({ text: `[System Note: Failed to load image from ${dataUrl}]` });
                             }
+                        } else {
+                            this.logger.warn(
+                                `[Adapter] Skipping image_url part because URL format is unsupported: ${dataUrl}`
+                            );
+                            googleParts.push({
+                                text: "[System Note: Skipped an image input because image_url format was unsupported]",
+                            });
                         }
                     }
                 }
@@ -2777,7 +2803,16 @@ class FormatConverter {
                                 if (contentPart.type === "text" || contentPart.type === "input_text") {
                                     googleParts.push({ text: contentPart.text });
                                 } else if (contentPart.type === "image_url" || contentPart.type === "input_image") {
-                                    const imageUrl = contentPart.image_url?.url || contentPart.image_url;
+                                    const imageUrl = this.normalizeImageUrl(contentPart.image_url);
+                                    if (!imageUrl) {
+                                        this.logger.warn(
+                                            "[Adapter] Skipping Response API image part because no string URL was provided."
+                                        );
+                                        googleParts.push({
+                                            text: "[System Note: Skipped an image input because image_url was not a string URL]",
+                                        });
+                                        continue;
+                                    }
                                     if (imageUrl.startsWith("data:")) {
                                         const match = imageUrl.match(/^data:([^;]+);base64,(.+)$/);
                                         if (match) {
@@ -2815,6 +2850,13 @@ class FormatConverter {
                                                 text: `[System Note: Failed to load image from ${imageUrl}]`,
                                             });
                                         }
+                                    } else {
+                                        this.logger.warn(
+                                            `[Adapter] Skipping Response API image part because URL format is unsupported: ${imageUrl}`
+                                        );
+                                        googleParts.push({
+                                            text: "[System Note: Skipped an image input because image_url format was unsupported]",
+                                        });
                                     }
                                 } else if (contentPart.type === "input_file") {
                                     this.logger.debug(
