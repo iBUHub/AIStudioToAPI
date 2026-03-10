@@ -485,6 +485,15 @@ class ProxyServerSystem extends EventEmitter {
             this.requestHandler.processOpenAIResponseRequest(req, res);
         });
 
+        // OpenAI Response API count input tokens endpoint
+        app.post("/v1/responses/input_tokens", (req, res) => {
+            this.requestHandler.processOpenAIResponseInputTokens(req, res);
+        });
+        // Compatibility alias (some clients omit the /v1 prefix)
+        app.post("/responses/input_tokens", (req, res) => {
+            this.requestHandler.processOpenAIResponseInputTokens(req, res);
+        });
+
         // Claude API compatible endpoint
         app.post("/v1/messages", (req, res) => {
             this.requestHandler.processClaudeRequest(req, res);

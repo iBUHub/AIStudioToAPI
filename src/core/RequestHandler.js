@@ -1736,6 +1736,152 @@ class RequestHandler {
         }
     }
 
+    // OpenAI Response API count input tokens endpoint
+    // Mirrors OpenAI's /v1/responses/input_tokens by returning only the request-side token count.
+    async processOpenAIResponseInputTokens(req, res) {
+        const requestId = this._generateRequestId();
+
+        // Check current account's browser connection
+        if (!this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex)) {
+            this.logger.warn(`[Request] No WebSocket connection for current account #${this.currentAuthIndex}`);
+            const recovered = await this._handleBrowserRecovery(res);
+            if (!recovered) return;
+        }
+
+        // Wait for system to become ready if it's busy
+        if (this.authSwitcher.isSystemBusy) {
+            const ready = await this._waitForSystemReady();
+            if (!ready) {
+                return this._sendErrorResponse(
+                    res,
+                    503,
+                    "Server undergoing internal maintenance (account switching/recovery), please try again later."
+                );
+            }
+            if (!this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex)) {
+                const connectionReady = await this._waitForConnection(10000);
+                if (!connectionReady) {
+                    return this._sendErrorResponse(
+                        res,
+                        503,
+                        "Service temporarily unavailable: Connection not established after switching."
+                    );
+                }
+            }
+        }
+
+        if (this.browserManager) {
+            this.browserManager.notifyUserActivity();
+        }
+
+        // Translate OpenAI Response format to Google format (so we can use Gemini countTokens)
+        let googleBody, model;
+        try {
+            const result = await this.formatConverter.translateOpenAIResponseToGoogle(req.body);
+            googleBody = result.googleRequest;
+            model = result.cleanModelName;
+        } catch (error) {
+            this.logger.error(`[Adapter] OpenAI Response input_tokens translation failed: ${error.message}`);
+            return this._sendErrorResponse(res, 400, "Invalid OpenAI Response request format.");
+        }
+
+        // Gemini countTokens accepts either:
+        // - contents[]
+        // - generateContentRequest (full request; required here because tools/systemInstruction/etc may be present)
+        const countTokensBody = {
+            generateContentRequest: {
+                model: `models/${model}`,
+                ...googleBody,
+            },
+        };
+
+        const proxyRequest = {
+            body: JSON.stringify(countTokensBody),
+            headers: { "Content-Type": "application/json" },
+            is_generative: false,
+            method: "POST",
+            path: `/v1beta/models/${model}:countTokens`,
+            query_params: {},
+            request_id: requestId,
+        };
+
+        try {
+            const messageQueue = this.connectionRegistry.createMessageQueue(requestId, this.currentAuthIndex);
+            this._setupClientDisconnectHandler(res, requestId);
+
+            this._forwardRequest(proxyRequest);
+            const response = await messageQueue.dequeue();
+
+            if (response.event_type === "error") {
+                this.logger.error(
+                    `[Request] Received error from browser for input_tokens, will trigger switching logic. Status code: ${response.status}, message: ${response.message}`
+                );
+
+                this._sendErrorResponse(res, response.status || 500, response.message);
+
+                // Avoid switching account if the error is just a connection reset
+                if (!this._isConnectionResetError(response)) {
+                    await this.authSwitcher.handleRequestFailureAndSwitch(response, null);
+                } else {
+                    this.logger.info(
+                        "[Request] Failure due to connection reset (input_tokens), skipping account switch."
+                    );
+                }
+                return;
+            }
+
+            // For non-streaming requests, consume all chunks until STREAM_END
+            let fullBody = "";
+            if (response.type !== "STREAM_END") {
+                if (response.data) fullBody += response.data;
+                // eslint-disable-next-line no-constant-condition
+                while (true) {
+                    const message = await messageQueue.dequeue();
+                    if (message.type === "STREAM_END") {
+                        break;
+                    }
+                    if (message.event_type === "error") {
+                        this.logger.error(`[Request] Error received during input_tokens count: ${message.message}`);
+                        this._sendErrorResponse(res, 500, message.message);
+                        return;
+                    }
+                    if (message.data) fullBody += message.data;
+                }
+            }
+
+            // Parse Gemini response
+            let geminiResponse;
+            try {
+                geminiResponse = JSON.parse(fullBody || response.body);
+            } catch (parseError) {
+                this.logger.error(`[Request] Failed to parse countTokens response: ${parseError.message}`);
+                this._sendErrorResponse(res, 500, "Failed to parse backend response");
+                return;
+            }
+
+            const totalTokens = geminiResponse.totalTokens || 0;
+
+            // Reset failure count on success
+            if (this.authSwitcher.failureCount > 0) {
+                this.logger.debug(
+                    `✅ [Auth] input_tokens request successful - failure count reset from ${this.authSwitcher.failureCount} to 0`
+                );
+                this.authSwitcher.failureCount = 0;
+            }
+
+            res.status(200).json({
+                input_tokens: totalTokens,
+            });
+
+            this.logger.info(`[Request] OpenAI Response input_tokens completed: ${totalTokens} input tokens`);
+        } catch (error) {
+            this._handleRequestError(error, res);
+        } finally {
+            this.connectionRegistry.removeMessageQueue(requestId, "request_complete");
+            if (!res.writableEnded) res.end();
+        }
+    }
+
     // === Response Handlers ===
 
     async _streamClaudeResponse(messageQueue, res, model) {
