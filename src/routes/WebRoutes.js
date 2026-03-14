@@ -46,7 +46,7 @@ class WebRoutes {
             cookie: {
                 httpOnly: true,
 
-                maxAge: 86400000,
+                maxAge: 604800000,
 
                 sameSite: "lax",
                 // This allows HTTP access in production if HTTPS is not configured
