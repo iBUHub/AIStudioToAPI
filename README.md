@@ -245,7 +245,7 @@ sudo docker compose down
 | `MAX_RETRIES`                   | 请求失败后的最大重试次数（仅对假流式和非流式生效）。                                                                                                                | `3`       |
 | `RETRY_DELAY`                   | 两次重试之间的间隔（毫秒）。                                                                                                                                        | `2000`    |
 | `SWITCH_ON_USES`                | 自动切换帐户前允许的请求次数（设为 `0` 禁用）。                                                                                                                     | `40`      |
-| `FAILURE_THRESHOLD`             | 切换帐户前允许的连续失败次数（设为 `0` 禁用）。                                                                                                                     | `3`       |
+| `FAILURE_THRESHOLD`             | 切换帐户前允许的连续失败次数（设为 `0` 禁用）。命中 `IMMEDIATE_SWITCH_STATUS_CODES` 的失败不会计入该统计。                                                          | `3`       |
 | `IMMEDIATE_SWITCH_STATUS_CODES` | 触发立即切换帐户的 HTTP 状态码（逗号分隔，设为空值以禁用）。                                                                                                        | `429,503` |
 | `MAX_CONTEXTS`                  | 最大同时登录的账号数量。同时登录的账号切换更快，无需重新登录。数值越大内存消耗越高（约：1 个账号 ~700MB，2 个账号 ~950MB，3 个账号 ~1100MB）。设为 `0` 表示无限制。 | `1`       |
 | `HTTP_PROXY`                    | 用于访问 Google 服务的 HTTP 代理地址。                                                                                                                              | 无        |
