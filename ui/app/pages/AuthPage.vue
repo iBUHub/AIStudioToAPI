@@ -267,9 +267,9 @@ const textInputRef = ref(null);
 // Initialize theme
 useTheme();
 
-const t = key => {
+const t = (key, options) => {
     langVersion.value; // Access to track language changes
-    return I18n.t(key, key);
+    return I18n.t(key, options);
 };
 
 const getApiErrorMessage = data => {
