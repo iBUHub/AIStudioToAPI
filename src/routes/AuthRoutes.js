@@ -40,6 +40,17 @@ class AuthRoutes {
         }
     }
 
+    _rejectIfSystemBusy(res) {
+        if (!this.serverSystem.requestHandler?.isSystemBusy) {
+            return false;
+        }
+
+        return res.status(409).json({
+            error: "System is busy switching or recovering accounts. Please try again later.",
+            message: "systemBusySwitchingOrRecoveringAccounts",
+        });
+    }
+
     /**
      * Get real client IP address, handling various proxy scenarios
      * Priority: CDN headers > X-Real-IP > X-Forwarded-For (first IP) > req.ip
@@ -225,8 +236,14 @@ class AuthRoutes {
         });
 
         // VNC-based auth creation routes
-        app.post("/api/vnc/sessions", isAuthenticated, this.createAuth.startVncSession.bind(this.createAuth));
-        app.post("/api/vnc/auth", isAuthenticated, this.createAuth.saveAuthFile.bind(this.createAuth));
+        app.post("/api/vnc/sessions", isAuthenticated, (req, res, next) => {
+            if (this._rejectIfSystemBusy(res)) return;
+            return this.createAuth.startVncSession(req, res, next);
+        });
+        app.post("/api/vnc/auth", isAuthenticated, (req, res, next) => {
+            if (this._rejectIfSystemBusy(res)) return;
+            return this.createAuth.saveAuthFile(req, res, next);
+        });
         app.delete("/api/vnc/sessions", isAuthenticated, async (req, res) => {
             this.logger.info("[VNC] Received cleanup request from client (beacon).");
             await this.createAuth._cleanupVncSession("client_beacon");

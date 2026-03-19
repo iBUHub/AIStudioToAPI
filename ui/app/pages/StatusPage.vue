@@ -1537,6 +1537,18 @@ const t = (key, options) => {
     return I18n.t(key, options);
 };
 
+const getApiErrorMessage = data => {
+    if (data?.message) {
+        return t(data.message, data);
+    }
+
+    if (data?.error) {
+        return typeof data.error === "string" ? data.error : data.error.message;
+    }
+
+    return t("unknownError");
+};
+
 const switchTab = tabName => {
     if (activeTab.value === "logs") {
         const logContainer = document.getElementById("log-container");
@@ -2380,10 +2392,10 @@ const handleFileUpload = async event => {
                     return { filename: data.filename || fileData.name, success: true };
                 }
 
-                let errorMsg = t("unknownError");
+                let errorMsg;
                 try {
                     const data = await res.json();
-                    if (data.error) errorMsg = data.error;
+                    errorMsg = getApiErrorMessage(data);
                 } catch (e) {
                     // Response is not JSON or cannot be parsed, fallback to status text or unknown error
                     if (res.statusText) {
@@ -2516,10 +2528,10 @@ const handleFileUpload = async event => {
                         }
                     } else {
                         // Batch upload failed completely
-                        let errorMsg = t("unknownError");
+                        let errorMsg;
                         try {
                             const data = await res.json();
-                            if (data.error) errorMsg = data.error;
+                            errorMsg = getApiErrorMessage(data);
                         } catch (e) {
                             if (res.statusText) {
                                 errorMsg = `HTTP Error ${res.status}: ${res.statusText}`;

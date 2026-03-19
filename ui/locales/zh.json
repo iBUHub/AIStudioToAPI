@@ -175,6 +175,7 @@
     "streamingMode": "流式模式",
     "switchingAccountNotice": "正在切换账号，请勿刷新页面。",
     "switchLanguage": "切换语言",
+    "systemBusySwitchingOrRecoveringAccounts": "系统正在切换或恢复账号，请稍后重试。",
     "tagCurrent": "当前",
     "tagExpired": "过期",
     "theme": "主题",
