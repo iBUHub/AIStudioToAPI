@@ -279,7 +279,7 @@ class AuthSwitcher {
                     }
                     return;
                 }
-                const successMessage = `🔄 Target account invalid, automatically fell back to account #${this.currentAuthIndex}.`;
+                const successMessage = `🔄 Account switch completed, now using account #${this.currentAuthIndex}.`;
                 this.logger.info(`[Auth] ${successMessage}`);
                 if (sendErrorCallback) sendErrorCallback(successMessage);
             } catch (error) {

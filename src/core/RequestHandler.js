@@ -449,6 +449,12 @@ class RequestHandler {
         return true;
     }
 
+    _logFinalRequestFailure(errorDetails, contextLabel = "Request") {
+        this.logger.error(
+            `[Request] ${contextLabel} failed after retries. Status code: ${errorDetails?.status || 500}, message: ${errorDetails?.message || "Unknown error"}`
+        );
+    }
+
     /**
      * Handle browser recovery when connection is lost
      *
@@ -835,9 +841,7 @@ class RequestHandler {
                 }
 
                 if (initialMessage.event_type === "error") {
-                    this.logger.error(
-                        `[Request] Received error from browser, will trigger switching logic. Status code: ${initialMessage.status}, message: ${initialMessage.message}`
-                    );
+                    this._logFinalRequestFailure(initialMessage, "OpenAI real stream");
 
                     // Send standard HTTP error response
                     this._sendErrorResponse(res, initialMessage.status || 500, initialMessage.message);
@@ -899,6 +903,7 @@ class RequestHandler {
                     const result = await this._executeRequestWithRetries(proxyRequest, messageQueue);
 
                     if (!result.success) {
+                        this._logFinalRequestFailure(result.error, "OpenAI fake/non-stream");
                         // Send standard HTTP error response for both streaming and non-streaming
                         if (connectionMaintainer) clearTimeout(connectionMaintainer);
                         if (isOpenAIStream && res.headersSent) {
@@ -1193,9 +1198,7 @@ class RequestHandler {
                 }
 
                 if (initialMessage.event_type === "error") {
-                    this.logger.error(
-                        `[Request] Received error from browser, will trigger switching logic. Status code: ${initialMessage.status}, message: ${initialMessage.message}`
-                    );
+                    this._logFinalRequestFailure(initialMessage, "OpenAI Response API real stream");
 
                     // Send standard HTTP error response
                     this._sendErrorResponse(res, initialMessage.status || 500, initialMessage.message);
@@ -1259,6 +1262,7 @@ class RequestHandler {
                     const result = await this._executeRequestWithRetries(proxyRequest, messageQueue);
 
                     if (!result.success) {
+                        this._logFinalRequestFailure(result.error, "OpenAI Response API fake/non-stream");
                         // Send standard HTTP error response for both streaming and non-streaming
                         if (connectionMaintainer) clearTimeout(connectionMaintainer);
                         if (isOpenAIStream && res.headersSent) {
@@ -1519,9 +1523,7 @@ class RequestHandler {
                 }
 
                 if (initialMessage.event_type === "error") {
-                    this.logger.error(
-                        `[Request] Received error from browser, will trigger switching logic. Status code: ${initialMessage.status}, message: ${initialMessage.message}`
-                    );
+                    this._logFinalRequestFailure(initialMessage, "Claude real stream");
                     this._sendClaudeErrorResponse(
                         res,
                         initialMessage.status || 500,
@@ -1577,6 +1579,7 @@ class RequestHandler {
                     const result = await this._executeRequestWithRetries(proxyRequest, messageQueue);
 
                     if (!result.success) {
+                        this._logFinalRequestFailure(result.error, "Claude fake/non-stream");
                         if (connectionMaintainer) clearTimeout(connectionMaintainer);
                         if (isClaudeStream && res.headersSent) {
                             // If keep-alives already started the SSE response, send an SSE error event instead of JSON.
@@ -2202,6 +2205,7 @@ class RequestHandler {
                         `[Request] Request #${proxyRequest.request_id} was properly cancelled by user, not counted in failure statistics.`
                     );
                 } else {
+                    this._logFinalRequestFailure(result.error, "Gemini fake stream");
                     // If keep-alives already started the SSE response, send an SSE error event instead of JSON.
                     if (res.headersSent) {
                         this._handleRequestError(result.error, res, "gemini");
@@ -2502,6 +2506,7 @@ class RequestHandler {
                     `[Request] Request #${proxyRequest.request_id} was properly cancelled by user, not counted in failure statistics.`
                 );
             } else {
+                this._logFinalRequestFailure(headerMessage, "Gemini real stream");
                 // Avoid switching account if the error is just a connection reset
                 if (!skipFinalFailureSwitch && !this._isConnectionResetError(headerMessage)) {
                     await this.authSwitcher.handleRequestFailureAndSwitch(headerMessage, null);
@@ -2622,7 +2627,7 @@ class RequestHandler {
                 if (isUserAbortedError(result.error)) {
                     this.logger.info(`[Request] Request #${proxyRequest.request_id} was properly cancelled by user.`);
                 } else {
-                    this.logger.error(`[Request] Browser returned error after retries: ${result.error.message}`);
+                    this._logFinalRequestFailure(result.error, "Gemini non-stream");
                     // Avoid switching account if the error is just a connection reset
                     if (!result.error.skipAccountSwitch && !this._isConnectionResetError(result.error)) {
                         await this.authSwitcher.handleRequestFailureAndSwitch(result.error, null);
@@ -2810,9 +2815,7 @@ class RequestHandler {
                     this.config?.immediateSwitchStatusCodes?.includes(errorStatus) &&
                     !isUserAbortedError(errorPayload)
                 ) {
-                    this.logger.warn(
-                        `[Request] Received ${errorStatus}, switching account and retrying before responding to client...`
-                    );
+                    this.logger.warn(`[Request] Received ${errorStatus}, switching account and retrying...`);
                     try {
                         const switched = await this._performImmediateSwitchRetry(
                             errorPayload,
