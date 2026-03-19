@@ -1421,8 +1421,6 @@ class RequestHandler {
         // Wait for system to become ready if it's busy
         {
             const ready = await this._waitForSystemAndConnectionIfBusy(res, {
-                busyMessage: "Server undergoing internal maintenance, please try again later.",
-                connectionMessage: "Service temporarily unavailable: Connection not established.",
                 sendError: (status, message) => this._sendClaudeErrorResponse(res, status, "overloaded_error", message),
             });
             if (!ready) return;
@@ -1731,8 +1729,6 @@ class RequestHandler {
         // Wait for system to become ready if it's busy
         {
             const ready = await this._waitForSystemAndConnectionIfBusy(res, {
-                busyMessage: "Server undergoing internal maintenance, please try again later.",
-                connectionMessage: "Service temporarily unavailable: Connection not established.",
                 sendError: (status, message) => this._sendClaudeErrorResponse(res, status, "overloaded_error", message),
             });
             if (!ready) return;
