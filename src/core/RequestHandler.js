@@ -409,9 +409,44 @@ class RequestHandler {
         return true;
     }
 
-    _getImmediateSwitchRetryLimit() {
-        const availableCount = this.authSource.getRotationIndices().length;
-        return Math.max(1, availableCount);
+    _createImmediateSwitchTracker() {
+        const attemptedAuthIndices = new Set();
+        if (Number.isInteger(this.currentAuthIndex) && this.currentAuthIndex >= 0) {
+            attemptedAuthIndices.add(this.currentAuthIndex);
+        }
+        return { attemptedAuthIndices };
+    }
+
+    async _performImmediateSwitchRetry(errorDetails, requestId, tracker) {
+        await this.authSwitcher.handleRequestFailureAndSwitch(
+            { message: errorDetails.message, status: Number(errorDetails.status) },
+            null
+        );
+
+        const ready = await this._waitForSystemAndConnectionIfBusy(null, {
+            sendError: () => {},
+        });
+        if (!ready) {
+            throw new Error("System not ready after immediate-switch retry.");
+        }
+
+        const newAuthIndex = this.currentAuthIndex;
+        if (!Number.isInteger(newAuthIndex) || newAuthIndex < 0) {
+            this.logger.warn(
+                `[Request] Immediate switch for request #${requestId} did not produce a valid target account.`
+            );
+            return false;
+        }
+
+        if (tracker.attemptedAuthIndices.has(newAuthIndex)) {
+            this.logger.warn(
+                `[Request] Immediate switch for request #${requestId} returned to already-attempted account #${newAuthIndex}, stopping account-switch retries.`
+            );
+            return false;
+        }
+
+        tracker.attemptedAuthIndices.add(newAuthIndex);
+        return true;
     }
 
     /**
@@ -759,8 +794,8 @@ class RequestHandler {
             if (useRealStream) {
                 let currentQueue = messageQueue;
                 let initialMessage;
-                let switchAttempts = 0;
-                const maxSwitchAttempts = this._getImmediateSwitchRetryLimit();
+                let skipFinalFailureSwitch = false;
+                const immediateSwitchTracker = this._createImmediateSwitchTracker();
 
                 // eslint-disable-next-line no-constant-condition
                 while (true) {
@@ -772,22 +807,19 @@ class RequestHandler {
                         initialMessage.event_type === "error" &&
                         !isUserAbortedError(initialMessage) &&
                         Number.isFinite(initialStatus) &&
-                        this.config?.immediateSwitchStatusCodes?.includes(initialStatus) &&
-                        switchAttempts < maxSwitchAttempts
+                        this.config?.immediateSwitchStatusCodes?.includes(initialStatus)
                     ) {
-                        switchAttempts++;
                         this.logger.warn(
-                            `[Request] OpenAI real stream received ${initialStatus}, switching account and retrying (${switchAttempts}/${maxSwitchAttempts})...`
+                            `[Request] OpenAI real stream received ${initialStatus}, switching account and retrying...`
                         );
-                        await this.authSwitcher.handleRequestFailureAndSwitch(
-                            { message: initialMessage.message, status: initialStatus },
-                            null
+                        const switched = await this._performImmediateSwitchRetry(
+                            initialMessage,
+                            requestId,
+                            immediateSwitchTracker
                         );
-                        const ready = await this._waitForSystemAndConnectionIfBusy(null, {
-                            sendError: () => {},
-                        });
-                        if (!ready) {
-                            throw new Error("System not ready after immediate-switch retry.");
+                        if (!switched) {
+                            skipFinalFailureSwitch = true;
+                            break;
                         }
 
                         try {
@@ -811,8 +843,12 @@ class RequestHandler {
                     this._sendErrorResponse(res, initialMessage.status || 500, initialMessage.message);
 
                     // Avoid switching account if the error is just a connection reset
-                    if (!this._isConnectionResetError(initialMessage)) {
+                    if (!skipFinalFailureSwitch && !this._isConnectionResetError(initialMessage)) {
                         await this.authSwitcher.handleRequestFailureAndSwitch(initialMessage, null);
+                    } else if (skipFinalFailureSwitch) {
+                        this.logger.info(
+                            "[Request] Immediate-switch retries exhausted, skipping additional account switch."
+                        );
                     } else {
                         this.logger.info(
                             "[Request] Failure due to connection reset (Real Stream), skipping account switch."
@@ -873,8 +909,12 @@ class RequestHandler {
                         }
 
                         // Avoid switching account if the error is just a connection reset
-                        if (!this._isConnectionResetError(result.error)) {
+                        if (!result.error.skipAccountSwitch && !this._isConnectionResetError(result.error)) {
                             await this.authSwitcher.handleRequestFailureAndSwitch(result.error, null);
+                        } else if (result.error.skipAccountSwitch) {
+                            this.logger.info(
+                                "[Request] Immediate-switch retries exhausted, skipping additional account switch."
+                            );
                         } else {
                             this.logger.info(
                                 "[Request] Failure due to connection reset (OpenAI), skipping account switch."
@@ -1112,8 +1152,8 @@ class RequestHandler {
             if (useRealStream) {
                 let currentQueue = messageQueue;
                 let initialMessage;
-                let switchAttempts = 0;
-                const maxSwitchAttempts = this._getImmediateSwitchRetryLimit();
+                let skipFinalFailureSwitch = false;
+                const immediateSwitchTracker = this._createImmediateSwitchTracker();
 
                 // eslint-disable-next-line no-constant-condition
                 while (true) {
@@ -1125,22 +1165,19 @@ class RequestHandler {
                         initialMessage.event_type === "error" &&
                         !isUserAbortedError(initialMessage) &&
                         Number.isFinite(initialStatus) &&
-                        this.config?.immediateSwitchStatusCodes?.includes(initialStatus) &&
-                        switchAttempts < maxSwitchAttempts
+                        this.config?.immediateSwitchStatusCodes?.includes(initialStatus)
                     ) {
-                        switchAttempts++;
                         this.logger.warn(
-                            `[Request] OpenAI Response API real stream received ${initialStatus}, switching account and retrying (${switchAttempts}/${maxSwitchAttempts})...`
+                            `[Request] OpenAI Response API real stream received ${initialStatus}, switching account and retrying...`
                         );
-                        await this.authSwitcher.handleRequestFailureAndSwitch(
-                            { message: initialMessage.message, status: initialStatus },
-                            null
+                        const switched = await this._performImmediateSwitchRetry(
+                            initialMessage,
+                            requestId,
+                            immediateSwitchTracker
                         );
-                        const ready = await this._waitForSystemAndConnectionIfBusy(null, {
-                            sendError: () => {},
-                        });
-                        if (!ready) {
-                            throw new Error("System not ready after immediate-switch retry.");
+                        if (!switched) {
+                            skipFinalFailureSwitch = true;
+                            break;
                         }
 
                         try {
@@ -1164,8 +1201,12 @@ class RequestHandler {
                     this._sendErrorResponse(res, initialMessage.status || 500, initialMessage.message);
 
                     // Avoid switching account if the error is just a connection reset
-                    if (!this._isConnectionResetError(initialMessage)) {
+                    if (!skipFinalFailureSwitch && !this._isConnectionResetError(initialMessage)) {
                         await this.authSwitcher.handleRequestFailureAndSwitch(initialMessage, null);
+                    } else if (skipFinalFailureSwitch) {
+                        this.logger.info(
+                            "[Request] Immediate-switch retries exhausted, skipping additional account switch."
+                        );
                     } else {
                         this.logger.info(
                             "[Request] Failure due to connection reset (Real Stream), skipping account switch."
@@ -1228,8 +1269,12 @@ class RequestHandler {
                         }
 
                         // Avoid switching account if the error is just a connection reset
-                        if (!this._isConnectionResetError(result.error)) {
+                        if (!result.error.skipAccountSwitch && !this._isConnectionResetError(result.error)) {
                             await this.authSwitcher.handleRequestFailureAndSwitch(result.error, null);
+                        } else if (result.error.skipAccountSwitch) {
+                            this.logger.info(
+                                "[Request] Immediate-switch retries exhausted, skipping additional account switch."
+                            );
                         } else {
                             this.logger.info(
                                 "[Request] Failure due to connection reset (Response API), skipping account switch."
@@ -1433,8 +1478,47 @@ class RequestHandler {
             this._setupClientDisconnectHandler(res, requestId);
 
             if (useRealStream) {
-                this._forwardRequest(proxyRequest);
-                const initialMessage = await messageQueue.dequeue();
+                let currentQueue = messageQueue;
+                let initialMessage;
+                let skipFinalFailureSwitch = false;
+                const immediateSwitchTracker = this._createImmediateSwitchTracker();
+
+                // eslint-disable-next-line no-constant-condition
+                while (true) {
+                    this._forwardRequest(proxyRequest);
+                    initialMessage = await currentQueue.dequeue();
+
+                    const initialStatus = Number(initialMessage?.status);
+                    if (
+                        initialMessage.event_type === "error" &&
+                        !isUserAbortedError(initialMessage) &&
+                        Number.isFinite(initialStatus) &&
+                        this.config?.immediateSwitchStatusCodes?.includes(initialStatus)
+                    ) {
+                        this.logger.warn(
+                            `[Request] Claude real stream received ${initialStatus}, switching account and retrying...`
+                        );
+                        const switched = await this._performImmediateSwitchRetry(
+                            initialMessage,
+                            requestId,
+                            immediateSwitchTracker
+                        );
+                        if (!switched) {
+                            skipFinalFailureSwitch = true;
+                            break;
+                        }
+
+                        try {
+                            currentQueue.close("retry_after_429");
+                        } catch {
+                            /* empty */
+                        }
+                        currentQueue = this.connectionRegistry.createMessageQueue(requestId, this.currentAuthIndex);
+                        continue;
+                    }
+
+                    break;
+                }
 
                 if (initialMessage.event_type === "error") {
                     this.logger.error(
@@ -1446,8 +1530,12 @@ class RequestHandler {
                         "api_error",
                         initialMessage.message
                     );
-                    if (!this._isConnectionResetError(initialMessage)) {
+                    if (!skipFinalFailureSwitch && !this._isConnectionResetError(initialMessage)) {
                         await this.authSwitcher.handleRequestFailureAndSwitch(initialMessage, null);
+                    } else if (skipFinalFailureSwitch) {
+                        this.logger.info(
+                            "[Request] Immediate-switch retries exhausted, skipping additional account switch."
+                        );
                     }
                     return;
                 }
@@ -1463,7 +1551,7 @@ class RequestHandler {
                     "Content-Type": "text/event-stream",
                 });
                 this.logger.info(`[Request] Claude streaming response (Real Mode) started...`);
-                await this._streamClaudeResponse(messageQueue, res, model);
+                await this._streamClaudeResponse(currentQueue, res, model);
             } else {
                 // Claude Fake Stream / Non-Stream mode
                 let connectionMaintainer;
@@ -1503,8 +1591,12 @@ class RequestHandler {
                                 result.error.message
                             );
                         }
-                        if (!this._isConnectionResetError(result.error)) {
+                        if (!result.error.skipAccountSwitch && !this._isConnectionResetError(result.error)) {
                             await this.authSwitcher.handleRequestFailureAndSwitch(result.error, null);
+                        } else if (result.error.skipAccountSwitch) {
+                            this.logger.info(
+                                "[Request] Immediate-switch retries exhausted, skipping additional account switch."
+                            );
                         }
                         return;
                     }
@@ -2110,14 +2202,10 @@ class RequestHandler {
                 clearTimeout(connectionMaintainer);
 
                 if (isUserAbortedError(result.error)) {
-                    this.logger.info(
+                    this.logger.debug(
                         `[Request] Request #${proxyRequest.request_id} was properly cancelled by user, not counted in failure statistics.`
                     );
                 } else {
-                    this.logger.error(
-                        `[Request] All ${this.maxRetries} retries failed, will be counted in failure statistics.`
-                    );
-
                     // If keep-alives already started the SSE response, send an SSE error event instead of JSON.
                     if (res.headersSent) {
                         this._handleRequestError(result.error, res, "gemini");
@@ -2126,8 +2214,12 @@ class RequestHandler {
                     }
 
                     // Avoid switching account if the error is just a connection reset
-                    if (!this._isConnectionResetError(result.error)) {
+                    if (!result.error.skipAccountSwitch && !this._isConnectionResetError(result.error)) {
                         await this.authSwitcher.handleRequestFailureAndSwitch(result.error, null);
+                    } else if (result.error.skipAccountSwitch) {
+                        this.logger.info(
+                            "[Request] Immediate-switch retries exhausted, skipping additional account switch."
+                        );
                     } else {
                         this.logger.info(
                             "[Request] Failure due to connection reset (Gemini Non-Stream), skipping account switch."
@@ -2363,8 +2455,8 @@ class RequestHandler {
         this.logger.info(`[Request] Request dispatched to browser for processing...`);
         let currentQueue = messageQueue;
         let headerMessage;
-        let switchAttempts = 0;
-        const maxSwitchAttempts = this._getImmediateSwitchRetryLimit();
+        let skipFinalFailureSwitch = false;
+        const immediateSwitchTracker = this._createImmediateSwitchTracker();
 
         // eslint-disable-next-line no-constant-condition
         while (true) {
@@ -2377,22 +2469,19 @@ class RequestHandler {
                 proxyRequest.is_generative &&
                 !isUserAbortedError(headerMessage) &&
                 Number.isFinite(headerStatus) &&
-                this.config?.immediateSwitchStatusCodes?.includes(headerStatus) &&
-                switchAttempts < maxSwitchAttempts
+                this.config?.immediateSwitchStatusCodes?.includes(headerStatus)
             ) {
-                switchAttempts++;
                 this.logger.warn(
-                    `[Request] Gemini real stream received ${headerStatus}, switching account and retrying (${switchAttempts}/${maxSwitchAttempts})...`
+                    `[Request] Gemini real stream received ${headerStatus}, switching account and retrying...`
                 );
-                await this.authSwitcher.handleRequestFailureAndSwitch(
-                    { message: headerMessage.message, status: headerStatus },
-                    null
+                const switched = await this._performImmediateSwitchRetry(
+                    headerMessage,
+                    proxyRequest.request_id,
+                    immediateSwitchTracker
                 );
-                const ready = await this._waitForSystemAndConnectionIfBusy(null, {
-                    sendError: () => {},
-                });
-                if (!ready) {
-                    throw new Error("System not ready after immediate-switch retry.");
+                if (!switched) {
+                    skipFinalFailureSwitch = true;
+                    break;
                 }
 
                 try {
@@ -2413,14 +2502,17 @@ class RequestHandler {
 
         if (headerMessage.event_type === "error") {
             if (isUserAbortedError(headerMessage)) {
-                this.logger.info(
+                this.logger.debug(
                     `[Request] Request #${proxyRequest.request_id} was properly cancelled by user, not counted in failure statistics.`
                 );
             } else {
-                this.logger.error(`[Request] Request failed, will be counted in failure statistics.`);
                 // Avoid switching account if the error is just a connection reset
-                if (!this._isConnectionResetError(headerMessage)) {
+                if (!skipFinalFailureSwitch && !this._isConnectionResetError(headerMessage)) {
                     await this.authSwitcher.handleRequestFailureAndSwitch(headerMessage, null);
+                } else if (skipFinalFailureSwitch) {
+                    this.logger.info(
+                        "[Request] Immediate-switch retries exhausted, skipping additional account switch."
+                    );
                 } else {
                     this.logger.info(
                         "[Request] Failure due to connection reset (Gemini Real Stream), skipping account switch."
@@ -2536,8 +2628,12 @@ class RequestHandler {
                 } else {
                     this.logger.error(`[Request] Browser returned error after retries: ${result.error.message}`);
                     // Avoid switching account if the error is just a connection reset
-                    if (!this._isConnectionResetError(result.error)) {
+                    if (!result.error.skipAccountSwitch && !this._isConnectionResetError(result.error)) {
                         await this.authSwitcher.handleRequestFailureAndSwitch(result.error, null);
+                    } else if (result.error.skipAccountSwitch) {
+                        this.logger.info(
+                            "[Request] Immediate-switch retries exhausted, skipping additional account switch."
+                        );
                     } else {
                         this.logger.info(
                             "[Request] Failure due to connection reset (Gemini Non-Stream), skipping account switch."
@@ -2649,8 +2745,7 @@ class RequestHandler {
         // Track the authIndex for the current queue to ensure proper cleanup
         let currentQueueAuthIndex = this.currentAuthIndex;
         let retryAttempt = 1;
-        let immediateSwitchAttempts = 0;
-        const maxImmediateSwitchAttempts = this._getImmediateSwitchRetryLimit();
+        const immediateSwitchTracker = this._createImmediateSwitchTracker();
 
         while (retryAttempt <= this.maxRetries) {
             try {
@@ -2719,36 +2814,26 @@ class RequestHandler {
                     this.config?.immediateSwitchStatusCodes?.includes(errorStatus) &&
                     !isUserAbortedError(errorPayload)
                 ) {
-                    if (immediateSwitchAttempts >= maxImmediateSwitchAttempts) {
-                        this.logger.error(
-                            `[Request] Immediate-switch limit reached (${maxImmediateSwitchAttempts}) for request #${proxyRequest.request_id}. Final error: ${errorPayload.message}`
-                        );
-                        break;
-                    }
-
-                    immediateSwitchAttempts++;
                     this.logger.warn(
-                        `[Request] Received ${errorStatus}, switching account and retrying before responding to client (${immediateSwitchAttempts}/${maxImmediateSwitchAttempts})...`
+                        `[Request] Received ${errorStatus}, switching account and retrying before responding to client...`
                     );
                     try {
-                        await this.authSwitcher.handleRequestFailureAndSwitch(
-                            { message: errorPayload.message, status: errorStatus },
-                            null
+                        const switched = await this._performImmediateSwitchRetry(
+                            errorPayload,
+                            proxyRequest.request_id,
+                            immediateSwitchTracker
                         );
-                        const ready = await this._waitForSystemAndConnectionIfBusy(null, {
-                            sendError: () => {},
-                        });
-                        if (!ready) {
-                            throw new Error("System not ready after immediate-switch retry.");
+                        if (!switched) {
+                            lastError = { ...errorPayload, skipAccountSwitch: true };
+                            break;
                         }
                     } catch (switchError) {
+                        lastError = { ...errorPayload, skipAccountSwitch: true };
                         this.logger.error(
                             `[Request] Account switch failed during immediate-switch retry flow: ${switchError.message}`
                         );
                         break;
                     }
-                    this._cancelBrowserRequest(proxyRequest.request_id, currentQueueAuthIndex);
-
                     try {
                         currentQueue.close("retry_creating_new_queue");
                     } catch (e) {

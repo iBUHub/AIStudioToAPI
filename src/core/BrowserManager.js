@@ -900,7 +900,7 @@ class BrowserManager {
             }
 
             if (!clicked) {
-                this.logger.info(`${logPrefix} No Launch button found (this is normal if already launched)`);
+                this.logger.info(`${logPrefix} No Launch button found`);
             }
         } catch (error) {
             this.logger.warn(`${logPrefix} ⚠️ Error while checking for Launch button: ${error.message}`);
