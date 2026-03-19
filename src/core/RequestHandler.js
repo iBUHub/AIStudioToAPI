@@ -372,6 +372,48 @@ class RequestHandler {
         return false;
     }
 
+    async _waitForSystemAndConnectionIfBusy(res = null, options = {}) {
+        if (!this.authSwitcher.isSystemBusy) {
+            return true;
+        }
+
+        const {
+            busyMessage = "Server undergoing internal maintenance (account switching/recovery), please try again later.",
+            connectionMessage = "Service temporarily unavailable: Connection not established after switching.",
+            connectionTimeoutMs = 10000,
+            onConnectionTimeout,
+            sendError = res ? (status, message) => this._sendErrorResponse(res, status, message) : () => {},
+        } = options;
+
+        const ready = await this._waitForSystemReady();
+        if (!ready) {
+            sendError(503, busyMessage);
+            return false;
+        }
+
+        if (!this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex)) {
+            const connectionReady = await this._waitForConnection(connectionTimeoutMs);
+            if (!connectionReady) {
+                if (typeof onConnectionTimeout === "function") {
+                    try {
+                        onConnectionTimeout();
+                    } catch (e) {
+                        this.logger.debug(`[System] onConnectionTimeout handler failed: ${e.message}`);
+                    }
+                }
+                sendError(503, connectionMessage);
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    _getImmediateSwitchRetryLimit() {
+        const availableCount = this.authSource.getRotationIndices().length;
+        return Math.max(1, availableCount);
+    }
+
     /**
      * Handle browser recovery when connection is lost
      *
@@ -398,32 +440,14 @@ class RequestHandler {
 
         // Wait for system to become ready if it's busy (someone else is starting/switching browser)
         if (this.authSwitcher.isSystemBusy) {
-            const ready = await this._waitForSystemReady();
-            if (!ready) {
-                await this._sendErrorResponse(
-                    res,
-                    503,
-                    "Server undergoing internal maintenance (account switching/recovery), please try again later."
-                );
-                return false;
-            }
-            // After waiting, also wait for WebSocket connection to be established for current account
-            if (!this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex)) {
-                const connectionReady = await this._waitForConnection(10000);
-                if (!connectionReady) {
-                    // The other process failed to establish connection, return error
+            return await this._waitForSystemAndConnectionIfBusy(res, {
+                connectionMessage: "Service temporarily unavailable: Browser failed to start. Please try again.",
+                onConnectionTimeout: () => {
                     this.logger.error(
                         `[System] WebSocket connection not established for account #${this.currentAuthIndex} after system ready, browser startup may have failed.`
                     );
-                    await this._sendErrorResponse(
-                        res,
-                        503,
-                        "Service temporarily unavailable: Browser failed to start. Please try again."
-                    );
-                    return false;
-                }
-            }
-            return true;
+                },
+            });
         }
 
         // Determine if this is first-time startup or actual crash recovery
@@ -549,26 +573,9 @@ class RequestHandler {
         }
 
         // Wait for system to become ready if it's busy
-        if (this.authSwitcher.isSystemBusy) {
-            const ready = await this._waitForSystemReady();
-            if (!ready) {
-                return this._sendErrorResponse(
-                    res,
-                    503,
-                    "Server undergoing internal maintenance (account switching/recovery), please try again later."
-                );
-            }
-            // After system ready, ensure connection is available for current account
-            if (!this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex)) {
-                const connectionReady = await this._waitForConnection(10000);
-                if (!connectionReady) {
-                    return this._sendErrorResponse(
-                        res,
-                        503,
-                        "Service temporarily unavailable: Connection not established after switching."
-                    );
-                }
-            }
+        {
+            const ready = await this._waitForSystemAndConnectionIfBusy(res);
+            if (!ready) return;
         }
         if (this.browserManager) {
             this.browserManager.notifyUserActivity();
@@ -650,25 +657,9 @@ class RequestHandler {
         }
 
         // Wait for system to become ready if it's busy
-        if (this.authSwitcher.isSystemBusy) {
-            const ready = await this._waitForSystemReady();
-            if (!ready) {
-                return this._sendErrorResponse(
-                    res,
-                    503,
-                    "Server undergoing internal maintenance (account switching/recovery), please try again later."
-                );
-            }
-            if (!this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex)) {
-                const connectionReady = await this._waitForConnection(10000);
-                if (!connectionReady) {
-                    return this._sendErrorResponse(
-                        res,
-                        503,
-                        "Service temporarily unavailable: Connection not established after switching."
-                    );
-                }
-            }
+        {
+            const ready = await this._waitForSystemAndConnectionIfBusy(res);
+            if (!ready) return;
         }
 
         if (this.browserManager) {
@@ -712,26 +703,9 @@ class RequestHandler {
         }
 
         // Wait for system to become ready if it's busy
-        if (this.authSwitcher.isSystemBusy) {
-            const ready = await this._waitForSystemReady();
-            if (!ready) {
-                return this._sendErrorResponse(
-                    res,
-                    503,
-                    "Server undergoing internal maintenance (account switching/recovery), please try again later."
-                );
-            }
-            // After system ready, ensure connection is available for current account
-            if (!this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex)) {
-                const connectionReady = await this._waitForConnection(10000);
-                if (!connectionReady) {
-                    return this._sendErrorResponse(
-                        res,
-                        503,
-                        "Service temporarily unavailable: Connection not established after switching."
-                    );
-                }
-            }
+        {
+            const ready = await this._waitForSystemAndConnectionIfBusy(res);
+            if (!ready) return;
         }
         if (this.browserManager) {
             this.browserManager.notifyUserActivity();
@@ -783,8 +757,50 @@ class RequestHandler {
             this._setupClientDisconnectHandler(res, requestId);
 
             if (useRealStream) {
-                this._forwardRequest(proxyRequest);
-                const initialMessage = await messageQueue.dequeue();
+                let currentQueue = messageQueue;
+                let initialMessage;
+                let switchAttempts = 0;
+                const maxSwitchAttempts = this._getImmediateSwitchRetryLimit();
+
+                // eslint-disable-next-line no-constant-condition
+                while (true) {
+                    this._forwardRequest(proxyRequest);
+                    initialMessage = await currentQueue.dequeue();
+
+                    const initialStatus = Number(initialMessage?.status);
+                    if (
+                        initialMessage.event_type === "error" &&
+                        !isUserAbortedError(initialMessage) &&
+                        Number.isFinite(initialStatus) &&
+                        this.config?.immediateSwitchStatusCodes?.includes(initialStatus) &&
+                        switchAttempts < maxSwitchAttempts
+                    ) {
+                        switchAttempts++;
+                        this.logger.warn(
+                            `[Request] OpenAI real stream received ${initialStatus}, switching account and retrying (${switchAttempts}/${maxSwitchAttempts})...`
+                        );
+                        await this.authSwitcher.handleRequestFailureAndSwitch(
+                            { message: initialMessage.message, status: initialStatus },
+                            null
+                        );
+                        const ready = await this._waitForSystemAndConnectionIfBusy(null, {
+                            sendError: () => {},
+                        });
+                        if (!ready) {
+                            throw new Error("System not ready after immediate-switch retry.");
+                        }
+
+                        try {
+                            currentQueue.close("retry_after_429");
+                        } catch {
+                            /* empty */
+                        }
+                        currentQueue = this.connectionRegistry.createMessageQueue(requestId, this.currentAuthIndex);
+                        continue;
+                    }
+
+                    break;
+                }
 
                 if (initialMessage.event_type === "error") {
                     this.logger.error(
@@ -818,7 +834,7 @@ class RequestHandler {
                     "Content-Type": "text/event-stream",
                 });
                 this.logger.info(`[Request] OpenAI streaming response (Real Mode) started...`);
-                await this._streamOpenAIResponse(messageQueue, res, model);
+                await this._streamOpenAIResponse(currentQueue, res, model);
             } else {
                 // OpenAI Fake Stream / Non-Stream mode
                 // Set up keep-alive timer for fake stream mode to prevent client timeout
@@ -991,26 +1007,9 @@ class RequestHandler {
         }
 
         // Wait for system to become ready if it's busy
-        if (this.authSwitcher.isSystemBusy) {
-            const ready = await this._waitForSystemReady();
-            if (!ready) {
-                return this._sendErrorResponse(
-                    res,
-                    503,
-                    "Server undergoing internal maintenance (account switching/recovery), please try again later."
-                );
-            }
-            // After system ready, ensure connection is available for current account
-            if (!this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex)) {
-                const connectionReady = await this._waitForConnection(10000);
-                if (!connectionReady) {
-                    return this._sendErrorResponse(
-                        res,
-                        503,
-                        "Service temporarily unavailable: Connection not established after switching."
-                    );
-                }
-            }
+        {
+            const ready = await this._waitForSystemAndConnectionIfBusy(res);
+            if (!ready) return;
         }
         if (this.browserManager) {
             this.browserManager.notifyUserActivity();
@@ -1111,8 +1110,50 @@ class RequestHandler {
             this._setupClientDisconnectHandler(res, requestId);
 
             if (useRealStream) {
-                this._forwardRequest(proxyRequest);
-                const initialMessage = await messageQueue.dequeue();
+                let currentQueue = messageQueue;
+                let initialMessage;
+                let switchAttempts = 0;
+                const maxSwitchAttempts = this._getImmediateSwitchRetryLimit();
+
+                // eslint-disable-next-line no-constant-condition
+                while (true) {
+                    this._forwardRequest(proxyRequest);
+                    initialMessage = await currentQueue.dequeue();
+
+                    const initialStatus = Number(initialMessage?.status);
+                    if (
+                        initialMessage.event_type === "error" &&
+                        !isUserAbortedError(initialMessage) &&
+                        Number.isFinite(initialStatus) &&
+                        this.config?.immediateSwitchStatusCodes?.includes(initialStatus) &&
+                        switchAttempts < maxSwitchAttempts
+                    ) {
+                        switchAttempts++;
+                        this.logger.warn(
+                            `[Request] OpenAI Response API real stream received ${initialStatus}, switching account and retrying (${switchAttempts}/${maxSwitchAttempts})...`
+                        );
+                        await this.authSwitcher.handleRequestFailureAndSwitch(
+                            { message: initialMessage.message, status: initialStatus },
+                            null
+                        );
+                        const ready = await this._waitForSystemAndConnectionIfBusy(null, {
+                            sendError: () => {},
+                        });
+                        if (!ready) {
+                            throw new Error("System not ready after immediate-switch retry.");
+                        }
+
+                        try {
+                            currentQueue.close("retry_after_429");
+                        } catch {
+                            /* empty */
+                        }
+                        currentQueue = this.connectionRegistry.createMessageQueue(requestId, this.currentAuthIndex);
+                        continue;
+                    }
+
+                    break;
+                }
 
                 if (initialMessage.event_type === "error") {
                     this.logger.error(
@@ -1146,7 +1187,7 @@ class RequestHandler {
                     "Content-Type": "text/event-stream",
                 });
                 this.logger.info(`[Request] OpenAI Response API streaming response (Real Mode) started...`);
-                await this._streamOpenAIResponseAPIResponse(messageQueue, res, model, {
+                await this._streamOpenAIResponseAPIResponse(currentQueue, res, model, {
                     responseDefaults,
                 });
             } else {
@@ -1333,27 +1374,13 @@ class RequestHandler {
         }
 
         // Wait for system to become ready if it's busy
-        if (this.authSwitcher.isSystemBusy) {
-            const ready = await this._waitForSystemReady();
-            if (!ready) {
-                return this._sendClaudeErrorResponse(
-                    res,
-                    503,
-                    "overloaded_error",
-                    "Server undergoing internal maintenance, please try again later."
-                );
-            }
-            if (!this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex)) {
-                const connectionReady = await this._waitForConnection(10000);
-                if (!connectionReady) {
-                    return this._sendClaudeErrorResponse(
-                        res,
-                        503,
-                        "overloaded_error",
-                        "Service temporarily unavailable: Connection not established."
-                    );
-                }
-            }
+        {
+            const ready = await this._waitForSystemAndConnectionIfBusy(res, {
+                busyMessage: "Server undergoing internal maintenance, please try again later.",
+                connectionMessage: "Service temporarily unavailable: Connection not established.",
+                sendError: (status, message) => this._sendClaudeErrorResponse(res, status, "overloaded_error", message),
+            });
+            if (!ready) return;
         }
 
         if (this.browserManager) {
@@ -1610,27 +1637,13 @@ class RequestHandler {
         }
 
         // Wait for system to become ready if it's busy
-        if (this.authSwitcher.isSystemBusy) {
-            const ready = await this._waitForSystemReady();
-            if (!ready) {
-                return this._sendClaudeErrorResponse(
-                    res,
-                    503,
-                    "overloaded_error",
-                    "Server undergoing internal maintenance, please try again later."
-                );
-            }
-            if (!this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex)) {
-                const connectionReady = await this._waitForConnection(10000);
-                if (!connectionReady) {
-                    return this._sendClaudeErrorResponse(
-                        res,
-                        503,
-                        "overloaded_error",
-                        "Service temporarily unavailable: Connection not established."
-                    );
-                }
-            }
+        {
+            const ready = await this._waitForSystemAndConnectionIfBusy(res, {
+                busyMessage: "Server undergoing internal maintenance, please try again later.",
+                connectionMessage: "Service temporarily unavailable: Connection not established.",
+                sendError: (status, message) => this._sendClaudeErrorResponse(res, status, "overloaded_error", message),
+            });
+            if (!ready) return;
         }
 
         if (this.browserManager) {
@@ -1745,25 +1758,9 @@ class RequestHandler {
         }
 
         // Wait for system to become ready if it's busy
-        if (this.authSwitcher.isSystemBusy) {
-            const ready = await this._waitForSystemReady();
-            if (!ready) {
-                return this._sendErrorResponse(
-                    res,
-                    503,
-                    "Server undergoing internal maintenance (account switching/recovery), please try again later."
-                );
-            }
-            if (!this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex)) {
-                const connectionReady = await this._waitForConnection(10000);
-                if (!connectionReady) {
-                    return this._sendErrorResponse(
-                        res,
-                        503,
-                        "Service temporarily unavailable: Connection not established after switching."
-                    );
-                }
-            }
+        {
+            const ready = await this._waitForSystemAndConnectionIfBusy(res);
+            if (!ready) return;
         }
 
         if (this.browserManager) {
@@ -2364,8 +2361,55 @@ class RequestHandler {
 
     async _handleRealStreamResponse(proxyRequest, messageQueue, req, res) {
         this.logger.info(`[Request] Request dispatched to browser for processing...`);
-        this._forwardRequest(proxyRequest);
-        const headerMessage = await messageQueue.dequeue();
+        let currentQueue = messageQueue;
+        let headerMessage;
+        let switchAttempts = 0;
+        const maxSwitchAttempts = this._getImmediateSwitchRetryLimit();
+
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+            this._forwardRequest(proxyRequest);
+            headerMessage = await currentQueue.dequeue();
+
+            const headerStatus = Number(headerMessage?.status);
+            if (
+                headerMessage.event_type === "error" &&
+                proxyRequest.is_generative &&
+                !isUserAbortedError(headerMessage) &&
+                Number.isFinite(headerStatus) &&
+                this.config?.immediateSwitchStatusCodes?.includes(headerStatus) &&
+                switchAttempts < maxSwitchAttempts
+            ) {
+                switchAttempts++;
+                this.logger.warn(
+                    `[Request] Gemini real stream received ${headerStatus}, switching account and retrying (${switchAttempts}/${maxSwitchAttempts})...`
+                );
+                await this.authSwitcher.handleRequestFailureAndSwitch(
+                    { message: headerMessage.message, status: headerStatus },
+                    null
+                );
+                const ready = await this._waitForSystemAndConnectionIfBusy(null, {
+                    sendError: () => {},
+                });
+                if (!ready) {
+                    throw new Error("System not ready after immediate-switch retry.");
+                }
+
+                try {
+                    currentQueue.close("retry_after_429");
+                } catch {
+                    /* empty */
+                }
+
+                currentQueue = this.connectionRegistry.createMessageQueue(
+                    proxyRequest.request_id,
+                    this.currentAuthIndex
+                );
+                continue;
+            }
+
+            break;
+        }
 
         if (headerMessage.event_type === "error") {
             if (isUserAbortedError(headerMessage)) {
@@ -2405,7 +2449,7 @@ class RequestHandler {
             let lastChunk = "";
             // eslint-disable-next-line no-constant-condition
             while (true) {
-                const dataMessage = await messageQueue.dequeue(this.timeouts.STREAM_CHUNK);
+                const dataMessage = await currentQueue.dequeue(this.timeouts.STREAM_CHUNK);
                 if (dataMessage.type === "STREAM_END") {
                     this.logger.info("[Request] Received stream end signal.");
                     break;
@@ -2604,8 +2648,11 @@ class RequestHandler {
         let currentQueue = messageQueue;
         // Track the authIndex for the current queue to ensure proper cleanup
         let currentQueueAuthIndex = this.currentAuthIndex;
+        let retryAttempt = 1;
+        let immediateSwitchAttempts = 0;
+        const maxImmediateSwitchAttempts = this._getImmediateSwitchRetryLimit();
 
-        for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
+        while (retryAttempt <= this.maxRetries) {
             try {
                 this._forwardRequest(proxyRequest);
 
@@ -2666,23 +2713,66 @@ class RequestHandler {
                 lastError = errorPayload;
 
                 // Check if we should stop retrying immediately based on status code
+                const errorStatus = Number(errorPayload?.status);
                 if (
-                    this.config.immediateSwitchStatusCodes &&
-                    this.config.immediateSwitchStatusCodes.includes(errorPayload.status)
+                    Number.isFinite(errorStatus) &&
+                    this.config?.immediateSwitchStatusCodes?.includes(errorStatus) &&
+                    !isUserAbortedError(errorPayload)
                 ) {
+                    if (immediateSwitchAttempts >= maxImmediateSwitchAttempts) {
+                        this.logger.error(
+                            `[Request] Immediate-switch limit reached (${maxImmediateSwitchAttempts}) for request #${proxyRequest.request_id}. Final error: ${errorPayload.message}`
+                        );
+                        break;
+                    }
+
+                    immediateSwitchAttempts++;
                     this.logger.warn(
-                        `[Request] Critical error ${errorPayload.status} detected (${errorPayload.message}), aborting retries immediately.`
+                        `[Request] Received ${errorStatus}, switching account and retrying before responding to client (${immediateSwitchAttempts}/${maxImmediateSwitchAttempts})...`
                     );
-                    break;
+                    try {
+                        await this.authSwitcher.handleRequestFailureAndSwitch(
+                            { message: errorPayload.message, status: errorStatus },
+                            null
+                        );
+                        const ready = await this._waitForSystemAndConnectionIfBusy(null, {
+                            sendError: () => {},
+                        });
+                        if (!ready) {
+                            throw new Error("System not ready after immediate-switch retry.");
+                        }
+                    } catch (switchError) {
+                        this.logger.error(
+                            `[Request] Account switch failed during immediate-switch retry flow: ${switchError.message}`
+                        );
+                        break;
+                    }
+                    this._cancelBrowserRequest(proxyRequest.request_id, currentQueueAuthIndex);
+
+                    try {
+                        currentQueue.close("retry_creating_new_queue");
+                    } catch (e) {
+                        this.logger.debug(`[Request] Failed to close old queue before retry: ${e.message}`);
+                    }
+
+                    this.logger.debug(
+                        `[Request] Creating new message queue after immediate switch for request #${proxyRequest.request_id} (switching from account #${currentQueueAuthIndex} to #${this.currentAuthIndex})`
+                    );
+                    currentQueue = this.connectionRegistry.createMessageQueue(
+                        proxyRequest.request_id,
+                        this.currentAuthIndex
+                    );
+                    currentQueueAuthIndex = this.currentAuthIndex;
+                    continue;
                 }
 
                 // Log the warning for the current attempt
                 this.logger.warn(
-                    `[Request] Attempt #${attempt}/${this.maxRetries} for request #${proxyRequest.request_id} failed: ${errorPayload.message}`
+                    `[Request] Attempt #${retryAttempt}/${this.maxRetries} for request #${proxyRequest.request_id} failed: ${errorPayload.message}`
                 );
 
                 // If it's the last attempt, break the loop to return failure
-                if (attempt >= this.maxRetries) {
+                if (retryAttempt >= this.maxRetries) {
                     this.logger.error(
                         `[Request] All ${this.maxRetries} retries failed for request #${proxyRequest.request_id}. Final error: ${errorPayload.message}`
                     );
@@ -2705,7 +2795,7 @@ class RequestHandler {
                 // Note: We keep the same requestId so the browser response routes to the new queue
                 // createMessageQueue will automatically close and remove any existing queue with the same ID from the registry
                 this.logger.debug(
-                    `[Request] Creating new message queue for retry #${attempt + 1} for request #${proxyRequest.request_id} (switching from account #${currentQueueAuthIndex} to #${this.currentAuthIndex})`
+                    `[Request] Creating new message queue for retry #${retryAttempt + 1} for request #${proxyRequest.request_id} (switching from account #${currentQueueAuthIndex} to #${this.currentAuthIndex})`
                 );
                 currentQueue = this.connectionRegistry.createMessageQueue(
                     proxyRequest.request_id,
@@ -2716,6 +2806,7 @@ class RequestHandler {
 
                 // Wait before the next retry
                 await new Promise(resolve => setTimeout(resolve, this.retryDelay));
+                retryAttempt++;
             }
         }
 
