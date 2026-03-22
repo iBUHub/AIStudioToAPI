@@ -196,33 +196,45 @@ class ConnectionManager extends EventTarget {
 class RequestProcessor {
     constructor() {
         this.activeOperations = new Map();
-        this.cancelledOperations = new Set();
+        this.cancelledAttempts = new Set();
         // [BrowserManager Injection Point] Do not modify the line below.
         // This line is dynamically replaced by BrowserManager.js based on TARGET_DOMAIN environment variable.
         this.targetDomain = "generativelanguage.googleapis.com";
     }
 
+    _normalizeAttemptId(operationId, requestAttemptId) {
+        return requestAttemptId || `${operationId}:attempt:legacy`;
+    }
+
+    _getAttemptKey(operationId, requestAttemptId) {
+        return `${operationId}::${this._normalizeAttemptId(operationId, requestAttemptId)}`;
+    }
+
     execute(requestSpec, operationId) {
+        const requestAttemptId = this._normalizeAttemptId(operationId, requestSpec.request_attempt_id);
+        const attemptKey = this._getAttemptKey(operationId, requestAttemptId);
+
         // Abort any existing operation with the same ID to prevent concurrent fetches
-        const existingController = this.activeOperations.get(operationId);
-        if (existingController) {
+        const existingOperation = this.activeOperations.get(operationId);
+        if (existingOperation) {
             Logger.debug(`Aborting existing operation #${operationId} before starting new attempt`);
-            existingController.abort();
+            existingOperation.abortController.abort();
             // Note: The old operation's finally block will try to delete this operationId,
             // but we immediately overwrite it below, so the new controller reference is safe
         }
 
         // Clear any stale cancellation flag from previous attempts
         // This prevents retries from being immediately aborted due to old cancellation state
-        if (this.cancelledOperations.has(operationId)) {
-            Logger.debug(`Clearing stale cancellation flag for operation #${operationId}`);
-            this.cancelledOperations.delete(operationId);
+        if (this.cancelledAttempts.has(attemptKey)) {
+            Logger.debug(`Clearing stale cancellation flag for operation #${operationId} attempt ${requestAttemptId}`);
+            this.cancelledAttempts.delete(attemptKey);
         }
 
         // Timeout constants - aligned with server-side timeouts
         const IDLE_TIMEOUT_DURATION = 300000; // 300 seconds (5 minutes) - matches FAKE_STREAM timeout
         const abortController = new AbortController();
-        this.activeOperations.set(operationId, abortController);
+        const activeOperation = { abortController, requestAttemptId };
+        this.activeOperations.set(operationId, activeOperation);
 
         let timeoutId = null;
 
@@ -279,11 +291,11 @@ class RequestProcessor {
 
         const responsePromise = Promise.race([attemptPromise, startIdleTimeout()]);
 
-        return { abortController, cancelTimeout, responsePromise };
+        return { abortController, attemptKey, cancelTimeout, requestAttemptId, responsePromise };
     }
 
     cancelAllOperations() {
-        this.activeOperations.forEach(controller => controller.abort());
+        this.activeOperations.forEach(operation => operation.abortController.abort());
         this.activeOperations.clear();
     }
 
@@ -549,12 +561,20 @@ class RequestProcessor {
         return sanitized;
     }
 
-    cancelOperation(operationId) {
-        this.cancelledOperations.add(operationId); // Core: Add ID to cancelled set
-        const controller = this.activeOperations.get(operationId);
-        if (controller) {
-            Logger.output(`Received cancel instruction, aborting operation #${operationId}...`);
-            controller.abort();
+    cancelOperation(operationId, requestAttemptId) {
+        const normalizedAttemptId = this._normalizeAttemptId(operationId, requestAttemptId);
+        const attemptKey = this._getAttemptKey(operationId, normalizedAttemptId);
+        this.cancelledAttempts.add(attemptKey);
+        const activeOperation = this.activeOperations.get(operationId);
+        if (activeOperation && activeOperation.requestAttemptId === normalizedAttemptId) {
+            Logger.output(
+                `Received cancel instruction, aborting operation #${operationId} (attempt ${normalizedAttemptId})...`
+            );
+            activeOperation.abortController.abort();
+        } else if (activeOperation) {
+            Logger.debug(
+                `Ignoring stale cancel for operation #${operationId}: expected attempt ${activeOperation.requestAttemptId}, got ${normalizedAttemptId}`
+            );
         }
     }
 }
@@ -594,7 +614,7 @@ class ProxySystem extends EventTarget {
             switch (requestSpec.event_type) {
                 case "cancel_request":
                     // If it's a cancel instruction, call the cancel method
-                    this.requestProcessor.cancelOperation(requestSpec.request_id);
+                    this.requestProcessor.cancelOperation(requestSpec.request_id, requestSpec.request_attempt_id);
                     break;
                 case "set_log_level":
                     // Dynamic log level adjustment at runtime
@@ -618,13 +638,15 @@ class ProxySystem extends EventTarget {
             Logger.output("Message processing error:", error.message);
             // Only send error response when an error occurs during proxy request processing
             if (requestSpec.request_id && requestSpec.event_type !== "cancel_request") {
-                this._sendErrorResponse(error, requestSpec.request_id);
+                this._sendErrorResponse(error, requestSpec.request_id, requestSpec.request_attempt_id);
             }
         }
     }
 
     async _processProxyRequest(requestSpec) {
         const operationId = requestSpec.request_id;
+        const requestAttemptId = this.requestProcessor._normalizeAttemptId(operationId, requestSpec.request_attempt_id);
+        const attemptKey = this.requestProcessor._getAttemptKey(operationId, requestAttemptId);
         const mode = requestSpec.streaming_mode || "fake";
         Logger.debug(`Browser received request`);
         let cancelTimeout;
@@ -632,7 +654,7 @@ class ProxySystem extends EventTarget {
         let abortController;
 
         try {
-            if (this.requestProcessor.cancelledOperations.has(operationId)) {
+            if (this.requestProcessor.cancelledAttempts.has(attemptKey)) {
                 throw new DOMException("The user aborted a request.", "AbortError");
             }
             const {
@@ -643,11 +665,11 @@ class ProxySystem extends EventTarget {
             cancelTimeout = ct;
             abortController = ac;
             const response = await responsePromise;
-            if (this.requestProcessor.cancelledOperations.has(operationId)) {
+            if (this.requestProcessor.cancelledAttempts.has(attemptKey)) {
                 throw new DOMException("The user aborted a request.", "AbortError");
             }
 
-            this._transmitHeaders(response, operationId, requestSpec.headers?.host);
+            this._transmitHeaders(response, operationId, requestAttemptId, requestSpec.headers?.host);
             reader = response.body.getReader();
             const textDecoder = new TextDecoder();
 
@@ -666,7 +688,7 @@ class ProxySystem extends EventTarget {
                 }
 
                 // Check if operation has been cancelled before creating timeout
-                if (this.requestProcessor.cancelledOperations.has(operationId)) {
+                if (this.requestProcessor.cancelledAttempts.has(attemptKey)) {
                     Logger.debug(`Operation #${operationId} cancelled, stopping stream read`);
                     processing = false;
                     break;
@@ -706,7 +728,7 @@ class ProxySystem extends EventTarget {
 
                     const chunk = textDecoder.decode(value, { stream: true });
                     if (mode === "real") {
-                        this._transmitChunk(chunk, operationId);
+                        this._transmitChunk(chunk, operationId, requestAttemptId);
                     } else {
                         fullBody += chunk;
                     }
@@ -742,17 +764,17 @@ class ProxySystem extends EventTarget {
             Logger.output("Data stream read complete.");
 
             // Check if operation was cancelled during streaming
-            if (this.requestProcessor.cancelledOperations.has(operationId)) {
+            if (this.requestProcessor.cancelledAttempts.has(attemptKey)) {
                 Logger.debug(`Operation #${operationId} was cancelled, skipping final transmission`);
                 return;
             }
 
             if (mode === "fake") {
                 // In non-streaming mode, after loop ends, forward the concatenated complete response body
-                this._transmitChunk(fullBody, operationId);
+                this._transmitChunk(fullBody, operationId, requestAttemptId);
             }
 
-            this._transmitStreamEnd(operationId);
+            this._transmitStreamEnd(operationId, requestAttemptId);
         } catch (error) {
             if (error.name === "AbortError") {
                 Logger.output(`[Diagnosis] Operation #${operationId} has been aborted by user.`);
@@ -760,8 +782,12 @@ class ProxySystem extends EventTarget {
                 Logger.output(`❌ Request processing failed: ${error.message}`);
             }
             // Only send error if we still own this operationId (prevent stale errors from reaching server during retries)
-            if (this.requestProcessor.activeOperations.get(operationId) === abortController) {
-                this._sendErrorResponse(error, operationId);
+            const currentOperation = this.requestProcessor.activeOperations.get(operationId);
+            if (
+                currentOperation?.abortController === abortController &&
+                currentOperation?.requestAttemptId === requestAttemptId
+            ) {
+                this._sendErrorResponse(error, operationId, requestAttemptId);
             } else {
                 Logger.debug(`[Diagnosis] Suppressing error for superseded operation #${operationId}`);
             }
@@ -782,15 +808,19 @@ class ProxySystem extends EventTarget {
                 }
             }
             // Only delete if we still own this operationId (prevent race with retries)
-            if (this.requestProcessor.activeOperations.get(operationId) === abortController) {
+            const currentOperation = this.requestProcessor.activeOperations.get(operationId);
+            if (
+                currentOperation?.abortController === abortController &&
+                currentOperation?.requestAttemptId === requestAttemptId
+            ) {
                 this.requestProcessor.activeOperations.delete(operationId);
-                // Only delete from cancelledOperations if we own the operation
-                this.requestProcessor.cancelledOperations.delete(operationId);
+                // Only delete from cancelledAttempts if we own the operation
+                this.requestProcessor.cancelledAttempts.delete(attemptKey);
             }
         }
     }
 
-    _transmitHeaders(response, operationId, proxyHost) {
+    _transmitHeaders(response, operationId, requestAttemptId, proxyHost) {
         const headerMap = {};
         response.headers.forEach((v, k) => {
             const lowerKey = k.toLowerCase();
@@ -813,33 +843,37 @@ class ProxySystem extends EventTarget {
         this.connectionManager.transmit({
             event_type: "response_headers",
             headers: headerMap,
+            request_attempt_id: requestAttemptId,
             request_id: operationId,
             status: response.status,
         });
     }
 
-    _transmitChunk(data, operationId) {
+    _transmitChunk(data, operationId, requestAttemptId) {
         if (!data) return;
         this.connectionManager.transmit({
             data,
             event_type: "chunk",
+            request_attempt_id: requestAttemptId,
             request_id: operationId,
         });
     }
 
-    _transmitStreamEnd(operationId) {
+    _transmitStreamEnd(operationId, requestAttemptId) {
         this.connectionManager.transmit({
             event_type: "stream_close",
+            request_attempt_id: requestAttemptId,
             request_id: operationId,
         });
         Logger.output("Task completed, stream end signal sent");
     }
 
-    _sendErrorResponse(error, operationId) {
+    _sendErrorResponse(error, operationId, requestAttemptId) {
         if (!operationId) return;
         this.connectionManager.transmit({
             event_type: "error",
             message: `Proxy browser error: ${error.message || "Unknown error"}`,
+            request_attempt_id: requestAttemptId,
             request_id: operationId,
             status: error.status || 504,
         });

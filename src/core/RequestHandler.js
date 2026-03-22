@@ -660,6 +660,7 @@ class RequestHandler {
 
         const proxyRequest = this._buildProxyRequest(req, requestId);
         proxyRequest.is_generative = isGenerativeRequest;
+        this._initializeProxyRequestAttempt(proxyRequest);
 
         const wantsStreamByHeader = req.headers.accept && req.headers.accept.includes("text/event-stream");
         const wantsStreamByPath = req.path.includes(":streamGenerateContent");
@@ -667,7 +668,11 @@ class RequestHandler {
 
         try {
             // Create message queue inside try-catch to handle invalid authIndex
-            const messageQueue = this.connectionRegistry.createMessageQueue(requestId, this.currentAuthIndex);
+            const messageQueue = this.connectionRegistry.createMessageQueue(
+                requestId,
+                this.currentAuthIndex,
+                proxyRequest.request_attempt_id
+            );
             this._setupClientDisconnectHandler(res, requestId);
 
             if (wantsStream) {
@@ -735,10 +740,15 @@ class RequestHandler {
             request_id: requestId,
             streaming_mode: "fake", // Uploads always return a single JSON response
         };
+        this._initializeProxyRequestAttempt(proxyRequest);
 
         try {
             // Create message queue inside try-catch to handle invalid authIndex
-            const messageQueue = this.connectionRegistry.createMessageQueue(requestId, this.currentAuthIndex);
+            const messageQueue = this.connectionRegistry.createMessageQueue(
+                requestId,
+                this.currentAuthIndex,
+                proxyRequest.request_attempt_id
+            );
             this._setupClientDisconnectHandler(res, requestId);
 
             await this._handleNonStreamResponse(proxyRequest, messageQueue, req, res);
@@ -809,10 +819,15 @@ class RequestHandler {
             request_id: requestId,
             streaming_mode: useRealStream ? "real" : "fake",
         };
+        this._initializeProxyRequestAttempt(proxyRequest);
 
         try {
             // Create message queue inside try-catch to handle invalid authIndex
-            const messageQueue = this.connectionRegistry.createMessageQueue(requestId, this.currentAuthIndex);
+            const messageQueue = this.connectionRegistry.createMessageQueue(
+                requestId,
+                this.currentAuthIndex,
+                proxyRequest.request_attempt_id
+            );
             this._setupClientDisconnectHandler(res, requestId);
 
             if (useRealStream) {
@@ -851,7 +866,12 @@ class RequestHandler {
                         } catch {
                             /* empty */
                         }
-                        currentQueue = this.connectionRegistry.createMessageQueue(requestId, this.currentAuthIndex);
+                        this._advanceProxyRequestAttempt(proxyRequest);
+                        currentQueue = this.connectionRegistry.createMessageQueue(
+                            requestId,
+                            this.currentAuthIndex,
+                            proxyRequest.request_attempt_id
+                        );
                         continue;
                     }
 
@@ -1166,10 +1186,15 @@ class RequestHandler {
             request_id: requestId,
             streaming_mode: useRealStream ? "real" : "fake",
         };
+        this._initializeProxyRequestAttempt(proxyRequest);
 
         try {
             // Create message queue inside try-catch to handle invalid authIndex
-            const messageQueue = this.connectionRegistry.createMessageQueue(requestId, this.currentAuthIndex);
+            const messageQueue = this.connectionRegistry.createMessageQueue(
+                requestId,
+                this.currentAuthIndex,
+                proxyRequest.request_attempt_id
+            );
             this._setupClientDisconnectHandler(res, requestId);
 
             if (useRealStream) {
@@ -1208,7 +1233,12 @@ class RequestHandler {
                         } catch {
                             /* empty */
                         }
-                        currentQueue = this.connectionRegistry.createMessageQueue(requestId, this.currentAuthIndex);
+                        this._advanceProxyRequestAttempt(proxyRequest);
+                        currentQueue = this.connectionRegistry.createMessageQueue(
+                            requestId,
+                            this.currentAuthIndex,
+                            proxyRequest.request_attempt_id
+                        );
                         continue;
                     }
 
@@ -1491,10 +1521,15 @@ class RequestHandler {
             request_id: requestId,
             streaming_mode: useRealStream ? "real" : "fake",
         };
+        this._initializeProxyRequestAttempt(proxyRequest);
 
         try {
             // Create message queue inside try-catch to handle invalid authIndex
-            const messageQueue = this.connectionRegistry.createMessageQueue(requestId, this.currentAuthIndex);
+            const messageQueue = this.connectionRegistry.createMessageQueue(
+                requestId,
+                this.currentAuthIndex,
+                proxyRequest.request_attempt_id
+            );
             this._setupClientDisconnectHandler(res, requestId);
 
             if (useRealStream) {
@@ -1533,7 +1568,12 @@ class RequestHandler {
                         } catch {
                             /* empty */
                         }
-                        currentQueue = this.connectionRegistry.createMessageQueue(requestId, this.currentAuthIndex);
+                        this._advanceProxyRequestAttempt(proxyRequest);
+                        currentQueue = this.connectionRegistry.createMessageQueue(
+                            requestId,
+                            this.currentAuthIndex,
+                            proxyRequest.request_attempt_id
+                        );
                         continue;
                     }
 
@@ -1790,10 +1830,15 @@ class RequestHandler {
             query_params: {},
             request_id: requestId,
         };
+        this._initializeProxyRequestAttempt(proxyRequest);
 
         try {
             // Create message queue inside try-catch to handle invalid authIndex
-            const messageQueue = this.connectionRegistry.createMessageQueue(requestId, this.currentAuthIndex);
+            const messageQueue = this.connectionRegistry.createMessageQueue(
+                requestId,
+                this.currentAuthIndex,
+                proxyRequest.request_attempt_id
+            );
             this._setupClientDisconnectHandler(res, requestId);
 
             this._forwardRequest(proxyRequest);
@@ -1906,9 +1951,14 @@ class RequestHandler {
             query_params: {},
             request_id: requestId,
         };
+        this._initializeProxyRequestAttempt(proxyRequest);
 
         try {
-            const messageQueue = this.connectionRegistry.createMessageQueue(requestId, this.currentAuthIndex);
+            const messageQueue = this.connectionRegistry.createMessageQueue(
+                requestId,
+                this.currentAuthIndex,
+                proxyRequest.request_attempt_id
+            );
             this._setupClientDisconnectHandler(res, requestId);
 
             this._forwardRequest(proxyRequest);
@@ -2509,9 +2559,11 @@ class RequestHandler {
                     /* empty */
                 }
 
+                this._advanceProxyRequestAttempt(proxyRequest);
                 currentQueue = this.connectionRegistry.createMessageQueue(
                     proxyRequest.request_id,
-                    this.currentAuthIndex
+                    this.currentAuthIndex,
+                    proxyRequest.request_attempt_id
                 );
                 continue;
             }
@@ -2863,9 +2915,11 @@ class RequestHandler {
                     this.logger.debug(
                         `[Request] Creating new message queue after immediate switch for request #${proxyRequest.request_id} (switching from account #${currentQueueAuthIndex} to #${this.currentAuthIndex})`
                     );
+                    this._advanceProxyRequestAttempt(proxyRequest);
                     currentQueue = this.connectionRegistry.createMessageQueue(
                         proxyRequest.request_id,
-                        this.currentAuthIndex
+                        this.currentAuthIndex,
+                        proxyRequest.request_attempt_id
                     );
                     currentQueueAuthIndex = this.currentAuthIndex;
                     continue;
@@ -2884,11 +2938,16 @@ class RequestHandler {
                     break;
                 }
 
-                // CRITICAL FIX: Cancel browser request on the ORIGINAL account that owns this queue
-                // If account has switched, currentAuthIndex may differ from currentQueueAuthIndex
-                this._cancelBrowserRequest(proxyRequest.request_id, currentQueueAuthIndex);
+                // Cancel browser request on the ORIGINAL account that owns this queue.
+                // request_attempt_id isolates retries so a delayed cancel cannot abort a newer attempt.
+                // If account has switched, currentAuthIndex may differ from currentQueueAuthIndex.
+                this._cancelBrowserRequest(
+                    proxyRequest.request_id,
+                    currentQueueAuthIndex,
+                    proxyRequest.request_attempt_id
+                );
 
-                // CRITICAL FIX: Explicitly close the old queue before creating a new one
+                // Explicitly close the old queue before creating a new one
                 // This ensures waitingResolvers are properly rejected even if authIndex changed
                 try {
                     currentQueue.close("retry_creating_new_queue");
@@ -2902,9 +2961,11 @@ class RequestHandler {
                 this.logger.debug(
                     `[Request] Creating new message queue for retry #${retryAttempt + 1} for request #${proxyRequest.request_id} (switching from account #${currentQueueAuthIndex} to #${this.currentAuthIndex})`
                 );
+                this._advanceProxyRequestAttempt(proxyRequest);
                 currentQueue = this.connectionRegistry.createMessageQueue(
                     proxyRequest.request_id,
-                    this.currentAuthIndex
+                    this.currentAuthIndex,
+                    proxyRequest.request_attempt_id
                 );
                 // Update tracked authIndex for the new queue
                 currentQueueAuthIndex = this.currentAuthIndex;
@@ -3370,22 +3431,27 @@ class RequestHandler {
                 // This ensures we cancel on the correct account even after retries switch accounts
                 const targetAuthIndex =
                     this.connectionRegistry.getAuthIndexForRequest(requestId) ?? this.currentAuthIndex;
+                const requestAttemptId = this.connectionRegistry.getRequestAttemptIdForRequest(requestId);
 
-                this._cancelBrowserRequest(requestId, targetAuthIndex);
+                this._cancelBrowserRequest(requestId, targetAuthIndex, requestAttemptId);
                 // Close and remove the message queue to unblock any waiting dequeue() calls
                 this.connectionRegistry.removeMessageQueue(requestId, "client_disconnect");
             }
         });
     }
 
-    _cancelBrowserRequest(requestId, authIndex) {
+    _cancelBrowserRequest(requestId, authIndex, requestAttemptId = null) {
         const targetAuthIndex = authIndex !== undefined ? authIndex : this.currentAuthIndex;
         const connection = this.connectionRegistry.getConnectionByAuth(targetAuthIndex);
         if (connection) {
-            this.logger.info(`[Request] Cancelling request #${requestId} on account #${targetAuthIndex}`);
+            this.logger.info(
+                `[Request] Cancelling request #${requestId} on account #${targetAuthIndex}` +
+                    (requestAttemptId ? ` (attempt ${requestAttemptId})` : "")
+            );
             connection.send(
                 JSON.stringify({
                     event_type: "cancel_request",
+                    request_attempt_id: requestAttemptId,
                     request_id: requestId,
                 })
             );
@@ -3405,11 +3471,12 @@ class RequestHandler {
         if (error.code === "QUEUE_TIMEOUT" || error instanceof QueueTimeoutError) {
             // Get the authIndex for this request from the registry
             const authIndex = this.connectionRegistry.getAuthIndexForRequest(requestId);
+            const requestAttemptId = this.connectionRegistry.getRequestAttemptIdForRequest(requestId);
             if (authIndex !== null) {
                 this.logger.debug(
                     `[Request] Queue timeout for request #${requestId}, notifying browser on account #${authIndex} to cancel`
                 );
-                this._cancelBrowserRequest(requestId, authIndex);
+                this._cancelBrowserRequest(requestId, authIndex, requestAttemptId);
             } else {
                 this.logger.debug(
                     `[Request] Queue timeout for request #${requestId}, but queue already removed (authIndex not found)`
@@ -3608,11 +3675,30 @@ class RequestHandler {
         };
     }
 
+    _initializeProxyRequestAttempt(proxyRequest) {
+        if (!proxyRequest.request_attempt_number) {
+            proxyRequest.request_attempt_number = 1;
+        }
+        proxyRequest.request_attempt_id = this._generateRequestAttemptId(
+            proxyRequest.request_id,
+            proxyRequest.request_attempt_number
+        );
+    }
+
+    _advanceProxyRequestAttempt(proxyRequest) {
+        proxyRequest.request_attempt_number = (proxyRequest.request_attempt_number || 1) + 1;
+        proxyRequest.request_attempt_id = this._generateRequestAttemptId(
+            proxyRequest.request_id,
+            proxyRequest.request_attempt_number
+        );
+    }
+
     _forwardRequest(proxyRequest) {
         const connection = this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex);
         if (connection) {
             this.logger.debug(
-                `[Request] Forwarding request #${proxyRequest.request_id} via connection for authIndex=${this.currentAuthIndex}`
+                `[Request] Forwarding request #${proxyRequest.request_id} via connection for authIndex=${this.currentAuthIndex}` +
+                    ` (attempt=${proxyRequest.request_attempt_id})`
             );
             connection.send(
                 JSON.stringify({
@@ -3629,6 +3715,10 @@ class RequestHandler {
 
     _generateRequestId() {
         return `req_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+    }
+
+    _generateRequestAttemptId(requestId, attemptNumber) {
+        return `${requestId}_attempt_${attemptNumber}_${Math.random().toString(36).substring(2, 8)}`;
     }
 }
 

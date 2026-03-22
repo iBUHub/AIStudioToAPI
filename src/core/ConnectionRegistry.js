@@ -258,6 +258,14 @@ class ConnectionRegistry extends EventEmitter {
                     );
                     return;
                 }
+                if (entry.requestAttemptId && parsedMessage.request_attempt_id !== entry.requestAttemptId) {
+                    this.logger.warn(
+                        `[Server] Received stale message for request ${requestId}: ` +
+                            `expected attempt=${entry.requestAttemptId}, got attempt=${parsedMessage.request_attempt_id || "missing"}. ` +
+                            `Message discarded (likely a delayed response from a previous retry).`
+                    );
+                    return;
+                }
                 this._routeMessage(parsedMessage, entry.queue);
             } else {
                 this.logger.warn(`[Server] Received message for unknown or outdated request ID: ${requestId}`);
@@ -397,10 +405,11 @@ class ConnectionRegistry extends EventEmitter {
      * Create a new message queue for a request
      * @param {string} requestId - The unique request ID
      * @param {number} authIndex - The account index (must be a non-negative integer)
+     * @param {string|null} [requestAttemptId=null] - Optional per-attempt identifier to discard stale retry messages
      * @returns {MessageQueue} The created message queue
      * @throws {Error} If authIndex is invalid (undefined, negative, or not an integer)
      */
-    createMessageQueue(requestId, authIndex) {
+    createMessageQueue(requestId, authIndex, requestAttemptId = null) {
         // Validate authIndex: must be a valid non-negative integer
         if (authIndex === undefined || authIndex < 0 || !Number.isInteger(authIndex)) {
             this.logger.error(
@@ -426,7 +435,12 @@ class ConnectionRegistry extends EventEmitter {
 
         const queue = new MessageQueue();
         // Add timestamp for stale queue detection
-        this.messageQueues.set(requestId, { authIndex, createdAt: Date.now(), queue });
+        this.messageQueues.set(requestId, {
+            authIndex,
+            createdAt: Date.now(),
+            queue,
+            requestAttemptId,
+        });
         return queue;
     }
 
@@ -451,6 +465,16 @@ class ConnectionRegistry extends EventEmitter {
     getAuthIndexForRequest(requestId) {
         const entry = this.messageQueues.get(requestId);
         return entry ? entry.authIndex : null;
+    }
+
+    /**
+     * Get the attempt identifier associated with a specific request
+     * @param {string} requestId - The request ID to look up
+     * @returns {string|null} The request attempt identifier, or null if not found
+     */
+    getRequestAttemptIdForRequest(requestId) {
+        const entry = this.messageQueues.get(requestId);
+        return entry ? entry.requestAttemptId || null : null;
     }
 
     /**
