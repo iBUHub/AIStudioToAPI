@@ -15,6 +15,18 @@ const mime = require("mime-types");
 class FormatConverter {
     // Placeholder signature for Gemini 3 functionCall validation
     static DUMMY_THOUGHT_SIGNATURE = "context_engineering_is_the_way_to_go";
+    static GEMINI_BUILT_IN_TOOL_KEYS = [
+        "codeExecution",
+        "code_execution",
+        "googleMaps",
+        "google_maps",
+        "googleSearch",
+        "google_search",
+        "googleSearchRetrieval",
+        "google_search_retrieval",
+        "urlContext",
+        "url_context",
+    ];
 
     // ThinkingLevel suffix mapping (lowercase -> uppercase API value)
     static THINKING_LEVEL_MAP = {
@@ -130,8 +142,9 @@ class FormatConverter {
                 tool =>
                     tool &&
                     typeof tool === "object" &&
-                    (Object.prototype.hasOwnProperty.call(tool, "googleSearch") ||
-                        Object.prototype.hasOwnProperty.call(tool, "urlContext"))
+                    FormatConverter.GEMINI_BUILT_IN_TOOL_KEYS.some(toolKey =>
+                        Object.prototype.hasOwnProperty.call(tool, toolKey)
+                    )
             )
         );
     }
