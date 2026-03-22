@@ -144,8 +144,8 @@ class FormatConverter {
                 tool =>
                     tool &&
                     typeof tool === "object" &&
-                    Array.isArray(tool.functionDeclarations) &&
-                    tool.functionDeclarations.length > 0
+                    ((Array.isArray(tool.functionDeclarations) && tool.functionDeclarations.length > 0) ||
+                        (Array.isArray(tool.function_declarations) && tool.function_declarations.length > 0))
             )
         );
     }
