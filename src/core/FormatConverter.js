@@ -168,7 +168,7 @@ class FormatConverter {
         }
 
         geminiBody.toolConfig.includeServerSideToolInvocations = true;
-        this.logger.info(
+        this.logger.debug(
             `${logPrefix} Enabled toolConfig.includeServerSideToolInvocations for built-in tools with functionDeclarations.`
         );
 
