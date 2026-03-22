@@ -1961,7 +1961,18 @@ class BrowserManager {
                 }
 
                 if (msgText.includes("[ProxyClient]")) {
-                    this.logger.info(`[Context#${authIndex}] ${msgText.replace("[ProxyClient] ", "")}`);
+                    const forwardedMessage = `[Context#${authIndex}] ${msgText.replace("[ProxyClient] ", "")}`;
+                    const browserLogType = msg.type();
+
+                    if (browserLogType === "debug") {
+                        this.logger.debug(forwardedMessage);
+                    } else if (browserLogType === "warning") {
+                        this.logger.warn(forwardedMessage);
+                    } else if (browserLogType === "error") {
+                        this.logger.error(forwardedMessage);
+                    } else {
+                        this.logger.info(forwardedMessage);
+                    }
                 } else if (msg.type() === "error") {
                     this.logger.error(`[Context#${authIndex} Page Error] ${msgText}`);
                 }
