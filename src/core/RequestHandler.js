@@ -3649,6 +3649,8 @@ class RequestHandler {
             }
         }
 
+        this.formatConverter.ensureServerSideToolInvocations(bodyObj, "[Proxy]");
+
         // Apply safety settings for native Google requests (only if not already provided)
         if (req.method === "POST" && bodyObj && bodyObj.contents && !bodyObj.safetySettings) {
             bodyObj.safetySettings = [

@@ -122,6 +122,59 @@ class FormatConverter {
         return geminiBody;
     }
 
+    hasGeminiBuiltInTools(geminiBody) {
+        return !!(
+            geminiBody &&
+            Array.isArray(geminiBody.tools) &&
+            geminiBody.tools.some(
+                tool =>
+                    tool &&
+                    typeof tool === "object" &&
+                    (Object.prototype.hasOwnProperty.call(tool, "googleSearch") ||
+                        Object.prototype.hasOwnProperty.call(tool, "urlContext"))
+            )
+        );
+    }
+
+    hasGeminiFunctionDeclarations(geminiBody) {
+        return !!(
+            geminiBody &&
+            Array.isArray(geminiBody.tools) &&
+            geminiBody.tools.some(
+                tool =>
+                    tool &&
+                    typeof tool === "object" &&
+                    Array.isArray(tool.functionDeclarations) &&
+                    tool.functionDeclarations.length > 0
+            )
+        );
+    }
+
+    ensureServerSideToolInvocations(geminiBody, logPrefix = "[Adapter]") {
+        if (!this.hasGeminiBuiltInTools(geminiBody) || !this.hasGeminiFunctionDeclarations(geminiBody)) {
+            return geminiBody;
+        }
+
+        if (
+            !geminiBody.toolConfig ||
+            typeof geminiBody.toolConfig !== "object" ||
+            Array.isArray(geminiBody.toolConfig)
+        ) {
+            geminiBody.toolConfig = {};
+        }
+
+        if (geminiBody.toolConfig.includeServerSideToolInvocations === true) {
+            return geminiBody;
+        }
+
+        geminiBody.toolConfig.includeServerSideToolInvocations = true;
+        this.logger.info(
+            `${logPrefix} Enabled toolConfig.includeServerSideToolInvocations for built-in tools with functionDeclarations.`
+        );
+
+        return geminiBody;
+    }
+
     /**
      * Sanitize tools in native Gemini requests by removing unsupported JSON Schema fields
      * like $schema and additionalProperties
@@ -818,6 +871,8 @@ class FormatConverter {
                 this.logger.info(`[Adapter] ⚠️ Force features enabled, injecting tools: [${toolsToAdd.join(", ")}]`);
             }
         }
+
+        this.ensureServerSideToolInvocations(googleRequest);
 
         // Safety settings
         googleRequest.safetySettings = [
