@@ -168,6 +168,30 @@ class StatusRoutes {
             res.json(this._getStatusData());
         });
 
+        app.get("/api/usage-stats", isAuthenticated, (req, res) => {
+            const snapshot = this.serverSystem.usageStatsService?.getSnapshot();
+            res.json(
+                snapshot || {
+                    accounts: [],
+                    records: [],
+                    startedAt: new Date().toISOString(),
+                    summary: {
+                        abortedCount: 0,
+                        activeRequests: 0,
+                        avgDurationMs: 0,
+                        errorCount: 0,
+                        formatBreakdown: [],
+                        requestCategoryBreakdown: [],
+                        successCount: 0,
+                        successRate: 0,
+                        totalRequests: 0,
+                        uniqueAccountPairs: 0,
+                        uptimeSeconds: 0,
+                    },
+                }
+            );
+        });
+
         app.put("/api/accounts/current", isAuthenticated, async (req, res) => {
             try {
                 if (this._rejectIfSystemBusy(res)) return;
