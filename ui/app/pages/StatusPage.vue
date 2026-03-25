@@ -78,6 +78,27 @@
                         <polyline points="10 9 9 9 8 9"></polyline>
                     </svg>
                 </button>
+                <button
+                    class="menu-item"
+                    :class="{ active: activeTab === 'stats' }"
+                    :title="t('usageStats')"
+                    @click="switchTab('stats')"
+                >
+                    <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="24"
+                        height="24"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    >
+                        <path d="M3 3v18h18"></path>
+                        <path d="M7 16l4-4 3 3 5-7"></path>
+                    </svg>
+                </button>
             </div>
 
             <div class="sidebar-footer">
@@ -1395,6 +1416,213 @@
                 </div>
             </div>
 
+            <!-- STATS VIEW -->
+            <div v-if="activeTab === 'stats'" class="view-container">
+                <header class="page-header stats-page-header">
+                    <div class="page-header-main">
+                        <h1>{{ t("usageStats") }}</h1>
+                        <p class="page-description">{{ t("usageStatsDescription") }}</p>
+                    </div>
+                    <div class="page-meta">
+                        <span class="meta-chip">{{ t("startedAt") }}: {{ formatDateTime(statsState.startedAt) }}</span>
+                        <span class="meta-chip"
+                            >{{ t("uptime") }}: {{ formatUptime(statsState.summary.uptimeSeconds) }}</span
+                        >
+                        <el-select v-model="timeRange" class="time-range-select">
+                            <el-option :label="t('timeRangeAll')" value="all" />
+                            <el-option :label="t('timeRange1h')" value="1h" />
+                            <el-option :label="t('timeRange6h')" value="6h" />
+                            <el-option :label="t('timeRange24h')" value="24h" />
+                            <el-option :label="t('timeRange7d')" value="7d" />
+                        </el-select>
+                    </div>
+                </header>
+
+                <div class="stats-grid">
+                    <div class="stats-card">
+                        <span class="stats-label">{{ t("total") }}</span>
+                        <strong class="stats-value">{{ filteredSummary.totalRequests }}</strong>
+                    </div>
+                    <div class="stats-card">
+                        <span class="stats-label">{{ t("successRate") }}</span>
+                        <strong class="stats-value">{{ filteredSummary.successRate }}%</strong>
+                    </div>
+                    <div class="stats-card">
+                        <span class="stats-label">{{ t("avgDuration") }}</span>
+                        <strong class="stats-value">{{ formatDuration(filteredSummary.avgDurationMs) }}</strong>
+                    </div>
+                    <div class="stats-card">
+                        <span class="stats-label">{{ t("activeRequests") }}</span>
+                        <strong class="stats-value">{{ filteredSummary.activeRequests }}</strong>
+                    </div>
+                    <div class="stats-card">
+                        <span class="stats-label">{{ t("uniqueAccountPairs") }}</span>
+                        <strong class="stats-value">{{ filteredSummary.uniqueAccountPairs }}</strong>
+                    </div>
+                    <div class="stats-card">
+                        <span class="stats-label">{{ t("requestRecords") }}</span>
+                        <strong class="stats-value">{{ filteredRecords.length }}</strong>
+                    </div>
+                </div>
+
+                <div class="stats-dashboard-grid">
+                    <section class="status-card">
+                        <h3 class="card-title">{{ t("requestSummary") }}</h3>
+                        <div class="summary-list">
+                            <div class="summary-row">
+                                <span>{{ t("success") }}</span>
+                                <strong class="status-ok">{{ filteredSummary.successCount }}</strong>
+                            </div>
+                            <div class="summary-row">
+                                <span>{{ t("failed") }}</span>
+                                <strong class="status-error">{{ filteredSummary.errorCount }}</strong>
+                            </div>
+                            <div class="summary-row">
+                                <span>{{ t("aborted") }}</span>
+                                <strong class="status-warning">{{ filteredSummary.abortedCount }}</strong>
+                            </div>
+                        </div>
+                        <div class="breakdown-block">
+                            <h4>{{ t("apiFormat") }}</h4>
+                            <div class="breakdown-list">
+                                <span
+                                    v-for="item in filteredSummary.formatBreakdown"
+                                    :key="`format-${item.key}`"
+                                    class="breakdown-chip"
+                                >
+                                    {{ translateLabel(item.key) }}: {{ item.count }}
+                                </span>
+                            </div>
+                        </div>
+                        <div class="breakdown-block">
+                            <h4>{{ t("streamingMode") }}</h4>
+                            <div class="breakdown-list">
+                                <span
+                                    v-for="item in filteredSummary.streamModeBreakdown"
+                                    :key="`streamMode-${item.key}`"
+                                    class="breakdown-chip"
+                                >
+                                    {{ translateLabel(item.key) }}: {{ item.count }}
+                                </span>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="status-card wide-card">
+                        <h3 class="card-title">{{ t("accountUsageBreakdown") }}</h3>
+                        <div v-if="filteredAccounts.length === 0" class="empty-state">
+                            {{ t("noUsageStats") }}
+                        </div>
+                        <div v-else class="table-scroll-wrapper">
+                            <table class="data-table fixed-header-table">
+                                <thead>
+                                    <tr>
+                                        <th>{{ t("account") }}</th>
+                                        <th>{{ t("total") }}</th>
+                                        <th>{{ t("success") }}</th>
+                                        <th>{{ t("failed") }}</th>
+                                        <th>{{ t("aborted") }}</th>
+                                        <th>{{ t("successRate") }}</th>
+                                        <th>{{ t("avgDuration") }}</th>
+                                        <th>{{ t("modelUsage") }}</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr v-for="item in filteredAccounts" :key="item.accountKey">
+                                        <td>{{ formatAccount(item.authIndex, item.accountName) }}</td>
+                                        <td>{{ item.totalRequests }}</td>
+                                        <td class="status-ok">{{ item.successCount }}</td>
+                                        <td class="status-error">{{ item.errorCount }}</td>
+                                        <td class="status-warning">{{ item.abortedCount }}</td>
+                                        <td>{{ item.successRate }}%</td>
+                                        <td>{{ formatDuration(item.avgDurationMs) }}</td>
+                                        <td>
+                                            <div class="breakdown-list">
+                                                <span
+                                                    v-for="mc in item.modelCounts"
+                                                    :key="mc.key"
+                                                    class="breakdown-chip"
+                                                >
+                                                    {{ mc.key }}: {{ mc.count }}
+                                                </span>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
+                </div>
+
+                <section class="status-card records-card">
+                    <div class="records-header">
+                        <h3 class="card-title">{{ t("requestRecords") }}</h3>
+                        <span class="records-order">{{ t("recentToOldest") }}</span>
+                    </div>
+                    <div v-if="filteredRecords.length === 0" class="empty-state">
+                        {{ t("noRequestRecords") }}
+                    </div>
+                    <div v-else class="table-scroll-wrapper records-scroll-wrapper">
+                        <table class="data-table fixed-header-table">
+                            <thead>
+                                <tr>
+                                    <th>{{ t("requestTime") }}</th>
+                                    <th>{{ t("requestId") }}</th>
+                                    <th>{{ t("apiFormat") }}</th>
+                                    <th>{{ t("streamingMode") }}</th>
+                                    <th>{{ t("requestModel") }}</th>
+                                    <th>{{ t("requestOutcome") }}</th>
+                                    <th>{{ t("requestStatus") }}</th>
+                                    <th>{{ t("requestDuration") }}</th>
+                                    <th>{{ t("requestAccount") }}</th>
+                                    <th>{{ t("requestAttempts") }}</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="record in filteredRecords" :key="record.sequence">
+                                    <td class="sticky-time-col">{{ formatDateTime(record.startedAt) }}</td>
+                                    <td class="mono truncate-cell">{{ record.requestId }}</td>
+                                    <td>{{ translateLabel(record.apiFormat) }}</td>
+                                    <td>{{ translateLabel(record.streamMode) }}</td>
+                                    <td>{{ record.model || "-" }}</td>
+                                    <td>
+                                        <span
+                                            class="outcome-badge"
+                                            :class="`is-${record.outcome}`"
+                                            :style="
+                                                record.outcome === 'error' && record.errorMessage
+                                                    ? 'cursor: pointer'
+                                                    : ''
+                                            "
+                                            :title="
+                                                record.outcome === 'error' && record.errorMessage
+                                                    ? t('clickToViewError')
+                                                    : ''
+                                            "
+                                            @click="showErrorDetail(record)"
+                                        >
+                                            {{ translateLabel(record.outcome) }}
+                                        </span>
+                                    </td>
+                                    <td>{{ record.statusCode ?? "-" }}</td>
+                                    <td>{{ formatDuration(record.durationMs) }}</td>
+                                    <td>{{ formatAccount(record.finalAuthIndex, record.finalAccountName) }}</td>
+                                    <td class="attempts-cell">
+                                        <span
+                                            class="attempts-count"
+                                            :class="{ 'is-clickable': record.attemptCount > 1 }"
+                                            :title="record.attemptCount > 1 ? t('clickToViewAttempts') : ''"
+                                            @click="record.attemptCount > 1 && showAttemptsDetail(record)"
+                                            >{{ record.attemptCount }}</span
+                                        >
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+
             <!-- LOGS VIEW -->
             <div v-if="activeTab === 'logs'" class="view-container logs-view-container">
                 <header class="page-header" style="display: flex; justify-content: space-between; align-items: center">
@@ -1535,6 +1763,256 @@ const langVersion = ref(0);
 const t = (key, options) => {
     langVersion.value; // Access to track changes
     return I18n.t(key, options);
+};
+
+// Stats tab state (reused from UsageStatsPage)
+const statsState = reactive({
+    accounts: [],
+    records: [],
+    startedAt: null,
+    summary: {
+        abortedCount: 0,
+        activeRequests: 0,
+        avgDurationMs: 0,
+        errorCount: 0,
+        formatBreakdown: [],
+        requestCategoryBreakdown: [],
+        successCount: 0,
+        successRate: 0,
+        totalRequests: 0,
+        uniqueAccountPairs: 0,
+        uptimeSeconds: 0,
+    },
+});
+
+// Time range filter: 'all' | '1h' | '6h' | '24h' | '7d'
+const timeRange = ref("all");
+
+const TIME_RANGE_MS = {
+    "1h": 60 * 60 * 1000,
+    "6h": 6 * 60 * 60 * 1000,
+    "7d": 7 * 24 * 60 * 60 * 1000,
+    "24h": 24 * 60 * 60 * 1000,
+    all: 0,
+};
+
+// Computed: records filtered by time range (records are newest-first)
+const filteredRecords = computed(() => {
+    if (timeRange.value === "all") return statsState.records;
+    const cutoff = Date.now() - TIME_RANGE_MS[timeRange.value];
+    return statsState.records.filter(r => {
+        const ts = r.startedAt ? new Date(r.startedAt).getTime() : 0;
+        return ts >= cutoff;
+    });
+});
+
+// Computed: summary recalculated from filtered records
+const filteredSummary = computed(() => {
+    const records = filteredRecords.value;
+    if (!records.length) {
+        return {
+            abortedCount: 0,
+            activeRequests: statsState.summary.activeRequests,
+            avgDurationMs: 0,
+            errorCount: 0,
+            formatBreakdown: [],
+            requestCategoryBreakdown: [],
+            streamModeBreakdown: [],
+            successCount: 0,
+            successRate: 0,
+            totalRequests: 0,
+            uniqueAccountPairs: 0,
+        };
+    }
+    const totalRequests = records.length;
+    const successCount = records.filter(r => r.outcome === "success").length;
+    const errorCount = records.filter(r => r.outcome === "error").length;
+    const abortedCount = records.filter(r => r.outcome === "aborted").length;
+    const totalDurationMs = records.reduce((sum, r) => sum + (r.durationMs || 0), 0);
+    const avgDurationMs = totalRequests > 0 ? Math.round(totalDurationMs / totalRequests) : 0;
+    const successRate = totalRequests > 0 ? Number(((successCount / totalRequests) * 100).toFixed(1)) : 0;
+
+    // Build per-format and per-category breakdowns from filtered records
+    const formatCounts = {};
+    const categoryCounts = {};
+    const streamModeCounts = {};
+    records.forEach(r => {
+        const fmt = r.apiFormat || "unknown";
+        formatCounts[fmt] = (formatCounts[fmt] || 0) + 1;
+        const cat = r.requestCategory || "unknown";
+        categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
+        const sm = r.streamMode || "nonStream";
+        streamModeCounts[sm] = (streamModeCounts[sm] || 0) + 1;
+    });
+    const formatBreakdown = Object.entries(formatCounts)
+        .map(([key, count]) => ({ count, key }))
+        .sort((a, b) => b.count - a.count);
+    const requestCategoryBreakdown = Object.entries(categoryCounts)
+        .map(([key, count]) => ({ count, key }))
+        .sort((a, b) => b.count - a.count);
+    const streamModeBreakdown = Object.entries(streamModeCounts)
+        .map(([key, count]) => ({ count, key }))
+        .sort((a, b) => b.count - a.count);
+
+    // Unique accounts from filtered records
+    const uniqueAccounts = new Set(records.map(r => r.finalAuthIndex));
+
+    return {
+        abortedCount,
+        activeRequests: statsState.summary.activeRequests,
+        avgDurationMs,
+        errorCount,
+        formatBreakdown,
+        requestCategoryBreakdown,
+        streamModeBreakdown,
+        successCount,
+        successRate,
+        totalRequests,
+        uniqueAccountPairs: uniqueAccounts.size,
+    };
+});
+
+// Computed: per-account stats recalculated from filtered records
+const filteredAccounts = computed(() => {
+    const records = filteredRecords.value;
+    if (!records.length) return [];
+    const accountMap = {};
+    records.forEach(r => {
+        const key = `${r.finalAuthIndex}-${r.finalAccountName}`;
+        if (!accountMap[key]) {
+            accountMap[key] = {
+                abortedCount: 0,
+                accountKey: key,
+                accountName: r.finalAccountName,
+                authIndex: r.finalAuthIndex,
+                errorCount: 0,
+                modelCounts: {},
+                successCount: 0,
+                totalDurationMs: 0,
+                totalRequests: 0,
+            };
+        }
+        const acc = accountMap[key];
+        acc.totalRequests += 1;
+        acc.totalDurationMs += r.durationMs || 0;
+        if (r.outcome === "success") acc.successCount += 1;
+        else if (r.outcome === "aborted") acc.abortedCount += 1;
+        else acc.errorCount += 1;
+        const mk = r.model || "unknown";
+        acc.modelCounts[mk] = (acc.modelCounts[mk] || 0) + 1;
+    });
+    return Object.values(accountMap)
+        .map(acc => ({
+            ...acc,
+            avgDurationMs: acc.totalRequests > 0 ? Math.round(acc.totalDurationMs / acc.totalRequests) : 0,
+            modelCounts: Object.entries(acc.modelCounts)
+                .map(([key, count]) => ({ count, key }))
+                .sort((a, b) => b.count - a.count),
+            successRate: acc.totalRequests > 0 ? Number(((acc.successCount / acc.totalRequests) * 100).toFixed(1)) : 0,
+        }))
+        .sort((a, b) => b.totalRequests - a.totalRequests);
+});
+
+const translateLabel = value => {
+    if (!value) return "-";
+    // Map streamMode backend values to i18n keys
+    const keyMap = { fake: "fakeStream", non: "nonStream", real: "realStream" };
+    const keyToTranslate = keyMap[value] || (value === "error" ? "failed" : value);
+    const translated = t(keyToTranslate);
+    return translated === keyToTranslate ? value : translated;
+};
+
+const formatDateTime = value => {
+    if (!value) return "-";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleString();
+};
+
+const formatDuration = value => {
+    const duration = Number(value);
+    if (!Number.isFinite(duration)) return "-";
+    if (duration < 1000) return `${duration} ms`;
+    if (duration < 60000) return `${(duration / 1000).toFixed(1)} s`;
+    return `${(duration / 60000).toFixed(1)} min`;
+};
+
+const formatUptime = seconds => {
+    const total = Number(seconds);
+    if (!Number.isFinite(total)) return "-";
+    const days = Math.floor(total / 86400);
+    const hours = Math.floor((total % 86400) / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+
+    const parts = [];
+    if (days > 0) parts.push(`${days}d`);
+    if (hours > 0 || parts.length > 0) parts.push(`${hours}h`);
+    parts.push(`${minutes}m`);
+    return parts.join(" ");
+};
+
+const formatAccount = (authIndex, accountName) => {
+    if (authIndex === null || authIndex === undefined) {
+        return accountName || "-";
+    }
+    return `#${authIndex} ${accountName || "N/A"}`;
+};
+const fetchUsageStats = async () => {
+    const res = await fetch("/api/usage-stats");
+    if (res.redirected) {
+        window.location.href = res.url;
+        return;
+    }
+    if (res.status === 401) {
+        window.location.href = "/login";
+        return;
+    }
+    if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+    }
+
+    const data = await res.json();
+    statsState.accounts = data.accounts || [];
+    statsState.records = data.records || [];
+    statsState.startedAt = data.startedAt || null;
+    statsState.summary = {
+        ...statsState.summary,
+        ...(data.summary || {}),
+    };
+};
+
+const showErrorDetail = record => {
+    if (!record || record.outcome !== "error") return;
+    ElMessageBox.alert(record.errorMessage || t("errorUnknown"), t("errorDetailTitle"), {
+        confirmButtonText: t("ok"),
+        lockScroll: false,
+        type: "error",
+    });
+};
+
+const showAttemptsDetail = record => {
+    if (!record || !record.attempts || record.attempts.length === 0) return;
+    const paths = record.attempts
+        .map((item, index) => {
+            const [authIndex, accountName] = (item.accountKey || "").split(":");
+            return `${index + 1}. ${formatAccount(Number(authIndex), accountName)}`;
+        })
+        .join("\n");
+    ElMessageBox.alert(paths, t("attemptsPathTitle"), {
+        confirmButtonText: t("ok"),
+        lockScroll: false,
+    });
+};
+
+const scheduleUpdate = () => {
+    if (!isActive) return;
+    const randomInterval = 4000 + Math.floor(Math.random() * 3000);
+    updateTimer = setTimeout(async () => {
+        await Promise.all([updateContent(), fetchUsageStats()]).catch(err => {
+            console.error("Error fetching data:", err.message || err);
+        });
+        scheduleUpdate();
+    }, randomInterval);
 };
 
 const getApiErrorMessage = data => {
@@ -2322,16 +2800,6 @@ const updateContent = async () => {
     }
 };
 
-const scheduleNextUpdate = () => {
-    if (!isActive) {
-        return;
-    }
-    const randomInterval = 4000 + Math.floor(Math.random() * 3000);
-    updateTimer = setTimeout(() => {
-        updateContent().finally(scheduleNextUpdate);
-    }, randomInterval);
-};
-
 const triggerFileUpload = () => {
     if (fileInput.value) {
         fileInput.value.click();
@@ -2683,7 +3151,8 @@ onMounted(() => {
             state.logs = t("loading");
         }
     });
-    updateContent().finally(scheduleNextUpdate);
+    updateContent().finally(scheduleUpdate);
+    fetchUsageStats().finally(scheduleUpdate);
 
     // Check for updates once on initial load
     checkForUpdates();
@@ -3346,6 +3815,417 @@ watchEffect(() => {
     width: 100%;
 }
 
+/* Stats View Styles */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.stats-dashboard-grid {
+    display: grid;
+    grid-template-columns: minmax(320px, 1fr) minmax(0, 2fr);
+    gap: 24px;
+    margin-bottom: 24px;
+}
+
+.stats-card {
+    padding: 18px 20px;
+}
+
+.stats-label {
+    display: block;
+    color: @text-secondary;
+    font-size: 0.85rem;
+    margin-bottom: 8px;
+}
+
+.stats-value {
+    display: block;
+    color: @text-primary;
+    font-size: 1.4rem;
+    font-weight: 700;
+}
+
+.meta-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 8px 12px;
+    border-radius: 999px;
+    background: @background-white;
+    border: 1px solid @border-light;
+    color: @text-secondary;
+    font-size: 0.85rem;
+}
+
+.time-range-select {
+    width: 120px;
+
+    :deep(.el-select__wrapper) {
+        background: @background-white;
+        border: 1px solid @border-light;
+        box-shadow: none !important;
+        border-radius: 999px !important;
+        padding: 4px 12px; // 调整 padding 以使总体高度匹配左侧的 meta-chip
+        min-height: 35px; // 设定最小高度以贴合原来的 `padding: 8px 12px` 的原生 select
+        transition: all @transition-fast;
+
+        &:hover {
+            border-color: @primary-color;
+            color: @text-primary;
+        }
+
+        &.is-focused,
+        &.is-focus {
+            border-color: @primary-color;
+            box-shadow: 0 0 0 2px rgba(var(--color-primary-rgb), 0.15) !important;
+        }
+    }
+
+    :deep(.el-select__placeholder) {
+        color: @text-secondary;
+        font-size: 0.85rem;
+        font-weight: 400; // 还原正常字体粗细
+    }
+
+    :deep(.el-select__selected-item) {
+        color: @text-secondary !important;
+        font-size: 0.85rem !important;
+        font-weight: 400 !important; // 绝对覆盖默认字体粗细
+    }
+
+    :deep(.el-select__suffix) {
+        color: @text-secondary;
+    }
+}
+
+.page-description {
+    color: @text-secondary;
+    margin: 0;
+}
+
+.wide-card {
+    min-width: 0;
+}
+
+.summary-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.summary-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.mono {
+    font-family: @font-family-mono;
+}
+
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+
+    th,
+    td {
+        text-align: left;
+        padding: 12px 10px;
+        border-bottom: 1px solid @border-light;
+        vertical-align: top;
+    }
+
+    th {
+        color: @text-secondary;
+        font-weight: 600;
+        background: rgba(0, 0, 0, 0.02);
+        position: sticky;
+        top: 0;
+        z-index: 1;
+    }
+
+    tbody tr:hover {
+        background: rgba(var(--color-primary-rgb), 0.06);
+    }
+}
+
+.empty-state {
+    color: @text-secondary;
+    text-align: center;
+    padding: 24px 0;
+}
+
+.breakdown-block {
+    margin-top: 20px;
+
+    h4 {
+        font-size: 0.85rem;
+        color: @text-secondary;
+        margin: 0 0 10px;
+    }
+}
+
+.breakdown-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.breakdown-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: @background-light;
+    color: @text-secondary;
+    font-size: 0.85rem;
+}
+
+.records-card {
+    margin-bottom: 0;
+}
+
+.records-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+}
+
+.records-order {
+    color: @text-secondary;
+    font-size: 0.85rem;
+}
+
+.records-shell {
+    max-height: 60vh;
+}
+
+/* Stats page header: allow meta chips to wrap below title on narrow screens */
+.stats-page-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.page-header-main {
+    flex: 1;
+    min-width: 0;
+}
+
+.page-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+/* Scrollable table wrapper */
+.table-scroll-wrapper {
+    overflow-x: auto;
+    border: 1px solid @border-light;
+    border-radius: @border-radius-md;
+    -webkit-overflow-scrolling: touch;
+    max-height: 60vh;
+
+    &::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+    }
+
+    &::-webkit-scrollbar-track {
+        background: transparent;
+    }
+
+    &::-webkit-scrollbar-thumb {
+        background: @border-color;
+        border-radius: 3px;
+
+        &:hover {
+            background: @text-secondary;
+        }
+    }
+}
+
+.fixed-header-table {
+    width: max-content;
+    min-width: 100%;
+
+    th,
+    td {
+        white-space: nowrap;
+    }
+
+    /* Solid background for generic th to prevent scroll-under contents from showing through */
+    th {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        background: linear-gradient(rgba(0, 0, 0, 0.02), rgba(0, 0, 0, 0.02)), @background-white;
+        /* Use box-shadow for bottom border to prevent sticky border-collapse disappearance */
+        box-shadow: inset 0 -1px 0 @border-light;
+    }
+
+    th:first-child,
+    td:first-child {
+        position: sticky;
+        left: 0;
+        z-index: 2;
+    }
+
+    td:first-child {
+        background: @background-white;
+        box-shadow: inset -1px 0 0 @border-light;
+    }
+
+    th:first-child {
+        z-index: 3;
+        /* Intersecting cell gets combined left and bottom shadows */
+        box-shadow: inset -1px -1px 0 @border-light;
+    }
+
+    /* Opaque hover background for sticky cell to avoid scrolled content bleed-through */
+    tbody tr:hover td:first-child {
+        background:
+            linear-gradient(rgba(var(--color-primary-rgb), 0.06), rgba(var(--color-primary-rgb), 0.06)),
+            @background-white;
+    }
+}
+
+/* Base stats-grid responsivenes explicitly ensured */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+/* truncate cells for very long text (e.g. paths, IDs) */
+.truncate-cell {
+    max-width: 250px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.outcome-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 72px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 600;
+
+    &.is-success {
+        color: @success-color;
+        background: rgba(var(--color-success-rgb), 0.12);
+    }
+
+    &.is-error {
+        color: @error-color;
+        background: rgba(var(--color-error-rgb), 0.12);
+    }
+
+    &.is-aborted {
+        color: @warning-color;
+        background: rgba(var(--color-warning-rgb), 0.12);
+    }
+}
+
+.attempts-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 32px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    background: var(--bg-hover);
+
+    &.is-clickable {
+        cursor: pointer;
+        color: var(--color-primary);
+        background: rgba(var(--color-primary-rgb), 0.1);
+
+        &:hover {
+            background: rgba(var(--color-primary-rgb), 0.2);
+        }
+    }
+}
+
+@media (max-width: 768px) {
+    .stats-page-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .page-meta {
+        width: 100%;
+        justify-content: flex-start;
+    }
+
+    .dashboard-grid,
+    .stats-dashboard-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .stats-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+    }
+
+    .table-scroll-wrapper {
+        max-height: 45vh;
+    }
+}
+
+@media (max-width: 599px) {
+    .stats-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .stats-card {
+        padding: 14px 16px;
+    }
+
+    .stats-value {
+        font-size: 1.25rem;
+    }
+
+    .stats-dashboard-grid {
+        gap: 16px;
+    }
+
+    .page-meta {
+        gap: 6px;
+    }
+
+    .meta-chip {
+        font-size: 0.8rem;
+        padding: 6px 10px;
+    }
+
+    .time-range-select {
+        :deep(.el-select__wrapper) {
+            font-size: 14px; // Prevent select text from shrinking at narrow widths
+        }
+
+        :deep(.el-select__placeholder),
+        :deep(.el-select__selected-item) {
+            font-size: 0.82rem;
+        }
+    }
+}
+
 .version-footer {
     margin-top: 30px;
     display: flex;
@@ -3579,6 +4459,10 @@ watchEffect(() => {
            For now assuming similar layout logic or letting it fall back.
         */
         height: calc(100vh - 106px); /* Keeping the old logic for mobile specific height if needed */
+    }
+
+    .stats-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }
 

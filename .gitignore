@@ -27,6 +27,9 @@ auth-*.json
 users.csv
 cache/
 
+# Usage statistics data
+data/
+
 # Temporary files
 tmp/
 ui/dist/
