@@ -352,14 +352,9 @@ class BrowserManager {
         return Math.abs(hashValue);
     }
 
-    /**
-     * Feature: Generate Privacy Protection Script (Stealth Mode)
-     * Injects specific GPU info and masks webdriver properties to avoid bot detection.
-     */
-    _getPrivacyProtectionScript(authIndex) {
+    _getFingerprintSeedSource(authIndex) {
         let seedSource = `account_salt_${authIndex}`;
 
-        // Attempt to use accountName (email) for better consistency across index reordering
         try {
             const authData = this.authSource.getAuth(authIndex);
             if (authData && authData.accountName && typeof authData.accountName === "string") {
@@ -372,63 +367,211 @@ class BrowserManager {
             // Fallback to index-based seed if auth data read fails
         }
 
-        // Use a consistent seed so the fingerprint remains static for this specific account
-        let seed = this._generateIdentitySeed(seedSource);
+        return seedSource;
+    }
 
-        // Pseudo-random generator based on the seed
-        const deterministicRandom = () => {
-            const x = Math.sin(seed++) * 10000;
+    _createDeterministicRandom(seed) {
+        let currentSeed = seed;
+        return () => {
+            const x = Math.sin(currentSeed++) * 10000;
             return x - Math.floor(x);
         };
+    }
 
-        // Select a GPU profile consistent with this account
-        const gpuProfiles = [
-            { renderer: "Intel Iris OpenGL Engine", vendor: "Intel Inc." },
-            {
-                renderer: "ANGLE (NVIDIA, NVIDIA GeForce GTX 1050 Ti Direct3D11 vs_5_0 ps_5_0, D3D11)",
-                vendor: "Google Inc. (NVIDIA)",
-            },
-            {
-                renderer: "ANGLE (AMD, AMD Radeon RX 580 Series Direct3D11 vs_5_0 ps_5_0, D3D11)",
-                vendor: "Google Inc. (AMD)",
-            },
+    _getFingerprintProfile(authIndex) {
+        const seed = this._generateIdentitySeed(this._getFingerprintSeedSource(authIndex));
+        const deterministicRandom = this._createDeterministicRandom(seed);
+        const pick = values => values[Math.floor(deterministicRandom() * values.length)];
+        const version = "146.0.7680.80";
+        const isMac = deterministicRandom() < 0.25;
+        const locales = [
+            { acceptLanguage: "en-US,en;q=0.9", language: "en-US", languages: ["en-US", "en"], locale: "en-US" },
         ];
-        const profile = gpuProfiles[Math.floor(deterministicRandom() * gpuProfiles.length)];
+        const screenProfile = pick(
+            isMac
+                ? [
+                      { screen: { availHeight: 860, availWidth: 1440, height: 900, width: 1440 } },
+                      { screen: { availHeight: 1070, availWidth: 1728, height: 1117, width: 1728 } },
+                  ]
+                : [
+                      { screen: { availHeight: 1040, availWidth: 1920, height: 1080, width: 1920 } },
+                      { screen: { availHeight: 1400, availWidth: 2560, height: 1440, width: 2560 } },
+                  ]
+        );
+        const localeProfile = pick(locales);
 
-        // We inject a noise variable to make the environment unique but stable
+        const profile = isMac
+            ? {
+                  browserName: "Chrome",
+                  browserVersion: version,
+                  colorDepth: 24,
+                  deviceMemory: pick([8, 16]),
+                  devicePixelRatio: 2,
+                  gpu: pick([
+                      { renderer: "Intel Iris OpenGL Engine", vendor: "Intel Inc." },
+                      { renderer: "Intel Iris Plus Graphics OpenGL Engine", vendor: "Intel Inc." },
+                  ]),
+                  hardwareConcurrency: pick([8, 10, 12]),
+                  maxTouchPoints: 0,
+                  mobile: false,
+                  platform: "MacIntel",
+                  pluginCount: pick([4, 5, 6]),
+                  userAgent: `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${version} Safari/537.36`,
+                  vendor: "Google Inc.",
+              }
+            : {
+                  browserName: "Chrome",
+                  browserVersion: version,
+                  colorDepth: 24,
+                  deviceMemory: pick([4, 8, 16]),
+                  devicePixelRatio: 1,
+                  gpu: pick([
+                      {
+                          renderer: "ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                          vendor: "Google Inc. (Intel)",
+                      },
+                      {
+                          renderer: "ANGLE (Intel, Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                          vendor: "Google Inc. (Intel)",
+                      },
+                      {
+                          renderer: "ANGLE (Intel, Intel(R) Iris(R) Xe Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                          vendor: "Google Inc. (Intel)",
+                      },
+                      {
+                          renderer: "ANGLE (NVIDIA, NVIDIA GeForce GTX 1050 Ti Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                          vendor: "Google Inc. (NVIDIA)",
+                      },
+                      {
+                          renderer: "ANGLE (NVIDIA, NVIDIA GeForce GTX 1660 SUPER Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                          vendor: "Google Inc. (NVIDIA)",
+                      },
+                      {
+                          renderer: "ANGLE (NVIDIA, NVIDIA GeForce RTX 2060 SUPER Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                          vendor: "Google Inc. (NVIDIA)",
+                      },
+                      {
+                          renderer: "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                          vendor: "Google Inc. (NVIDIA)",
+                      },
+                      {
+                          renderer: "ANGLE (AMD, AMD Radeon(TM) Vega 8 Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                          vendor: "Google Inc. (AMD)",
+                      },
+                      {
+                          renderer: "ANGLE (AMD, AMD Radeon RX 580 Series Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                          vendor: "Google Inc. (AMD)",
+                      },
+                      {
+                          renderer: "ANGLE (AMD, AMD Radeon RX 6600 XT Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                          vendor: "Google Inc. (AMD)",
+                      },
+                  ]),
+                  hardwareConcurrency: pick([4, 8, 12, 16]),
+                  maxTouchPoints: 0,
+                  mobile: false,
+                  platform: "Win32",
+                  pluginCount: pick([3, 4, 5, 6, 7]),
+                  userAgent: `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${version} Safari/537.36`,
+                  vendor: "Google Inc.",
+              };
+
         const randomArtifact = Math.floor(deterministicRandom() * 1000);
+
+        return {
+            ...localeProfile,
+            ...screenProfile,
+            ...profile,
+            appVersion: profile.userAgent.replace(/^Mozilla\//, ""),
+            randomArtifact,
+            seed,
+        };
+    }
+
+    /**
+     * Feature: Generate Privacy Protection Script (Stealth Mode)
+     * Injects specific GPU info and masks webdriver properties to avoid bot detection.
+     */
+    _getPrivacyProtectionScript(authIndex) {
+        const profile = this._getFingerprintProfile(authIndex);
+        const serializedProfile = JSON.stringify(profile);
 
         return `
             (function() {
                 if (window._privacyProtectionInjected) return;
                 window._privacyProtectionInjected = true;
 
+                const profile = ${serializedProfile};
+
                 try {
-                    // 1. Mask WebDriver property
+                    const defineNavigatorValue = (key, value) => {
+                        Object.defineProperty(navigator, key, {
+                            configurable: true,
+                            get: () => value,
+                        });
+                    };
+
+                    // 1. Mask WebDriver property and align navigator fields with the selected profile
                     Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                    defineNavigatorValue('userAgent', profile.userAgent);
+                    defineNavigatorValue('appVersion', profile.appVersion);
+                    defineNavigatorValue('platform', profile.platform);
+                    defineNavigatorValue('vendor', profile.vendor);
+                    defineNavigatorValue('language', profile.language);
+                    defineNavigatorValue('languages', profile.languages);
+                    defineNavigatorValue('hardwareConcurrency', profile.hardwareConcurrency);
+                    defineNavigatorValue('deviceMemory', profile.deviceMemory);
+                    defineNavigatorValue('maxTouchPoints', profile.maxTouchPoints);
 
                     // 2. Mock Plugins if empty
                     if (navigator.plugins.length === 0) {
+                        const pluginArray = Array.from({ length: profile.pluginCount }, (_, index) => ({
+                            name: 'Chrome PDF Plugin ' + (index + 1),
+                            filename: 'internal-pdf-viewer-' + (index + 1),
+                            description: 'Portable Document Format',
+                        }));
+
                         Object.defineProperty(navigator, 'plugins', {
-                            get: () => new Array(${3 + Math.floor(deterministicRandom() * 3)}),
+                            configurable: true,
+                            get: () => pluginArray,
                         });
                     }
 
-                    // 3. Spoof WebGL Renderer (High Impact)
+                    // 3. Align screen metadata with the selected device profile
+                    const screenOverrides = {
+                        availHeight: profile.screen.availHeight,
+                        availWidth: profile.screen.availWidth,
+                        colorDepth: profile.colorDepth,
+                        height: profile.screen.height,
+                        pixelDepth: profile.colorDepth,
+                        width: profile.screen.width,
+                    };
+                    for (const [key, value] of Object.entries(screenOverrides)) {
+                        Object.defineProperty(window.screen, key, {
+                            configurable: true,
+                            get: () => value,
+                        });
+                    }
+                    Object.defineProperty(window, 'devicePixelRatio', {
+                        configurable: true,
+                        get: () => profile.devicePixelRatio,
+                    });
+
+                    // 4. Spoof WebGL Renderer (High Impact)
                     const getParameterProxy = WebGLRenderingContext.prototype.getParameter;
                     WebGLRenderingContext.prototype.getParameter = function(parameter) {
                         // 37445: UNMASKED_VENDOR_WEBGL
                         // 37446: UNMASKED_RENDERER_WEBGL
-                        if (parameter === 37445) return '${profile.vendor}';
-                        if (parameter === 37446) return '${profile.renderer}';
+                        if (parameter === 37445) return profile.gpu.vendor;
+                        if (parameter === 37446) return profile.gpu.renderer;
                         return getParameterProxy.apply(this, arguments);
                     };
 
-                    // 4. Inject benign noise
-                    window['_canvas_noise_${randomArtifact}'] = '${randomArtifact}';
+                    // 5. Inject benign noise
+                    window['_canvas_noise_' + profile.randomArtifact] = String(profile.randomArtifact);
 
                     if (window === window.top) {
-                        console.log("[ProxyClient] Privacy protection layer active: ${profile.renderer}");
+                        console.log("[ProxyClient] Privacy profile active: " + profile.browserName + " / " + profile.gpu.renderer);
 
                         // PostMessage responder for authIndex requests from cross-origin iframes
                         // Injected via addInitScript so it's ready BEFORE any iframe loads (no race condition)
@@ -1900,9 +2043,13 @@ class BrowserManager {
                 throw new Error(`Failed to get or parse auth source for index ${authIndex}.`);
             }
 
-            // Viewport Randomization
-            const randomWidth = 1920 + Math.floor(Math.random() * 50);
-            const randomHeight = 1080 + Math.floor(Math.random() * 50);
+            const fingerprintProfile = this._getFingerprintProfile(authIndex);
+
+            // Keep viewport slightly randomized while preserving a consistent device profile.
+            const viewportInsetX = Math.floor(Math.random() * 121);
+            const viewportInsetY = 72 + Math.floor(Math.random() * 89);
+            const randomWidth = Math.max(1280, fingerprintProfile.screen.width - viewportInsetX);
+            const randomHeight = Math.max(720, fingerprintProfile.screen.height - viewportInsetY);
 
             // Check abort status before expensive operations
             if (this.abortedContexts.has(authIndex) || (isBackgroundTask && this._backgroundPreloadAbort)) {
@@ -1910,8 +2057,14 @@ class BrowserManager {
             }
 
             context = await this.browser.newContext({
-                deviceScaleFactor: 1,
+                deviceScaleFactor: fingerprintProfile.devicePixelRatio,
+                extraHTTPHeaders: { "Accept-Language": fingerprintProfile.acceptLanguage },
+                hasTouch: fingerprintProfile.maxTouchPoints > 0,
+                isMobile: fingerprintProfile.mobile,
+                locale: fingerprintProfile.locale,
+                screen: fingerprintProfile.screen,
                 storageState: storageStateObject,
+                userAgent: fingerprintProfile.userAgent,
                 viewport: { height: randomHeight, width: randomWidth },
                 ...(proxyConfig ? { proxy: proxyConfig } : {}),
             });
