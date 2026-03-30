@@ -3147,7 +3147,7 @@ class FormatConverter {
                 typeof textFormat.format === "string" ? textFormat.format : textFormat.format?.type || null;
 
             if (formatType === "json_schema" && typeof textFormat.format === "object") {
-                // Follow the official Responses API shape:
+                // Follow the official Response API shape:
                 // text.format = { type: "json_schema", name, schema, strict }
                 const jsonSchemaConfig = textFormat.format;
                 const schema = jsonSchemaConfig.schema;
