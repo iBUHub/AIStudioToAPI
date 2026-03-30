@@ -663,9 +663,7 @@ class RequestHandler {
         proxyRequest.is_generative = isGenerativeRequest;
         this._initializeProxyRequestAttempt(proxyRequest);
 
-        const wantsStreamByHeader = req.headers.accept && req.headers.accept.includes("text/event-stream");
-        const wantsStreamByPath = req.path.includes(":streamGenerateContent");
-        const wantsStream = wantsStreamByHeader || wantsStreamByPath;
+        const wantsStream = req.path.includes(":streamGenerateContent");
         res.__proxyResponseStreamMode = wantsStream ? proxyRequest.streaming_mode : null;
 
         try {
