@@ -677,9 +677,9 @@ class RequestHandler {
 
             if (wantsStream) {
                 this.logger.info(
-                    `[Request] Client enabled streaming (${this.serverSystem.streamingMode}), entering streaming processing mode...`
+                    `[Request] Client enabled streaming (${proxyRequest.streaming_mode}), entering streaming processing mode...`
                 );
-                if (this.serverSystem.streamingMode === "fake") {
+                if (proxyRequest.streaming_mode === "fake") {
                     await this._handlePseudoStreamResponse(proxyRequest, messageQueue, req, res);
                 } else {
                     await this._handleRealStreamResponse(proxyRequest, messageQueue, req, res);
@@ -782,7 +782,6 @@ class RequestHandler {
 
         const isOpenAIStream = req.body.stream === true;
         const systemStreamMode = this.serverSystem.streamingMode;
-        const useRealStream = isOpenAIStream && systemStreamMode === "real";
 
         // Handle usage counting
         const usageCount = this.authSwitcher.incrementUsageCount();
@@ -798,15 +797,19 @@ class RequestHandler {
         }
 
         // Translate OpenAI format to Google format (also handles model name suffix parsing)
-        let googleBody, model;
+        let googleBody, model, modelStreamingMode;
         try {
             const result = await this.formatConverter.translateOpenAIToGoogle(req.body);
             googleBody = result.googleRequest;
             model = result.cleanModelName;
+            modelStreamingMode = result.modelStreamingMode || null;
         } catch (error) {
             this.logger.error(`[Adapter] OpenAI request translation failed: ${error.message}`);
             return this._sendErrorResponse(res, 400, "Invalid OpenAI request format.");
         }
+
+        const effectiveStreamMode = modelStreamingMode || systemStreamMode;
+        const useRealStream = isOpenAIStream && effectiveStreamMode === "real";
 
         const googleEndpoint = useRealStream ? "streamGenerateContent" : "generateContent";
         const proxyRequest = {
@@ -1149,7 +1152,6 @@ class RequestHandler {
             Object.entries(responseDefaultsRaw).filter(([, v]) => v !== undefined)
         );
         const systemStreamMode = this.serverSystem.streamingMode;
-        const useRealStream = isOpenAIStream && systemStreamMode === "real";
 
         // Handle usage counting
         const usageCount = this.authSwitcher.incrementUsageCount();
@@ -1165,15 +1167,19 @@ class RequestHandler {
         }
 
         // Translate OpenAI Response format to Google format
-        let googleBody, model;
+        let googleBody, model, modelStreamingMode;
         try {
             const result = await this.formatConverter.translateOpenAIResponseToGoogle(req.body);
             googleBody = result.googleRequest;
             model = result.cleanModelName;
+            modelStreamingMode = result.modelStreamingMode || null;
         } catch (error) {
             this.logger.error(`[Adapter] OpenAI Response request translation failed: ${error.message}`);
             return this._sendErrorResponse(res, 400, "Invalid OpenAI Response request format.");
         }
+
+        const effectiveStreamMode = modelStreamingMode || systemStreamMode;
+        const useRealStream = isOpenAIStream && effectiveStreamMode === "real";
 
         const googleEndpoint = useRealStream ? "streamGenerateContent" : "generateContent";
         const proxyRequest = {
@@ -1484,7 +1490,6 @@ class RequestHandler {
 
         const isClaudeStream = req.body.stream === true;
         const systemStreamMode = this.serverSystem.streamingMode;
-        const useRealStream = isClaudeStream && systemStreamMode === "real";
 
         // Handle usage counting
         const usageCount = this.authSwitcher.incrementUsageCount();
@@ -1500,15 +1505,19 @@ class RequestHandler {
         }
 
         // Translate Claude format to Google format
-        let googleBody, model;
+        let googleBody, model, modelStreamingMode;
         try {
             const result = await this.formatConverter.translateClaudeToGoogle(req.body);
             googleBody = result.googleRequest;
             model = result.cleanModelName;
+            modelStreamingMode = result.modelStreamingMode || null;
         } catch (error) {
             this.logger.error(`[Adapter] Claude request translation failed: ${error.message}`);
             return this._sendClaudeErrorResponse(res, 400, "invalid_request_error", "Invalid Claude request format.");
         }
+
+        const effectiveStreamMode = modelStreamingMode || systemStreamMode;
+        const useRealStream = isClaudeStream && effectiveStreamMode === "real";
 
         const googleEndpoint = useRealStream ? "streamGenerateContent" : "generateContent";
         const proxyRequest = {
@@ -3534,6 +3543,7 @@ class RequestHandler {
             /^(\/v1beta\/models\/)([^:]+)(:(generateContent|streamGenerateContent).*)$/
         );
         let modelThinkingLevel = null;
+        let modelStreamingMode = null;
 
         if (modelPathMatch) {
             const pathPrefix = modelPathMatch[1];
@@ -3541,14 +3551,27 @@ class RequestHandler {
             const pathSuffix = modelPathMatch[3];
 
             const FormatConverter = require("./FormatConverter");
-            const { cleanModelName, thinkingLevel } = FormatConverter.parseModelThinkingLevel(rawModelName);
+            const { cleanModelName: streamStrippedModel, streamingMode } =
+                FormatConverter.parseModelStreamingModeSuffix(rawModelName);
+            const { cleanModelName, thinkingLevel } = FormatConverter.parseModelThinkingLevel(streamStrippedModel);
+
+            if (streamingMode) {
+                modelStreamingMode = streamingMode;
+                this.logger.info(
+                    `[Proxy] Detected streamingMode suffix in model path: "${rawModelName}" -> model="${streamStrippedModel}", streamingMode="${streamingMode}"`
+                );
+            }
 
             if (thinkingLevel) {
                 modelThinkingLevel = thinkingLevel;
-                cleanPath = `${pathPrefix}${cleanModelName}${pathSuffix}`;
                 this.logger.info(
                     `[Proxy] Detected thinkingLevel suffix in model path: "${rawModelName}" -> model="${cleanModelName}", thinkingLevel="${thinkingLevel}"`
                 );
+            }
+
+            // Always strip recognized directives from path model name
+            if (cleanModelName !== rawModelName) {
+                cleanPath = `${pathPrefix}${cleanModelName}${pathSuffix}`;
             }
         }
 
@@ -3657,6 +3680,8 @@ class RequestHandler {
 
         this.logger.debug(`[Proxy] Debug: Final Gemini Request (Google Native) = ${JSON.stringify(bodyObj, null, 2)}`);
 
+        const effectiveStreamMode = modelStreamingMode || this.serverSystem.streamingMode;
+
         return {
             body: req.method !== "GET" ? JSON.stringify(bodyObj) : undefined,
             headers: req.headers,
@@ -3667,7 +3692,7 @@ class RequestHandler {
             path: cleanPath,
             query_params: req.query || {},
             request_id: requestId,
-            streaming_mode: this.serverSystem.streamingMode,
+            streaming_mode: effectiveStreamMode,
         };
     }
 
