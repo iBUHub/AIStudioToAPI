@@ -623,6 +623,7 @@ class RequestHandler {
     // Process standard Google API requests
     async processRequest(req, res) {
         const requestId = this._generateRequestId();
+        res.__proxyResponseStreamMode = null;
 
         // Check current account's browser connection
         if (!this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex)) {
@@ -665,6 +666,7 @@ class RequestHandler {
         const wantsStreamByHeader = req.headers.accept && req.headers.accept.includes("text/event-stream");
         const wantsStreamByPath = req.path.includes(":streamGenerateContent");
         const wantsStream = wantsStreamByHeader || wantsStreamByPath;
+        res.__proxyResponseStreamMode = wantsStream ? proxyRequest.streaming_mode : null;
 
         try {
             // Create message queue inside try-catch to handle invalid authIndex
@@ -763,6 +765,7 @@ class RequestHandler {
     // Process OpenAI format requests
     async processOpenAIRequest(req, res) {
         const requestId = this._generateRequestId();
+        res.__proxyResponseStreamMode = null;
 
         // Check current account's browser connection
         if (!this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex)) {
@@ -823,6 +826,7 @@ class RequestHandler {
             streaming_mode: useRealStream ? "real" : "fake",
         };
         this._initializeProxyRequestAttempt(proxyRequest);
+        res.__proxyResponseStreamMode = isOpenAIStream ? (useRealStream ? "real" : "fake") : null;
 
         try {
             // Create message queue inside try-catch to handle invalid authIndex
@@ -1084,6 +1088,7 @@ class RequestHandler {
     // Process OpenAI Response API format requests
     async processOpenAIResponseRequest(req, res) {
         const requestId = this._generateRequestId();
+        res.__proxyResponseStreamMode = null;
 
         // Check current account's browser connection
         if (!this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex)) {
@@ -1193,6 +1198,7 @@ class RequestHandler {
             streaming_mode: useRealStream ? "real" : "fake",
         };
         this._initializeProxyRequestAttempt(proxyRequest);
+        res.__proxyResponseStreamMode = isOpenAIStream ? (useRealStream ? "real" : "fake") : null;
 
         try {
             // Create message queue inside try-catch to handle invalid authIndex
@@ -1468,6 +1474,7 @@ class RequestHandler {
     // Process Claude API format requests
     async processClaudeRequest(req, res) {
         const requestId = this._generateRequestId();
+        res.__proxyResponseStreamMode = null;
 
         // Check current account's browser connection
         if (!this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex)) {
@@ -1531,6 +1538,7 @@ class RequestHandler {
             streaming_mode: useRealStream ? "real" : "fake",
         };
         this._initializeProxyRequestAttempt(proxyRequest);
+        res.__proxyResponseStreamMode = isClaudeStream ? (useRealStream ? "real" : "fake") : null;
 
         try {
             // Create message queue inside try-catch to handle invalid authIndex
@@ -3362,8 +3370,8 @@ class RequestHandler {
                         const writeErrorMsg = String(writeError?.message ?? writeError);
                         this.logger.error(`[Request] Failed to write error to stream: ${writeErrorMsg}`);
                     }
-                } else if (this.serverSystem.streamingMode === "fake") {
-                    // Fake streaming mode - try to send error chunk
+                } else if (res.__proxyResponseStreamMode === "fake") {
+                    // Request-scoped fake stream mode - try to send an SSE-style error chunk
                     try {
                         this._sendErrorChunkToClient(res, `Processing failed: ${errorMsg}`);
                     } catch (writeError) {
