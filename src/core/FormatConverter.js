@@ -3146,19 +3146,18 @@ class FormatConverter {
             const formatType =
                 typeof textFormat.format === "string" ? textFormat.format : textFormat.format?.type || null;
 
-            if (
-                formatType === "json_schema" &&
-                typeof textFormat.format === "object" &&
-                textFormat.format.json_schema
-            ) {
-                const schema = textFormat.format.json_schema.schema;
+            if (formatType === "json_schema" && typeof textFormat.format === "object") {
+                // Follow the official Responses API shape:
+                // text.format = { type: "json_schema", name, schema, strict }
+                const jsonSchemaConfig = textFormat.format;
+                const schema = jsonSchemaConfig.schema;
                 if (schema) {
                     try {
                         const convertedSchema = this._convertSchemaToGemini(schema, true);
                         generationConfig.responseMimeType = "application/json";
                         generationConfig.responseSchema = convertedSchema;
                         this.logger.info(
-                            `[Adapter] Converted OpenAI Response API text.format to Gemini responseSchema: ${textFormat.format.json_schema.name || "unnamed"}`
+                            `[Adapter] Converted OpenAI Response API text.format to Gemini responseSchema: ${jsonSchemaConfig.name || "unnamed"}`
                         );
                     } catch (error) {
                         this.logger.error(
