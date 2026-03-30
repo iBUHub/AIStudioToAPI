@@ -3559,21 +3559,22 @@ class RequestHandler {
             const pathSuffix = modelPathMatch[3];
 
             const FormatConverter = require("./FormatConverter");
-            const { cleanModelName: streamStrippedModel, streamingMode } =
+            const { cleanModelName: streamStrippedModel, streamingMode: parsedStreamingMode } =
                 FormatConverter.parseModelStreamingModeSuffix(rawModelName);
-            const { cleanModelName, thinkingLevel } = FormatConverter.parseModelThinkingLevel(streamStrippedModel);
+            const { cleanModelName, thinkingLevel: parsedThinkingLevel } =
+                FormatConverter.parseModelThinkingLevel(streamStrippedModel);
+            modelStreamingMode = parsedStreamingMode;
+            modelThinkingLevel = parsedThinkingLevel;
 
-            if (streamingMode) {
-                modelStreamingMode = streamingMode;
+            if (modelStreamingMode) {
                 this.logger.info(
-                    `[Proxy] Detected streamingMode suffix in model path: "${rawModelName}" -> model="${streamStrippedModel}", streamingMode="${streamingMode}"`
+                    `[Proxy] Detected streamingMode suffix in model path: "${rawModelName}" -> model="${streamStrippedModel}", streamingMode="${modelStreamingMode}"`
                 );
             }
 
-            if (thinkingLevel) {
-                modelThinkingLevel = thinkingLevel;
+            if (modelThinkingLevel) {
                 this.logger.info(
-                    `[Proxy] Detected thinkingLevel suffix in model path: "${rawModelName}" -> model="${cleanModelName}", thinkingLevel="${thinkingLevel}"`
+                    `[Proxy] Detected thinkingLevel suffix in model path: "${streamStrippedModel}" -> model="${cleanModelName}", thinkingLevel="${modelThinkingLevel}"`
                 );
             }
 

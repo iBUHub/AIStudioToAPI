@@ -425,6 +425,9 @@ class FormatConverter {
     async translateOpenAIToGoogle(openaiBody) {
         this.logger.info("[Adapter] Starting translation of OpenAI request format to Google format...");
 
+        // [DEBUG] Log incoming messages for troubleshooting
+        this.logger.debug(`[Adapter] Debug: incoming OpenAI Body = ${JSON.stringify(openaiBody, null, 2)}`);
+
         // Parse model suffixes in fixed order:
         // 1) streaming override: only `-real` / `-fake` at the end
         // 2) thinkingLevel override: `-minimal` / `(minimal)` etc.
@@ -441,12 +444,9 @@ class FormatConverter {
         }
         if (modelThinkingLevel) {
             this.logger.info(
-                `[Adapter] Detected thinkingLevel suffix in model name: "${rawModel}" -> model="${cleanModelName}", thinkingLevel="${modelThinkingLevel}"`
+                `[Adapter] Detected thinkingLevel suffix in model name: "${streamStrippedModel}" -> model="${cleanModelName}", thinkingLevel="${modelThinkingLevel}"`
             );
         }
-
-        // [DEBUG] Log incoming messages for troubleshooting
-        this.logger.debug(`[Adapter] Debug: incoming OpenAI Body = ${JSON.stringify(openaiBody, null, 2)}`);
 
         let systemInstruction = null;
         const googleContents = [];
@@ -754,9 +754,7 @@ class FormatConverter {
                 thinkingConfig = {};
             }
             thinkingConfig.thinkingLevel = modelThinkingLevel;
-            this.logger.info(
-                `[Adapter] Applied thinkingLevel from model name suffix: ${modelThinkingLevel} (overriding any existing value)`
-            );
+            this.logger.info(`[Adapter] Applied thinkingLevel from model name suffix: ${modelThinkingLevel}`);
         }
 
         if (thinkingConfig) {
@@ -1961,6 +1959,9 @@ class FormatConverter {
     async translateClaudeToGoogle(claudeBody) {
         this.logger.info("[Adapter] Starting translation of Claude request format to Google format...");
 
+        // [DEBUG] Log incoming messages
+        this.logger.debug(`[Adapter] Debug: incoming Claude Body = ${JSON.stringify(claudeBody, null, 2)}`);
+
         // Parse model suffixes in fixed order:
         // 1) streaming override: only `-real` / `-fake` at the end
         // 2) thinkingLevel override: `-minimal` / `(minimal)` etc.
@@ -1977,12 +1978,9 @@ class FormatConverter {
         }
         if (modelThinkingLevel) {
             this.logger.info(
-                `[Adapter] Detected thinkingLevel suffix in model name: "${rawModel}" -> model="${cleanModelName}", thinkingLevel="${modelThinkingLevel}"`
+                `[Adapter] Detected thinkingLevel suffix in model name: "${streamStrippedModel}" -> model="${cleanModelName}", thinkingLevel="${modelThinkingLevel}"`
             );
         }
-
-        // [DEBUG] Log incoming messages
-        this.logger.debug(`[Adapter] Debug: incoming Claude Body = ${JSON.stringify(claudeBody, null, 2)}`);
 
         let systemInstruction = null;
         const googleContents = [];
@@ -2735,6 +2733,10 @@ class FormatConverter {
     async translateOpenAIResponseToGoogle(responseBody) {
         this.logger.info("[Adapter] Starting translation of OpenAI Response API request format to Google format...");
 
+        this.logger.debug(
+            `[Adapter] Debug: incoming OpenAI Response API Body = ${JSON.stringify(responseBody, null, 2)}`
+        );
+
         // Parse model suffixes in fixed order:
         // 1) streaming override: only `-real` / `-fake` at the end
         // 2) thinkingLevel override: `-minimal` / `(minimal)` etc.
@@ -2751,13 +2753,9 @@ class FormatConverter {
         }
         if (modelThinkingLevel) {
             this.logger.info(
-                `[Adapter] Detected thinkingLevel suffix in model name: "${rawModel}" -> model="${cleanModelName}", thinkingLevel="${modelThinkingLevel}"`
+                `[Adapter] Detected thinkingLevel suffix in model name: "${streamStrippedModel}" -> model="${cleanModelName}", thinkingLevel="${modelThinkingLevel}"`
             );
         }
-
-        this.logger.debug(
-            `[Adapter] Debug: incoming OpenAI Response API Body = ${JSON.stringify(responseBody, null, 2)}`
-        );
 
         const googleContents = [];
         let systemInstructionText = "";
@@ -3030,9 +3028,7 @@ class FormatConverter {
                 thinkingConfig = {};
             }
             thinkingConfig.thinkingLevel = modelThinkingLevel;
-            this.logger.info(
-                `[Adapter] Applied thinkingLevel from model name suffix: ${modelThinkingLevel} (overriding any existing value)`
-            );
+            this.logger.info(`[Adapter] Applied thinkingLevel from model name suffix: ${modelThinkingLevel}`);
         }
 
         if (thinkingConfig) {
