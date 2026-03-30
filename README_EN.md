@@ -268,6 +268,8 @@ To simplify the login process for multiple accounts, you can configure the `user
 Edit `configs/models.json` to customize available models and their settings.
 
 > 💡 **Tip:** The thinking parameter reserves the function to be set via the model suffix. It supports setting the thinking level by appending `-THINKING_LEVEL` or `(THINKING_LEVEL)` to the model name (`THINKING_LEVEL` supports `high`, `low`, `medium`, `minimal`, case-insensitive). For example: `gemini-3-flash-preview(minimal)` or `gemini-3-flash-preview-minimal`.
+>
+> Streaming mode can also be overridden by appending `-real` or `-fake` to the end of the model name. This override has higher priority than the system streaming mode, but it only takes effect for streaming requests. For example: `gemini-3-flash-preview-fake`. When used together, the streaming suffix must be last, for example: `gemini-3-flash-preview-minimal-fake` or `gemini-3-flash-preview(minimal)-real`.
 
 ## 📄 License
 
