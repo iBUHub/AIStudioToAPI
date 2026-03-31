@@ -498,46 +498,304 @@ class BrowserManager {
 
         return `
             (function() {
-                if (window._privacyProtectionInjected) return;
-                window._privacyProtectionInjected = true;
-
                 const profile = ${serializedProfile};
 
                 try {
-                    const defineNavigatorValue = (key, value) => {
-                        Object.defineProperty(navigator, key, {
-                            configurable: true,
-                            get: () => value,
-                        });
+                    const nativeSources = new WeakMap();
+
+                    const markAsNative = (fn, name) => {
+                        nativeSources.set(fn, 'function ' + name + '() { [native code] }');
+                        return fn;
                     };
 
-                    // 1. Mask WebDriver property and align navigator fields with the selected profile
-                    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-                    defineNavigatorValue('userAgent', profile.userAgent);
-                    defineNavigatorValue('appVersion', profile.appVersion);
-                    defineNavigatorValue('platform', profile.platform);
-                    defineNavigatorValue('vendor', profile.vendor);
-                    defineNavigatorValue('language', profile.language);
-                    defineNavigatorValue('languages', profile.languages);
-                    defineNavigatorValue('hardwareConcurrency', profile.hardwareConcurrency);
-                    defineNavigatorValue('deviceMemory', profile.deviceMemory);
-                    defineNavigatorValue('maxTouchPoints', profile.maxTouchPoints);
+                    const toStringDescriptor = Object.getOwnPropertyDescriptor(Function.prototype, 'toString');
+                    if (toStringDescriptor && typeof toStringDescriptor.value === 'function') {
+                        const originalToString = toStringDescriptor.value;
+                        const patchedToString = function toString() {
+                            if (nativeSources.has(this)) {
+                                return nativeSources.get(this);
+                            }
+                            return originalToString.call(this);
+                        };
 
-                    // 2. Mock Plugins if empty
-                    if (navigator.plugins.length === 0) {
-                        const pluginArray = Array.from({ length: profile.pluginCount }, (_, index) => ({
-                            name: 'Chrome PDF Plugin ' + (index + 1),
-                            filename: 'internal-pdf-viewer-' + (index + 1),
-                            description: 'Portable Document Format',
-                        }));
-
-                        Object.defineProperty(navigator, 'plugins', {
-                            configurable: true,
-                            get: () => pluginArray,
+                        Object.defineProperty(Function.prototype, 'toString', {
+                            configurable: toStringDescriptor.configurable,
+                            enumerable: toStringDescriptor.enumerable,
+                            writable: toStringDescriptor.writable,
+                            value: markAsNative(patchedToString, 'toString'),
                         });
                     }
 
-                    // 3. Align screen metadata with the selected device profile
+                    const overrideGetterOnPrototype = (instance, key, value) => {
+                        const proto = instance && Object.getPrototypeOf(instance);
+                        if (!proto) return;
+
+                        const descriptor = Object.getOwnPropertyDescriptor(proto, key);
+                        if (descriptor && descriptor.configurable === false) return;
+
+                        const nextDescriptor = {
+                            configurable: descriptor ? descriptor.configurable : true,
+                            enumerable: descriptor ? descriptor.enumerable : false,
+                            get: markAsNative(function() {
+                                return value;
+                            }, 'get ' + key),
+                        };
+
+                        if (descriptor && typeof descriptor.set === 'function') {
+                            nextDescriptor.set = descriptor.set;
+                        }
+
+                        Object.defineProperty(proto, key, nextDescriptor);
+                    };
+
+                    const overrideMethodOnPrototype = (proto, key, factory) => {
+                        if (!proto) return;
+
+                        const descriptor = Object.getOwnPropertyDescriptor(proto, key);
+                        if (!descriptor || typeof descriptor.value !== 'function' || descriptor.configurable === false) {
+                            return;
+                        }
+
+                        Object.defineProperty(proto, key, {
+                            configurable: descriptor.configurable,
+                            enumerable: descriptor.enumerable,
+                            writable: descriptor.writable,
+                            value: markAsNative(factory(descriptor.value), key),
+                        });
+                    };
+
+                    const createPluginArtifacts = count => {
+                        const pluginProto = typeof Plugin === 'function' ? Plugin.prototype : Object.prototype;
+                        const pluginArrayProto = typeof PluginArray === 'function' ? PluginArray.prototype : Object.prototype;
+                        const mimeTypeProto = typeof MimeType === 'function' ? MimeType.prototype : Object.prototype;
+                        const mimeTypeArrayProto =
+                            typeof MimeTypeArray === 'function' ? MimeTypeArray.prototype : Object.prototype;
+
+                        const defineValue = (target, key, value) => {
+                            Object.defineProperty(target, key, {
+                                configurable: true,
+                                enumerable: false,
+                                writable: false,
+                                value,
+                            });
+                        };
+
+                        const createMimeType = (type, getEnabledPlugin) => {
+                            const mimeType = Object.create(mimeTypeProto);
+                            Object.defineProperties(mimeType, {
+                                description: {
+                                    configurable: true,
+                                    enumerable: false,
+                                    get: markAsNative(function() {
+                                        return 'Portable Document Format';
+                                    }, 'get description'),
+                                },
+                                enabledPlugin: {
+                                    configurable: true,
+                                    enumerable: false,
+                                    get: markAsNative(function() {
+                                        return getEnabledPlugin();
+                                    }, 'get enabledPlugin'),
+                                },
+                                suffixes: {
+                                    configurable: true,
+                                    enumerable: false,
+                                    get: markAsNative(function() {
+                                        return 'pdf';
+                                    }, 'get suffixes'),
+                                },
+                                type: {
+                                    configurable: true,
+                                    enumerable: false,
+                                    get: markAsNative(function() {
+                                        return type;
+                                    }, 'get type'),
+                                },
+                            });
+                            return mimeType;
+                        };
+
+                        const createPlugin = (index, mimeType) => {
+                            const plugin = Object.create(pluginProto);
+                            Object.defineProperties(plugin, {
+                                description: {
+                                    configurable: true,
+                                    enumerable: false,
+                                    get: markAsNative(function() {
+                                        return 'Portable Document Format';
+                                    }, 'get description'),
+                                },
+                                filename: {
+                                    configurable: true,
+                                    enumerable: false,
+                                    get: markAsNative(function() {
+                                        return 'internal-pdf-viewer-' + (index + 1);
+                                    }, 'get filename'),
+                                },
+                                item: {
+                                    configurable: true,
+                                    enumerable: false,
+                                    writable: true,
+                                    value: markAsNative(function(itemIndex) {
+                                        return itemIndex === 0 ? mimeType : null;
+                                    }, 'item'),
+                                },
+                                length: {
+                                    configurable: true,
+                                    enumerable: false,
+                                    get: markAsNative(function() {
+                                        return 1;
+                                    }, 'get length'),
+                                },
+                                name: {
+                                    configurable: true,
+                                    enumerable: false,
+                                    get: markAsNative(function() {
+                                        return 'Chrome PDF Plugin ' + (index + 1);
+                                    }, 'get name'),
+                                },
+                                namedItem: {
+                                    configurable: true,
+                                    enumerable: false,
+                                    writable: true,
+                                    value: markAsNative(function(nameOrType) {
+                                        return String(nameOrType) === mimeType.type ? mimeType : null;
+                                    }, 'namedItem'),
+                                },
+                            });
+
+                            defineValue(plugin, 0, mimeType);
+                            defineValue(plugin, mimeType.type, mimeType);
+                            return plugin;
+                        };
+
+                        const mimeTypes = [];
+                        const plugins = [];
+                        for (let index = 0; index < count; index++) {
+                            let pluginRef = null;
+                            const mimeType = createMimeType(
+                                index === 0 ? 'application/pdf' : 'application/x-google-chrome-pdf',
+                                () => pluginRef
+                            );
+                            const plugin = createPlugin(index, mimeType);
+                            pluginRef = plugin;
+                            mimeTypes.push(mimeType);
+                            plugins.push(plugin);
+                        }
+
+                        const mimeTypeArray = Object.create(mimeTypeArrayProto);
+                        Object.defineProperties(mimeTypeArray, {
+                            item: {
+                                configurable: true,
+                                enumerable: false,
+                                writable: true,
+                                value: markAsNative(function(index) {
+                                    return mimeTypes[index] || null;
+                                }, 'item'),
+                            },
+                            length: {
+                                configurable: true,
+                                enumerable: false,
+                                get: markAsNative(function() {
+                                    return mimeTypes.length;
+                                }, 'get length'),
+                            },
+                            namedItem: {
+                                configurable: true,
+                                enumerable: false,
+                                writable: true,
+                                value: markAsNative(function(nameOrType) {
+                                    const lookup = String(nameOrType);
+                                    return mimeTypes.find(mimeType => mimeType.type === lookup) || null;
+                                }, 'namedItem'),
+                            },
+                            [Symbol.iterator]: {
+                                configurable: true,
+                                enumerable: false,
+                                writable: true,
+                                value: markAsNative(function values() {
+                                    return mimeTypes[Symbol.iterator]();
+                                }, 'values'),
+                            },
+                        });
+
+                        const pluginArray = Object.create(pluginArrayProto);
+                        Object.defineProperties(pluginArray, {
+                            item: {
+                                configurable: true,
+                                enumerable: false,
+                                writable: true,
+                                value: markAsNative(function(index) {
+                                    return plugins[index] || null;
+                                }, 'item'),
+                            },
+                            length: {
+                                configurable: true,
+                                enumerable: false,
+                                get: markAsNative(function() {
+                                    return plugins.length;
+                                }, 'get length'),
+                            },
+                            namedItem: {
+                                configurable: true,
+                                enumerable: false,
+                                writable: true,
+                                value: markAsNative(function(nameOrFilename) {
+                                    const lookup = String(nameOrFilename);
+                                    return (
+                                        plugins.find(plugin => plugin.name === lookup || plugin.filename === lookup) ||
+                                        null
+                                    );
+                                }, 'namedItem'),
+                            },
+                            refresh: {
+                                configurable: true,
+                                enumerable: false,
+                                writable: true,
+                                value: markAsNative(function() {}, 'refresh'),
+                            },
+                            [Symbol.iterator]: {
+                                configurable: true,
+                                enumerable: false,
+                                writable: true,
+                                value: markAsNative(function values() {
+                                    return plugins[Symbol.iterator]();
+                                }, 'values'),
+                            },
+                        });
+
+                        plugins.forEach((plugin, index) => {
+                            defineValue(pluginArray, index, plugin);
+                            defineValue(pluginArray, plugin.name, plugin);
+                        });
+                        mimeTypes.forEach((mimeType, index) => {
+                            defineValue(mimeTypeArray, index, mimeType);
+                            defineValue(mimeTypeArray, mimeType.type, mimeType);
+                        });
+
+                        return { mimeTypeArray, pluginArray };
+                    };
+
+                    // 1. Navigator fields: patch prototype chain rather than leaking own properties.
+                    overrideGetterOnPrototype(navigator, 'webdriver', undefined);
+                    overrideGetterOnPrototype(navigator, 'userAgent', profile.userAgent);
+                    overrideGetterOnPrototype(navigator, 'appVersion', profile.appVersion);
+                    overrideGetterOnPrototype(navigator, 'platform', profile.platform);
+                    overrideGetterOnPrototype(navigator, 'vendor', profile.vendor);
+                    overrideGetterOnPrototype(navigator, 'language', profile.language);
+                    overrideGetterOnPrototype(navigator, 'languages', profile.languages);
+                    overrideGetterOnPrototype(navigator, 'hardwareConcurrency', profile.hardwareConcurrency);
+                    overrideGetterOnPrototype(navigator, 'deviceMemory', profile.deviceMemory);
+                    overrideGetterOnPrototype(navigator, 'maxTouchPoints', profile.maxTouchPoints);
+
+                    // 2. Plugins/mimeTypes: only emulate if the runtime currently exposes an empty collection.
+                    if (!navigator.plugins || navigator.plugins.length === 0) {
+                        const { mimeTypeArray, pluginArray } = createPluginArtifacts(profile.pluginCount);
+                        overrideGetterOnPrototype(navigator, 'plugins', pluginArray);
+                        overrideGetterOnPrototype(navigator, 'mimeTypes', mimeTypeArray);
+                    }
+
+                    // 3. Screen metadata: align on Screen.prototype / Window.prototype.
                     const screenOverrides = {
                         availHeight: profile.screen.availHeight,
                         availWidth: profile.screen.availWidth,
@@ -547,28 +805,36 @@ class BrowserManager {
                         width: profile.screen.width,
                     };
                     for (const [key, value] of Object.entries(screenOverrides)) {
-                        Object.defineProperty(window.screen, key, {
-                            configurable: true,
-                            get: () => value,
-                        });
+                        overrideGetterOnPrototype(window.screen, key, value);
                     }
-                    Object.defineProperty(window, 'devicePixelRatio', {
-                        configurable: true,
-                        get: () => profile.devicePixelRatio,
-                    });
+                    overrideGetterOnPrototype(window, 'devicePixelRatio', profile.devicePixelRatio);
 
-                    // 4. Spoof WebGL Renderer (High Impact)
-                    const getParameterProxy = WebGLRenderingContext.prototype.getParameter;
-                    WebGLRenderingContext.prototype.getParameter = function(parameter) {
-                        // 37445: UNMASKED_VENDOR_WEBGL
-                        // 37446: UNMASKED_RENDERER_WEBGL
-                        if (parameter === 37445) return profile.gpu.vendor;
-                        if (parameter === 37446) return profile.gpu.renderer;
-                        return getParameterProxy.apply(this, arguments);
+                    // 4. WebGL: cover WebGL1, WebGL2 and the debug extension path.
+                    const debugRendererInfo = Object.freeze({
+                        UNMASKED_RENDERER_WEBGL: 37446,
+                        UNMASKED_VENDOR_WEBGL: 37445,
+                    });
+                    const patchWebGLPrototype = proto => {
+                        overrideMethodOnPrototype(proto, 'getParameter', originalMethod => function(parameter) {
+                            if (parameter === 37445) return profile.gpu.vendor;
+                            if (parameter === 37446) return profile.gpu.renderer;
+                            return Reflect.apply(originalMethod, this, arguments);
+                        });
+
+                        overrideMethodOnPrototype(proto, 'getExtension', originalMethod => function(name) {
+                            if (name === 'WEBGL_debug_renderer_info') {
+                                return debugRendererInfo;
+                            }
+                            return Reflect.apply(originalMethod, this, arguments);
+                        });
                     };
 
-                    // 5. Inject benign noise
-                    window['_canvas_noise_' + profile.randomArtifact] = String(profile.randomArtifact);
+                    if (typeof WebGLRenderingContext === 'function') {
+                        patchWebGLPrototype(WebGLRenderingContext.prototype);
+                    }
+                    if (typeof WebGL2RenderingContext === 'function') {
+                        patchWebGLPrototype(WebGL2RenderingContext.prototype);
+                    }
 
                     if (window === window.top) {
                         console.log("[ProxyClient] Privacy profile active: " + profile.browserName + " / " + profile.gpu.renderer);
