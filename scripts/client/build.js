@@ -782,8 +782,10 @@ class ProxySystem extends EventTarget {
             this._transmitStreamEnd(operationId, requestAttemptId);
         } catch (error) {
             const wasCancelled = isOperationCancelled();
-            if (error.name === "AbortError" || wasCancelled) {
+            if (wasCancelled) {
                 Logger.output(`[Diagnosis] Operation #${operationId} has been aborted by user.`);
+            } else if (error.name === "AbortError") {
+                Logger.output(`[Diagnosis] Operation #${operationId} aborted due to internal shutdown/disconnect.`);
             } else {
                 Logger.output(`Request processing failed: ${error.message}`);
             }
