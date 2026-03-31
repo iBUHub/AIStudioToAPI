@@ -652,9 +652,10 @@ class ProxySystem extends EventTarget {
         let cancelTimeout;
         let reader;
         let abortController;
+        const isOperationCancelled = () => this.requestProcessor.cancelledAttempts.has(attemptKey);
 
         try {
-            if (this.requestProcessor.cancelledAttempts.has(attemptKey)) {
+            if (isOperationCancelled()) {
                 throw new DOMException("The user aborted a request.", "AbortError");
             }
             const {
@@ -665,7 +666,7 @@ class ProxySystem extends EventTarget {
             cancelTimeout = ct;
             abortController = ac;
             const response = await responsePromise;
-            if (this.requestProcessor.cancelledAttempts.has(attemptKey)) {
+            if (isOperationCancelled()) {
                 throw new DOMException("The user aborted a request.", "AbortError");
             }
 
@@ -688,7 +689,7 @@ class ProxySystem extends EventTarget {
                 }
 
                 // Check if operation has been cancelled before creating timeout
-                if (this.requestProcessor.cancelledAttempts.has(attemptKey)) {
+                if (isOperationCancelled()) {
                     Logger.debug(`Operation #${operationId} cancelled, stopping stream read`);
                     processing = false;
                     break;
@@ -738,6 +739,10 @@ class ProxySystem extends EventTarget {
                         chunkTimeoutId = null;
                     }
 
+                    if (isOperationCancelled()) {
+                        throw new DOMException("The user aborted a request.", "AbortError");
+                    }
+
                     const errorMessage = String(error?.message ?? error);
 
                     // If timeout occurred, cancel the reader to stop background processing
@@ -764,7 +769,7 @@ class ProxySystem extends EventTarget {
             Logger.output("Data stream read complete.");
 
             // Check if operation was cancelled during streaming
-            if (this.requestProcessor.cancelledAttempts.has(attemptKey)) {
+            if (isOperationCancelled()) {
                 Logger.debug(`Operation #${operationId} was cancelled, skipping final transmission`);
                 return;
             }
@@ -776,10 +781,16 @@ class ProxySystem extends EventTarget {
 
             this._transmitStreamEnd(operationId, requestAttemptId);
         } catch (error) {
-            if (error.name === "AbortError") {
+            const wasCancelled = isOperationCancelled();
+            if (wasCancelled) {
                 Logger.output(`[Diagnosis] Operation #${operationId} has been aborted by user.`);
+            } else if (error.name === "AbortError") {
+                Logger.output(`[Diagnosis] Operation #${operationId} aborted due to internal shutdown/disconnect.`);
             } else {
-                Logger.output(`❌ Request processing failed: ${error.message}`);
+                Logger.output(`Request processing failed: ${error.message}`);
+            }
+            if (wasCancelled) {
+                return;
             }
             // Only send error if we still own this operationId (prevent stale errors from reaching server during retries)
             const currentOperation = this.requestProcessor.activeOperations.get(operationId);
