@@ -1423,10 +1423,47 @@
                         <h1>{{ t("usageStats") }}</h1>
                     </div>
                     <div class="page-meta">
-                        <span class="meta-chip">{{ t("startedAt") }}: {{ formatDateTime(statsState.startedAt) }}</span>
-                        <span class="meta-chip"
-                            >{{ t("uptime") }}: {{ formatUptime(statsState.summary.uptimeSeconds) }}</span
-                        >
+                        <span class="meta-chip">
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="14"
+                                height="14"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                style="margin-right: 6px; opacity: 0.7"
+                            >
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <polyline points="12 6 12 12 16 14"></polyline>
+                            </svg>
+                            <span style="opacity: 0.8; margin-right: 4px">{{ t("startedAt") }}:</span>
+                            <span style="font-weight: 600; font-family: monospace">{{
+                                formatDateTime(statsState.startedAt)
+                            }}</span>
+                        </span>
+                        <span class="meta-chip">
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="14"
+                                height="14"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                style="margin-right: 6px; opacity: 0.7"
+                            >
+                                <path d="M22 12h-4l-3 9L9 3l-3 9H2"></path>
+                            </svg>
+                            <span style="opacity: 0.8; margin-right: 4px">{{ t("uptime") }}:</span>
+                            <span style="font-weight: 600; font-family: monospace">{{
+                                formatUptime(statsState.summary.uptimeSeconds)
+                            }}</span>
+                        </span>
                         <el-select v-model="timeRange" class="time-range-select">
                             <el-option :label="t('timeRangeAll')" value="all" />
                             <el-option :label="t('timeRange1h')" value="1h" />
@@ -1553,7 +1590,7 @@
                 <div class="stats-dashboard-grid">
                     <section class="status-card summary-card-visual">
                         <div class="card-header-v2">
-                            <h3 class="card-title">{{ t("requestSummary") }}</h3>
+                            <h3 class="card-title-usage">{{ t("requestSummary") }}</h3>
                             <div class="summary-total-badge">{{ filteredSummary.totalRequests }} {{ t("total") }}</div>
                         </div>
 
@@ -1637,7 +1674,9 @@
 
                 <div class="full-width-section">
                     <section class="status-card wide-card">
-                        <h3 class="card-title">{{ t("accountUsageBreakdown") }}</h3>
+                        <div class="card-header-v2">
+                            <h3 class="card-title-usage">{{ t("accountUsageBreakdown") }}</h3>
+                        </div>
                         <div v-if="filteredAccounts.length === 0" class="empty-state">
                             {{ t("noUsageStats") }}
                         </div>
@@ -1686,8 +1725,8 @@
 
                 <div class="full-width-section">
                     <section class="status-card records-card">
-                        <div class="records-header">
-                            <h3 class="card-title">{{ t("requestRecords") }}</h3>
+                        <div class="card-header-v2">
+                            <h3 class="card-title-usage">{{ t("requestRecords") }}</h3>
                             <span class="records-order">{{ t("recentToOldest") }}</span>
                         </div>
                         <div v-if="filteredRecords.length === 0" class="empty-state">
@@ -3483,6 +3522,17 @@ watchEffect(() => {
     padding-bottom: 15px;
 }
 
+.card-title-usage {
+    font-size: 0.9rem;
+    color: @text-secondary;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 600;
+    margin: 0;
+    padding: 0;
+    border-bottom: none;
+}
+
 /* Status Items */
 .status-list {
     display: flex;
@@ -4049,13 +4099,19 @@ watchEffect(() => {
     }
 }
 
+.card-header-v2 {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid @border-light;
+}
+
 .summary-card-visual {
-    .card-header-v2 {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 24px;
-    }
+    padding: 24px;
+    background: @background-white;
+    border-radius: @border-radius-lg;
 
     .summary-total-badge {
         background: var(--bg-light);
@@ -4212,52 +4268,49 @@ watchEffect(() => {
 .meta-chip {
     display: inline-flex;
     align-items: center;
-    padding: 8px 12px;
-    border-radius: 999px;
+    padding: 6px 14px;
+    border-radius: 8px;
     background: @background-white;
     border: 1px solid @border-light;
     color: @text-secondary;
-    font-size: 0.85rem;
+    font-size: 0.82rem;
+    transition: all 0.2s;
+
+    &:hover {
+        border-color: @primary-color;
+        color: @primary-color;
+    }
 }
 
 .time-range-select {
-    width: 120px;
+    width: 130px;
 
     :deep(.el-select__wrapper) {
         background: @background-white;
         border: 1px solid @border-light;
         box-shadow: none !important;
-        border-radius: 999px !important;
-        padding: 4px 12px; // 调整 padding 以使总体高度匹配左侧的 meta-chip
-        min-height: 35px; // 设定最小高度以贴合原来的 `padding: 8px 12px` 的原生 select
+        border-radius: 8px !important;
+        padding: 5px 12px;
+        min-height: 35px;
         transition: all @transition-fast;
 
         &:hover {
             border-color: @primary-color;
-            color: @text-primary;
         }
 
-        &.is-focused,
-        &.is-focus {
+        &.is-focused {
             border-color: @primary-color;
-            box-shadow: 0 0 0 2px rgba(var(--color-primary-rgb), 0.15) !important;
         }
     }
 
     :deep(.el-select__placeholder) {
         color: @text-secondary;
-        font-size: 0.85rem;
-        font-weight: 400; // 还原正常字体粗细
+        font-size: 0.82rem;
     }
 
     :deep(.el-select__selected-item) {
         color: @text-secondary !important;
-        font-size: 0.85rem !important;
-        font-weight: 400 !important; // 绝对覆盖默认字体粗细
-    }
-
-    :deep(.el-select__suffix) {
-        color: @text-secondary;
+        font-size: 0.82rem !important;
     }
 }
 
@@ -4550,7 +4603,6 @@ watchEffect(() => {
         justify-content: flex-start;
     }
 
-    .dashboard-grid,
     .stats-dashboard-grid {
         grid-template-columns: 1fr;
     }
