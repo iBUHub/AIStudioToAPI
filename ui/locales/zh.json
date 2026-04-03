@@ -187,6 +187,7 @@
     "requestAttempts": "尝试次数",
     "requestDuration": "耗时",
     "requestId": "请求 ID",
+    "requestIp": "IP",
     "requestModel": "模型",
     "requestOutcome": "结果",
     "requestPath": "路径",
@@ -234,8 +235,6 @@
     "uptime": "运行时长",
     "usageCount": "使用次数",
     "usageStats": "使用统计",
-    "usageStatsDescription": "查看服务启动后的内存统计汇总，以及完整请求记录。",
-
     "usernamePlaceholder": "用户名",
     "versionInfo": "版本信息",
     "viewRelease": "查看版本发布",

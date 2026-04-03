@@ -128,14 +128,12 @@ class UsageStatsService {
 
         const finishedAtMs = Date.now();
         const lastAttempt = tracker.attempts[tracker.attempts.length - 1] || null;
+        const lastParsed = lastAttempt?.accountKey ? this._parseAccountKey(lastAttempt.accountKey) : {};
         const finalAuthIndex =
-            this._normalizeAuthIndex(result.finalAuthIndex) ??
-            lastAttempt?.authIndex ??
-            tracker.initialAuthIndex ??
-            null;
+            this._normalizeAuthIndex(result.finalAuthIndex) ?? lastParsed.authIndex ?? tracker.initialAuthIndex ?? null;
         const finalAccountName =
             this._normalizeAccountName(result.finalAccountName) ??
-            lastAttempt?.accountName ??
+            lastParsed.accountName ??
             tracker.initialAccountName ??
             null;
         const outcome = this._normalizeOutcome(result.outcome);
@@ -393,6 +391,19 @@ class UsageStatsService {
         }
 
         return `${authIndex}:${accountName || "N/A"}`;
+    }
+
+    _parseAccountKey(accountKey) {
+        if (!accountKey || accountKey === "unassigned") {
+            return { accountName: null, authIndex: null };
+        }
+        const colonIdx = accountKey.indexOf(":");
+        if (colonIdx === -1) {
+            return { accountName: accountKey, authIndex: null };
+        }
+        const authIndex = Number(accountKey.slice(0, colonIdx));
+        const accountName = accountKey.slice(colonIdx + 1);
+        return { accountName, authIndex: Number.isFinite(authIndex) ? authIndex : null };
     }
 }
 

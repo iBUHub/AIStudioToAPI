@@ -1421,7 +1421,6 @@
                 <header class="page-header stats-page-header">
                     <div class="page-header-main">
                         <h1>{{ t("usageStats") }}</h1>
-                        <p class="page-description">{{ t("usageStatsDescription") }}</p>
                     </div>
                     <div class="page-meta">
                         <span class="meta-chip">{{ t("startedAt") }}: {{ formatDateTime(statsState.startedAt) }}</span>
@@ -1576,6 +1575,7 @@
                                     <th>{{ t("requestDuration") }}</th>
                                     <th>{{ t("requestAccount") }}</th>
                                     <th>{{ t("requestAttempts") }}</th>
+                                    <th>{{ t("requestIp") }}</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -1616,6 +1616,7 @@
                                             >{{ record.attemptCount }}</span
                                         >
                                     </td>
+                                    <td class="mono truncate-cell">{{ record.clientIp || "-" }}</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -1743,7 +1744,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watchEffect } from "vue";
+import { computed, h, nextTick, onBeforeUnmount, onMounted, reactive, ref, watchEffect } from "vue";
 import { useRouter } from "vue-router";
 import { ElMessage, ElMessageBox, ElNotification } from "element-plus";
 import JSZip from "jszip";
@@ -1984,6 +1985,7 @@ const fetchUsageStats = async () => {
 const showErrorDetail = record => {
     if (!record || record.outcome !== "error") return;
     ElMessageBox.alert(record.errorMessage || t("errorUnknown"), t("errorDetailTitle"), {
+        closeOnClickModal: true,
         confirmButtonText: t("ok"),
         lockScroll: false,
         type: "error",
@@ -1992,15 +1994,36 @@ const showErrorDetail = record => {
 
 const showAttemptsDetail = record => {
     if (!record || !record.attempts || record.attempts.length === 0) return;
-    const paths = record.attempts
-        .map((item, index) => {
-            const [authIndex, accountName] = (item.accountKey || "").split(":");
-            return `${index + 1}. ${formatAccount(Number(authIndex), accountName)}`;
-        })
-        .join("\n");
-    ElMessageBox.alert(paths, t("attemptsPathTitle"), {
+    const rows = record.attempts.map((item, index) => {
+        const colonIdx = (item.accountKey || "").indexOf(":");
+        const authIndex = colonIdx === -1 ? null : Number((item.accountKey || "").slice(0, colonIdx));
+        const accountName = colonIdx === -1 ? item.accountKey || "" : (item.accountKey || "").slice(colonIdx + 1);
+        return h(
+            "div",
+            {
+                style: "display: flex; align-items: center; gap: 10px; margin-bottom: 10px; font-size: 14px;",
+            },
+            [
+                h(
+                    "span",
+                    {
+                        style: "display: inline-flex; align-items: center; justify-content: center; min-width: 24px; height: 24px; border-radius: 50%; background: #409eff; color: #fff; font-size: 12px; font-weight: 700; flex-shrink: 0;",
+                    },
+                    String(index + 1)
+                ),
+                h("span", { style: "color: #606266;" }, `#${authIndex} ${accountName}`),
+            ]
+        );
+    });
+
+    const content = h("div", { style: "padding: 4px 0;" }, rows);
+
+    ElMessageBox({
+        closeOnClickModal: true,
         confirmButtonText: t("ok"),
         lockScroll: false,
+        message: content,
+        title: t("attemptsPathTitle"),
     });
 };
 

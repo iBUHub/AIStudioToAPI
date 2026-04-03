@@ -187,6 +187,7 @@
     "requestAttempts": "Attempts",
     "requestDuration": "Duration",
     "requestId": "Request ID",
+    "requestIp": "IP",
     "requestModel": "Model",
     "requestOutcome": "Outcome",
     "requestPath": "Path",
@@ -234,8 +235,6 @@
     "uptime": "Uptime",
     "usageCount": "Usage Count",
     "usageStats": "Usage Stats",
-    "usageStatsDescription": "Aggregated in-memory request metrics and full request history since this service started.",
-
     "usernamePlaceholder": "Username",
     "versionInfo": "Version Info",
     "viewRelease": "View Release",
