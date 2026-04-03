@@ -1506,52 +1506,50 @@
                             </div>
                         </div>
                     </section>
-
-                    <section class="status-card wide-card">
-                        <h3 class="card-title">{{ t("accountUsageBreakdown") }}</h3>
-                        <div v-if="filteredAccounts.length === 0" class="empty-state">
-                            {{ t("noUsageStats") }}
-                        </div>
-                        <div v-else class="table-scroll-wrapper">
-                            <table class="data-table fixed-header-table">
-                                <thead>
-                                    <tr>
-                                        <th>{{ t("account") }}</th>
-                                        <th>{{ t("total") }}</th>
-                                        <th>{{ t("success") }}</th>
-                                        <th>{{ t("failed") }}</th>
-                                        <th>{{ t("aborted") }}</th>
-                                        <th>{{ t("successRate") }}</th>
-                                        <th>{{ t("avgDuration") }}</th>
-                                        <th>{{ t("modelUsage") }}</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <tr v-for="item in filteredAccounts" :key="item.accountKey">
-                                        <td>{{ formatAccount(item.authIndex, item.accountName) }}</td>
-                                        <td>{{ item.totalRequests }}</td>
-                                        <td class="status-ok">{{ item.successCount }}</td>
-                                        <td class="status-error">{{ item.errorCount }}</td>
-                                        <td class="status-warning">{{ item.abortedCount }}</td>
-                                        <td>{{ item.successRate }}%</td>
-                                        <td>{{ formatDuration(item.avgDurationMs) }}</td>
-                                        <td>
-                                            <div class="breakdown-list">
-                                                <span
-                                                    v-for="mc in item.modelCounts"
-                                                    :key="mc.key"
-                                                    class="breakdown-chip"
-                                                >
-                                                    {{ mc.key }}: {{ mc.count }}
-                                                </span>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </section>
                 </div>
+
+                <section class="status-card wide-card">
+                    <h3 class="card-title">{{ t("accountUsageBreakdown") }}</h3>
+                    <div v-if="filteredAccounts.length === 0" class="empty-state">
+                        {{ t("noUsageStats") }}
+                    </div>
+                    <div v-else class="table-scroll-wrapper">
+                        <table class="data-table fixed-header-table">
+                            <thead>
+                                <tr>
+                                    <th>{{ t("account") }}</th>
+                                    <th>{{ t("total") }}</th>
+                                    <th>{{ t("success") }}</th>
+                                    <th>{{ t("failed") }}</th>
+                                    <th>{{ t("aborted") }}</th>
+                                    <th>{{ t("successRate") }}</th>
+                                    <th>{{ t("avgDuration") }}</th>
+                                    <th>{{ t("modelUsage") }}</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="item in filteredAccounts" :key="item.accountKey">
+                                    <td class="account-cell">
+                                        {{ formatAccount(item.authIndex, item.accountName) }}
+                                    </td>
+                                    <td>{{ item.totalRequests }}</td>
+                                    <td class="status-ok">{{ item.successCount }}</td>
+                                    <td class="status-error">{{ item.errorCount }}</td>
+                                    <td class="status-warning">{{ item.abortedCount }}</td>
+                                    <td>{{ item.successRate }}%</td>
+                                    <td>{{ formatDuration(item.avgDurationMs) }}</td>
+                                    <td>
+                                        <div class="breakdown-list">
+                                            <span v-for="mc in item.modelCounts" :key="mc.key" class="breakdown-chip">
+                                                {{ mc.key }}: {{ mc.count }}
+                                            </span>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
 
                 <section class="status-card records-card">
                     <div class="records-header">
@@ -3930,6 +3928,7 @@ watchEffect(() => {
 
 .wide-card {
     min-width: 0;
+    margin-bottom: 24px;
 }
 
 .summary-list {
@@ -4113,11 +4112,20 @@ watchEffect(() => {
     }
 
     /* Opaque hover background for sticky cell to avoid scrolled content bleed-through */
-    tbody tr:hover td:first-child {
+    tbody tr:hover td:first-child,
+    tbody tr:hover .account-cell {
         background:
             linear-gradient(rgba(var(--color-primary-rgb), 0.06), rgba(var(--color-primary-rgb), 0.06)),
             @background-white;
     }
+}
+
+/* Account column: allow wrapping for long email addresses */
+.account-cell {
+    white-space: normal !important;
+    word-break: break-all;
+    max-width: 240px;
+    vertical-align: middle;
 }
 
 /* Base stats-grid responsivenes explicitly ensured */
@@ -4134,6 +4142,12 @@ watchEffect(() => {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+/* Time column in request records: sticky + fixed width */
+.sticky-time-col {
+    max-width: 180px;
+    white-space: normal !important;
 }
 
 .outcome-badge {
@@ -4209,6 +4223,14 @@ watchEffect(() => {
     .table-scroll-wrapper {
         max-height: 45vh;
     }
+
+    .account-cell {
+        max-width: 150px;
+    }
+
+    .sticky-time-col {
+        max-width: 150px;
+    }
 }
 
 @media (max-width: 599px) {
@@ -4246,6 +4268,14 @@ watchEffect(() => {
         :deep(.el-select__selected-item) {
             font-size: 0.82rem;
         }
+    }
+
+    .account-cell {
+        max-width: 100px;
+    }
+
+    .sticky-time-col {
+        max-width: 90px;
     }
 }
 
