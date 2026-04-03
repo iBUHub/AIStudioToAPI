@@ -164,7 +164,7 @@ class UsageStatsService {
             sequence: ++this.sequence,
             startedAt: tracker.startedAt,
             statusCode,
-            streamMode: tracker.streamMode || "non",
+            streamMode: tracker.requestCategory === "generation" ? tracker.streamMode || "non" : null,
         };
 
         this.records.push(record);
