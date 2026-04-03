@@ -1437,189 +1437,324 @@
                     </div>
                 </header>
 
-                <div class="stats-grid">
-                    <div class="stats-card">
-                        <span class="stats-label">{{ t("total") }}</span>
-                        <strong class="stats-value">{{ filteredSummary.totalRequests }}</strong>
+                <div class="stats-grid-v2">
+                    <div class="stats-card-v2">
+                        <div class="card-icon is-total">
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="20"
+                                height="20"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            >
+                                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                            </svg>
+                        </div>
+                        <div class="card-info">
+                            <span class="stats-label">{{ t("requestRecords") }}</span>
+                            <strong class="stats-value">{{ filteredSummary.totalRequests }}</strong>
+                        </div>
                     </div>
-                    <div class="stats-card">
-                        <span class="stats-label">{{ t("successRate") }}</span>
-                        <strong class="stats-value">{{ filteredSummary.successRate }}%</strong>
+                    <div class="stats-card-v2">
+                        <div class="card-icon is-success">
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="20"
+                                height="20"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            >
+                                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                                <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                            </svg>
+                        </div>
+                        <div class="card-info">
+                            <span class="stats-label">{{ t("successRate") }}</span>
+                            <strong class="stats-value">{{ filteredSummary.successRate }}%</strong>
+                        </div>
                     </div>
-                    <div class="stats-card">
-                        <span class="stats-label">{{ t("avgDuration") }}</span>
-                        <strong class="stats-value">{{ formatDuration(filteredSummary.avgDurationMs) }}</strong>
+                    <div class="stats-card-v2">
+                        <div class="card-icon is-warning">
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="20"
+                                height="20"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            >
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <polyline points="12 6 12 12 16 14"></polyline>
+                            </svg>
+                        </div>
+                        <div class="card-info">
+                            <span class="stats-label">{{ t("avgDuration") }}</span>
+                            <strong class="stats-value">{{ formatDuration(filteredSummary.avgDurationMs) }}</strong>
+                        </div>
                     </div>
-                    <div class="stats-card">
-                        <span class="stats-label">{{ t("activeRequests") }}</span>
-                        <strong class="stats-value">{{ filteredSummary.activeRequests }}</strong>
+                    <div class="stats-card-v2">
+                        <div class="card-icon is-active">
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="20"
+                                height="20"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            >
+                                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                            </svg>
+                        </div>
+                        <div class="card-info">
+                            <span class="stats-label">{{ t("activeRequests") }}</span>
+                            <strong class="stats-value">{{ filteredSummary.activeRequests }}</strong>
+                        </div>
                     </div>
-                    <div class="stats-card">
-                        <span class="stats-label">{{ t("uniqueAccountPairs") }}</span>
-                        <strong class="stats-value">{{ filteredSummary.uniqueAccountPairs }}</strong>
-                    </div>
-                    <div class="stats-card">
-                        <span class="stats-label">{{ t("requestRecords") }}</span>
-                        <strong class="stats-value">{{ filteredRecords.length }}</strong>
+                    <div class="stats-card-v2">
+                        <div class="card-icon is-accounts">
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="20"
+                                height="20"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            >
+                                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                                <circle cx="9" cy="7" r="4"></circle>
+                                <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                                <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                            </svg>
+                        </div>
+                        <div class="card-info">
+                            <span class="stats-label">{{ t("uniqueAccountPairs") }}</span>
+                            <strong class="stats-value">{{ filteredSummary.uniqueAccountPairs }}</strong>
+                        </div>
                     </div>
                 </div>
 
                 <div class="stats-dashboard-grid">
-                    <section class="status-card">
-                        <h3 class="card-title">{{ t("requestSummary") }}</h3>
-                        <div class="summary-list">
-                            <div class="summary-row">
-                                <span>{{ t("success") }}</span>
-                                <strong class="status-ok">{{ filteredSummary.successCount }}</strong>
+                    <section class="status-card summary-card-visual">
+                        <div class="card-header-v2">
+                            <h3 class="card-title">{{ t("requestSummary") }}</h3>
+                            <div class="summary-total-badge">{{ filteredSummary.totalRequests }} {{ t("total") }}</div>
+                        </div>
+
+                        <!-- Visual Progress Bar -->
+                        <div class="progress-stacked-root">
+                            <div class="progress-info-labels">
+                                <span class="label-success"
+                                    >{{ t("success") }}: {{ filteredSummary.successCount }}</span
+                                >
+                                <span class="label-error">{{ t("failed") }}: {{ filteredSummary.errorCount }}</span>
+                                <span class="label-warn">{{ t("aborted") }}: {{ filteredSummary.abortedCount }}</span>
                             </div>
-                            <div class="summary-row">
-                                <span>{{ t("failed") }}</span>
-                                <strong class="status-error">{{ filteredSummary.errorCount }}</strong>
-                            </div>
-                            <div class="summary-row">
-                                <span>{{ t("aborted") }}</span>
-                                <strong class="status-warning">{{ filteredSummary.abortedCount }}</strong>
+                            <div class="progress-stacked-bar">
+                                <div
+                                    class="bar-segment is-success"
+                                    :style="{
+                                        width:
+                                            filteredSummary.totalRequests > 0
+                                                ? (filteredSummary.successCount / filteredSummary.totalRequests) * 100 +
+                                                  '%'
+                                                : '0%',
+                                    }"
+                                    :title="t('success')"
+                                ></div>
+                                <div
+                                    class="bar-segment is-error"
+                                    :style="{
+                                        width:
+                                            filteredSummary.totalRequests > 0
+                                                ? (filteredSummary.errorCount / filteredSummary.totalRequests) * 100 +
+                                                  '%'
+                                                : '0%',
+                                    }"
+                                    :title="t('failed')"
+                                ></div>
+                                <div
+                                    class="bar-segment is-warning"
+                                    :style="{
+                                        width:
+                                            filteredSummary.totalRequests > 0
+                                                ? (filteredSummary.abortedCount / filteredSummary.totalRequests) * 100 +
+                                                  '%'
+                                                : '0%',
+                                    }"
+                                    :title="t('aborted')"
+                                ></div>
                             </div>
                         </div>
-                        <div class="breakdown-block">
-                            <h4>{{ t("apiFormat") }}</h4>
-                            <div class="breakdown-list">
-                                <span
-                                    v-for="item in filteredSummary.formatBreakdown"
-                                    :key="`format-${item.key}`"
-                                    class="breakdown-chip"
-                                >
-                                    {{ translateLabel(item.key) }}: {{ item.count }}
-                                </span>
+
+                        <div class="breakdown-grid-v2">
+                            <div class="breakdown-block-v2">
+                                <h4>{{ t("apiFormat") }}</h4>
+                                <div class="breakdown-list-v2">
+                                    <div
+                                        v-for="item in filteredSummary.formatBreakdown"
+                                        :key="`format-${item.key}`"
+                                        class="modern-chip"
+                                    >
+                                        <span class="chip-dot"></span>
+                                        <span class="chip-label">{{ translateLabel(item.key) }}</span>
+                                        <span class="chip-count">{{ item.count }}</span>
+                                    </div>
+                                </div>
                             </div>
-                        </div>
-                        <div class="breakdown-block">
-                            <h4>{{ t("streamingMode") }}</h4>
-                            <div class="breakdown-list">
-                                <span
-                                    v-for="item in filteredSummary.streamModeBreakdown"
-                                    :key="`streamMode-${item.key}`"
-                                    class="breakdown-chip"
-                                >
-                                    {{ translateLabel(item.key) }}: {{ item.count }}
-                                </span>
+                            <div class="breakdown-block-v2">
+                                <h4>{{ t("streamingMode") }}</h4>
+                                <div class="breakdown-list-v2">
+                                    <div
+                                        v-for="item in filteredSummary.streamModeBreakdown"
+                                        :key="`streamMode-${item.key}`"
+                                        class="modern-chip mode-chip"
+                                    >
+                                        <span class="chip-label">{{ translateLabel(item.key) }}</span>
+                                        <span class="chip-count">{{ item.count }}</span>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </section>
                 </div>
 
-                <section class="status-card wide-card">
-                    <h3 class="card-title">{{ t("accountUsageBreakdown") }}</h3>
-                    <div v-if="filteredAccounts.length === 0" class="empty-state">
-                        {{ t("noUsageStats") }}
-                    </div>
-                    <div v-else class="table-scroll-wrapper">
-                        <table class="data-table fixed-header-table">
-                            <thead>
-                                <tr>
-                                    <th>{{ t("account") }}</th>
-                                    <th>{{ t("total") }}</th>
-                                    <th>{{ t("success") }}</th>
-                                    <th>{{ t("failed") }}</th>
-                                    <th>{{ t("aborted") }}</th>
-                                    <th>{{ t("successRate") }}</th>
-                                    <th>{{ t("avgDuration") }}</th>
-                                    <th>{{ t("modelUsage") }}</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr v-for="item in filteredAccounts" :key="item.accountKey">
-                                    <td class="account-cell">
-                                        {{ formatAccount(item.authIndex, item.accountName) }}
-                                    </td>
-                                    <td>{{ item.totalRequests }}</td>
-                                    <td class="status-ok">{{ item.successCount }}</td>
-                                    <td class="status-error">{{ item.errorCount }}</td>
-                                    <td class="status-warning">{{ item.abortedCount }}</td>
-                                    <td>{{ item.successRate }}%</td>
-                                    <td>{{ formatDuration(item.avgDurationMs) }}</td>
-                                    <td>
-                                        <div class="breakdown-list">
-                                            <span v-for="mc in item.modelCounts" :key="mc.key" class="breakdown-chip">
-                                                {{ mc.key }}: {{ mc.count }}
-                                            </span>
-                                        </div>
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </section>
+                <div class="full-width-section">
+                    <section class="status-card wide-card">
+                        <h3 class="card-title">{{ t("accountUsageBreakdown") }}</h3>
+                        <div v-if="filteredAccounts.length === 0" class="empty-state">
+                            {{ t("noUsageStats") }}
+                        </div>
+                        <div v-else class="table-scroll-wrapper">
+                            <table class="data-table fixed-header-table">
+                                <thead>
+                                    <tr>
+                                        <th>{{ t("account") }}</th>
+                                        <th>{{ t("total") }}</th>
+                                        <th>{{ t("success") }}</th>
+                                        <th>{{ t("failed") }}</th>
+                                        <th>{{ t("aborted") }}</th>
+                                        <th>{{ t("successRate") }}</th>
+                                        <th>{{ t("avgDuration") }}</th>
+                                        <th>{{ t("modelUsage") }}</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr v-for="item in filteredAccounts" :key="item.accountKey">
+                                        <td class="account-cell">
+                                            {{ formatAccount(item.authIndex, item.accountName) }}
+                                        </td>
+                                        <td>{{ item.totalRequests }}</td>
+                                        <td class="status-ok">{{ item.successCount }}</td>
+                                        <td class="status-error">{{ item.errorCount }}</td>
+                                        <td class="status-warning">{{ item.abortedCount }}</td>
+                                        <td>{{ item.successRate }}%</td>
+                                        <td>{{ formatDuration(item.avgDurationMs) }}</td>
+                                        <td>
+                                            <div class="breakdown-list">
+                                                <span
+                                                    v-for="mc in item.modelCounts"
+                                                    :key="mc.key"
+                                                    class="breakdown-chip"
+                                                >
+                                                    {{ mc.key }}: {{ mc.count }}
+                                                </span>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
+                </div>
 
-                <section class="status-card records-card">
-                    <div class="records-header">
-                        <h3 class="card-title">{{ t("requestRecords") }}</h3>
-                        <span class="records-order">{{ t("recentToOldest") }}</span>
-                    </div>
-                    <div v-if="filteredRecords.length === 0" class="empty-state">
-                        {{ t("noRequestRecords") }}
-                    </div>
-                    <div v-else class="table-scroll-wrapper records-scroll-wrapper">
-                        <table class="data-table fixed-header-table">
-                            <thead>
-                                <tr>
-                                    <th>{{ t("requestTime") }}</th>
-                                    <th>{{ t("requestId") }}</th>
-                                    <th>{{ t("apiFormat") }}</th>
-                                    <th>{{ t("streamingMode") }}</th>
-                                    <th>{{ t("requestModel") }}</th>
-                                    <th>{{ t("requestOutcome") }}</th>
-                                    <th>{{ t("requestStatus") }}</th>
-                                    <th>{{ t("requestDuration") }}</th>
-                                    <th>{{ t("requestAccount") }}</th>
-                                    <th>{{ t("requestAttempts") }}</th>
-                                    <th>{{ t("requestIp") }}</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr v-for="record in filteredRecords" :key="record.sequence">
-                                    <td class="sticky-time-col">{{ formatDateTime(record.startedAt) }}</td>
-                                    <td class="mono truncate-cell">{{ record.requestId }}</td>
-                                    <td>{{ translateLabel(record.apiFormat) }}</td>
-                                    <td>{{ translateLabel(record.streamMode) }}</td>
-                                    <td>{{ record.model || "-" }}</td>
-                                    <td>
-                                        <span
-                                            class="outcome-badge"
-                                            :class="`is-${record.outcome}`"
-                                            :style="
-                                                record.outcome === 'error' && record.errorMessage
-                                                    ? 'cursor: pointer'
-                                                    : ''
-                                            "
-                                            :title="
-                                                record.outcome === 'error' && record.errorMessage
-                                                    ? t('clickToViewError')
-                                                    : ''
-                                            "
-                                            @click="showErrorDetail(record)"
-                                        >
-                                            {{ translateLabel(record.outcome) }}
-                                        </span>
-                                    </td>
-                                    <td>{{ record.statusCode ?? "-" }}</td>
-                                    <td>{{ formatDuration(record.durationMs) }}</td>
-                                    <td>{{ formatAccount(record.finalAuthIndex, record.finalAccountName) }}</td>
-                                    <td class="attempts-cell">
-                                        <span
-                                            class="attempts-count"
-                                            :class="{ 'is-clickable': record.attemptCount > 1 }"
-                                            :title="record.attemptCount > 1 ? t('clickToViewAttempts') : ''"
-                                            @click="record.attemptCount > 1 && showAttemptsDetail(record)"
-                                            >{{ record.attemptCount }}</span
-                                        >
-                                    </td>
-                                    <td class="mono truncate-cell">{{ record.clientIp || "-" }}</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </section>
+                <div class="full-width-section">
+                    <section class="status-card records-card">
+                        <div class="records-header">
+                            <h3 class="card-title">{{ t("requestRecords") }}</h3>
+                            <span class="records-order">{{ t("recentToOldest") }}</span>
+                        </div>
+                        <div v-if="filteredRecords.length === 0" class="empty-state">
+                            {{ t("noRequestRecords") }}
+                        </div>
+                        <div v-else class="table-scroll-wrapper records-scroll-wrapper">
+                            <table class="data-table fixed-header-table">
+                                <thead>
+                                    <tr>
+                                        <th>{{ t("requestTime") }}</th>
+                                        <th>{{ t("requestId") }}</th>
+                                        <th>{{ t("apiFormat") }}</th>
+                                        <th>{{ t("streamingMode") }}</th>
+                                        <th>{{ t("requestModel") }}</th>
+                                        <th>{{ t("requestOutcome") }}</th>
+                                        <th>{{ t("requestStatus") }}</th>
+                                        <th>{{ t("requestDuration") }}</th>
+                                        <th>{{ t("requestAccount") }}</th>
+                                        <th>{{ t("requestAttempts") }}</th>
+                                        <th>{{ t("requestIp") }}</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr v-for="record in filteredRecords" :key="record.sequence">
+                                        <td class="sticky-time-col">{{ formatDateTime(record.startedAt) }}</td>
+                                        <td class="mono truncate-cell">{{ record.requestId }}</td>
+                                        <td>{{ translateLabel(record.apiFormat) }}</td>
+                                        <td>{{ translateLabel(record.streamMode) }}</td>
+                                        <td>{{ record.model || "-" }}</td>
+                                        <td>
+                                            <span
+                                                class="outcome-badge"
+                                                :class="`is-${record.outcome}`"
+                                                :style="
+                                                    record.outcome === 'error' && record.errorMessage
+                                                        ? 'cursor: pointer'
+                                                        : ''
+                                                "
+                                                :title="
+                                                    record.outcome === 'error' && record.errorMessage
+                                                        ? t('clickToViewError')
+                                                        : ''
+                                                "
+                                                @click="showErrorDetail(record)"
+                                            >
+                                                {{ translateLabel(record.outcome) }}
+                                            </span>
+                                        </td>
+                                        <td>{{ record.statusCode ?? "-" }}</td>
+                                        <td>{{ formatDuration(record.durationMs) }}</td>
+                                        <td>{{ formatAccount(record.finalAuthIndex, record.finalAccountName) }}</td>
+                                        <td class="attempts-cell">
+                                            <span
+                                                class="attempts-count"
+                                                :class="{ 'is-clickable': record.attemptCount > 1 }"
+                                                :title="record.attemptCount > 1 ? t('clickToViewAttempts') : ''"
+                                                @click="record.attemptCount > 1 && showAttemptsDetail(record)"
+                                                >{{ record.attemptCount }}</span
+                                            >
+                                        </td>
+                                        <td class="mono truncate-cell">{{ record.clientIp || "-" }}</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
+                </div>
             </div>
 
             <!-- LOGS VIEW -->
@@ -3837,36 +3972,241 @@ watchEffect(() => {
 }
 
 /* Stats View Styles */
-.stats-grid {
+.stats-grid-v2 {
     display: grid;
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-    gap: 16px;
-    margin-bottom: 24px;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 20px;
+    margin-bottom: 30px;
 }
 
-.stats-dashboard-grid {
+.stats-card-v2 {
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
+    border-radius: @border-radius-lg;
+    padding: 20px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    transition: all @transition-normal;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
+    min-width: 0;
+
+    &:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.08);
+        border-color: @primary-color;
+    }
+
+    .card-icon {
+        width: 42px;
+        height: 42px;
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+
+        &.is-total {
+            color: #409eff;
+            background: fade(#409eff, 10%);
+        }
+        &.is-success {
+            color: #67c23a;
+            background: fade(#67c23a, 10%);
+        }
+        &.is-warning {
+            color: #e6a23c;
+            background: fade(#e6a23c, 10%);
+        }
+        &.is-active {
+            color: #6366f1;
+            background: fade(#6366f1, 10%);
+        }
+        &.is-accounts {
+            color: #ec4899;
+            background: fade(#ec4899, 10%);
+        }
+    }
+
+    .stats-label {
+        display: block;
+        color: @text-secondary;
+        font-size: 0.8rem;
+        margin-bottom: 2px;
+        font-weight: 500;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .stats-value {
+        display: block;
+        color: @text-primary;
+        font-size: 1.5rem;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+        white-space: nowrap;
+    }
+}
+
+.summary-card-visual {
+    .card-header-v2 {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 24px;
+    }
+
+    .summary-total-badge {
+        background: var(--bg-light);
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 0.85rem;
+        color: @text-secondary;
+        border: 1px solid var(--border-light);
+    }
+}
+
+.progress-stacked-root {
+    margin-bottom: 30px;
+
+    .progress-info-labels {
+        display: flex;
+        gap: 24px;
+        margin-bottom: 12px;
+        font-size: 0.85rem;
+        font-weight: 600;
+
+        span {
+            position: relative;
+            padding-left: 14px;
+            display: flex;
+            align-items: center;
+
+            &::before {
+                content: "";
+                position: absolute;
+                left: 0;
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+            }
+        }
+
+        .label-success::before {
+            background: #67c23a;
+            box-shadow: 0 0 8px fade(#67c23a, 50%);
+        }
+        .label-error::before {
+            background: #f56c6c;
+            box-shadow: 0 0 8px fade(#f56c6c, 50%);
+        }
+        .label-warn::before {
+            background: #e6a23c;
+            box-shadow: 0 0 8px fade(#e6a23c, 50%);
+        }
+    }
+
+    .progress-stacked-bar {
+        display: flex;
+        height: 12px;
+        background: var(--bg-light);
+        border-radius: 10px;
+        overflow: hidden;
+        border: 1px solid var(--border-light);
+    }
+
+    .bar-segment {
+        height: 100%;
+        transition: width 1s ease-out;
+
+        &.is-success {
+            background: @success-color;
+        }
+        &.is-error {
+            background: @error-color;
+        }
+        &.is-warning {
+            background: @warning-color;
+        }
+    }
+}
+
+.breakdown-grid-v2 {
     display: grid;
-    grid-template-columns: minmax(320px, 1fr) minmax(0, 2fr);
-    gap: 24px;
-    margin-bottom: 24px;
+    grid-template-columns: 1fr 1fr;
+    gap: 30px;
+
+    @media (max-width: 600px) {
+        grid-template-columns: 1fr;
+        gap: 20px;
+    }
 }
 
-.stats-card {
-    padding: 18px 20px;
+.breakdown-block-v2 {
+    h4 {
+        font-size: 0.85rem;
+        color: @text-secondary;
+        margin: 0 0 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
 }
 
-.stats-label {
-    display: block;
-    color: @text-secondary;
-    font-size: 0.85rem;
-    margin-bottom: 8px;
+.breakdown-list-v2 {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
 }
 
-.stats-value {
-    display: block;
+.modern-chip {
+    display: flex;
+    align-items: center;
+    padding: 10px 14px;
+    background: var(--bg-light);
+    border: 1px solid var(--border-light);
+    border-radius: 10px;
+    font-size: 0.9rem;
     color: @text-primary;
-    font-size: 1.4rem;
-    font-weight: 700;
+    transition: all 0.2s;
+
+    &:hover {
+        border-color: @primary-color;
+        background: var(--bg-card);
+    }
+
+    .chip-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: @primary-color;
+        margin-right: 12px;
+        box-shadow: 0 0 6px rgba(var(--color-primary-rgb), 0.4);
+    }
+
+    .chip-label {
+        font-weight: 500;
+        flex: 1;
+    }
+
+    .chip-count {
+        background: var(--bg-card);
+        padding: 2px 8px;
+        border-radius: 6px;
+        font-size: 0.8rem;
+        font-weight: 700;
+        color: @text-secondary;
+        border: 1px solid var(--border-light);
+    }
+
+    &.mode-chip {
+        background: transparent;
+        border-style: dashed;
+
+        .chip-label {
+            color: @text-secondary;
+        }
+    }
 }
 
 .meta-chip {
@@ -4128,12 +4468,12 @@ watchEffect(() => {
     vertical-align: middle;
 }
 
-/* Base stats-grid responsivenes explicitly ensured */
-.stats-grid {
+/* Base stats-grid responsiveness explicitly ensured via auto-fit */
+.stats-grid-v2 {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     gap: 16px;
-    margin-bottom: 24px;
+    margin-bottom: 30px;
 }
 
 /* truncate cells for very long text (e.g. paths, IDs) */
@@ -4215,8 +4555,8 @@ watchEffect(() => {
         grid-template-columns: 1fr;
     }
 
-    .stats-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+    .stats-grid-v2 {
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
         gap: 12px;
     }
 
@@ -4234,16 +4574,16 @@ watchEffect(() => {
 }
 
 @media (max-width: 599px) {
-    .stats-grid {
+    .stats-grid-v2 {
         grid-template-columns: 1fr 1fr;
     }
 
-    .stats-card {
+    .stats-card-v2 {
         padding: 14px 16px;
-    }
 
-    .stats-value {
-        font-size: 1.25rem;
+        .stats-value {
+            font-size: 1.25rem;
+        }
     }
 
     .stats-dashboard-grid {
