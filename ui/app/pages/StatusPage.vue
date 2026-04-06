@@ -1585,6 +1585,29 @@
                             <strong class="stats-value">{{ filteredSummary.uniqueAccountPairs }}</strong>
                         </div>
                     </div>
+                    <div class="stats-card-v2">
+                        <div class="card-icon is-error">
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="20"
+                                height="20"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            >
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <line x1="15" y1="9" x2="9" y2="15"></line>
+                                <line x1="9" y1="9" x2="15" y2="15"></line>
+                            </svg>
+                        </div>
+                        <div class="card-info">
+                            <span class="stats-label">{{ t("failed") }}</span>
+                            <strong class="stats-value">{{ filteredSummary.failedRequests }}</strong>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="stats-dashboard-grid">
@@ -1988,6 +2011,7 @@ const filteredSummary = computed(() => {
             activeRequests: statsState.summary.activeRequests,
             avgDurationMs: 0,
             errorCount: 0,
+            failedRequests: 0,
             formatBreakdown: [],
             requestCategoryBreakdown: [],
             streamModeBreakdown: [],
@@ -2001,6 +2025,7 @@ const filteredSummary = computed(() => {
     const successCount = records.filter(r => r.outcome === "success").length;
     const errorCount = records.filter(r => r.outcome === "error").length;
     const abortedCount = records.filter(r => r.outcome === "aborted").length;
+    const failedRequests = errorCount + abortedCount;
     const totalDurationMs = records.reduce((sum, r) => sum + (r.durationMs || 0), 0);
     const avgDurationMs = totalRequests > 0 ? Math.round(totalDurationMs / totalRequests) : 0;
     const successRate = totalRequests > 0 ? Number(((successCount / totalRequests) * 100).toFixed(1)) : 0;
@@ -2035,6 +2060,7 @@ const filteredSummary = computed(() => {
         activeRequests: statsState.summary.activeRequests,
         avgDurationMs,
         errorCount,
+        failedRequests,
         formatBreakdown,
         requestCategoryBreakdown,
         streamModeBreakdown,
@@ -4036,6 +4062,7 @@ watchEffect(() => {
     padding: 20px 16px;
     display: flex;
     align-items: center;
+    min-height: 96px;
     gap: 12px;
     transition: all @transition-normal;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
@@ -4068,6 +4095,10 @@ watchEffect(() => {
             color: #e6a23c;
             background: fade(#e6a23c, 10%);
         }
+        &.is-error {
+            color: #f56c6c;
+            background: fade(#f56c6c, 10%);
+        }
         &.is-active {
             color: #6366f1;
             background: fade(#6366f1, 10%);
@@ -4076,6 +4107,14 @@ watchEffect(() => {
             color: #ec4899;
             background: fade(#ec4899, 10%);
         }
+    }
+
+    .card-info {
+        min-width: 0;
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
     }
 
     .stats-label {
@@ -4087,6 +4126,7 @@ watchEffect(() => {
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+        line-height: 1.3;
     }
 
     .stats-value {
@@ -4096,6 +4136,9 @@ watchEffect(() => {
         font-weight: 800;
         letter-spacing: -0.02em;
         white-space: nowrap;
+        line-height: 1.15;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 }
 
