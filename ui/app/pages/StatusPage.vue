@@ -2605,7 +2605,7 @@ const filteredSummary = computed(() => {
     const successCount = records.filter(r => r.outcome === "success").length;
     const errorCount = records.filter(r => r.outcome === "error").length;
     const abortedCount = records.filter(r => r.outcome === "aborted").length;
-    const failedRequests = errorCount + abortedCount;
+    const failedRequests = errorCount;
     const totalDurationMs = records.reduce((sum, r) => sum + (r.durationMs || 0), 0);
     const avgDurationMs = totalRequests > 0 ? Math.round(totalDurationMs / totalRequests) : 0;
     const successRate = totalRequests > 0 ? Number(((successCount / totalRequests) * 100).toFixed(1)) : 0;
