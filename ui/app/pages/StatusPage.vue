@@ -1470,7 +1470,7 @@
                 <section class="status-card stats-filters-card">
                     <div class="stats-filters-header">
                         <div class="stats-filters-copy">
-                            <h3 class="card-title-usage">{{ t("usageFilters") }}</h3>
+                            <h3 class="card-title">{{ t("usageFilters") }}</h3>
                         </div>
                         <div class="stats-filters-actions">
                             <el-select v-model="timeRange" class="time-range-select stats-time-range-select">
@@ -1494,10 +1494,41 @@
                     <div class="records-filters stats-record-filters">
                         <el-select
                             v-model="recordFilters.apiFormat"
-                            clearable
+                            multiple
                             :placeholder="t('apiFormat')"
-                            class="record-filter-select"
+                            class="record-filter-select record-filter-select-custom"
+                            @change="handleFilterChange('apiFormat')"
+                            @visible-change="v => !v && (filterSearchQuery.apiFormat = '')"
                         >
+                            <template #prefix>
+                                <span
+                                    class="custom-label-text"
+                                    :class="{
+                                        'is-placeholder-label':
+                                            recordFilters.apiFormat.length === 0 ||
+                                            (recordFilters.apiFormat.length === 1 && recordFilters.apiFormat[0] === ''),
+                                    }"
+                                >
+                                    {{ getFilterLabel("apiFormat", t("apiFormat")) }}
+                                </span>
+                            </template>
+                            <el-option disabled class="stats-filter-search-option">
+                                <el-input
+                                    v-model="filterSearchQuery.apiFormat"
+                                    :placeholder="t('searchPlaceholder')"
+                                    @click.stop
+                                >
+                                    <template #suffix>
+                                        <el-icon
+                                            class="stats-search-clear-btn"
+                                            :class="{ 'is-visible': filterSearchQuery.apiFormat }"
+                                            @click.stop="filterSearchQuery.apiFormat = ''"
+                                        >
+                                            <CircleClose />
+                                        </el-icon>
+                                    </template>
+                                </el-input>
+                            </el-option>
                             <el-option :label="t('timeRangeAll')" value="" />
                             <el-option
                                 v-for="item in recordFilterOptions.apiFormats"
@@ -1508,10 +1539,42 @@
                         </el-select>
                         <el-select
                             v-model="recordFilters.streamMode"
-                            clearable
+                            multiple
                             :placeholder="t('streamingMode')"
-                            class="record-filter-select"
+                            class="record-filter-select record-filter-select-custom"
+                            @change="handleFilterChange('streamMode')"
+                            @visible-change="v => !v && (filterSearchQuery.streamMode = '')"
                         >
+                            <template #prefix>
+                                <span
+                                    class="custom-label-text"
+                                    :class="{
+                                        'is-placeholder-label':
+                                            recordFilters.streamMode.length === 0 ||
+                                            (recordFilters.streamMode.length === 1 &&
+                                                recordFilters.streamMode[0] === ''),
+                                    }"
+                                >
+                                    {{ getFilterLabel("streamMode", t("streamingMode")) }}
+                                </span>
+                            </template>
+                            <el-option disabled class="stats-filter-search-option">
+                                <el-input
+                                    v-model="filterSearchQuery.streamMode"
+                                    :placeholder="t('searchPlaceholder')"
+                                    @click.stop
+                                >
+                                    <template #suffix>
+                                        <el-icon
+                                            class="stats-search-clear-btn"
+                                            :class="{ 'is-visible': filterSearchQuery.streamMode }"
+                                            @click.stop="filterSearchQuery.streamMode = ''"
+                                        >
+                                            <CircleClose />
+                                        </el-icon>
+                                    </template>
+                                </el-input>
+                            </el-option>
                             <el-option :label="t('timeRangeAll')" value="" />
                             <el-option
                                 v-for="item in recordFilterOptions.streamModes"
@@ -1522,11 +1585,41 @@
                         </el-select>
                         <el-select
                             v-model="recordFilters.model"
-                            filterable
-                            clearable
+                            multiple
                             :placeholder="t('requestModel')"
-                            class="record-filter-select record-filter-select-wide"
+                            class="record-filter-select record-filter-select-wide record-filter-select-custom"
+                            @change="handleFilterChange('model')"
+                            @visible-change="v => !v && (filterSearchQuery.model = '')"
                         >
+                            <template #prefix>
+                                <span
+                                    class="custom-label-text"
+                                    :class="{
+                                        'is-placeholder-label':
+                                            recordFilters.model.length === 0 ||
+                                            (recordFilters.model.length === 1 && recordFilters.model[0] === ''),
+                                    }"
+                                >
+                                    {{ getFilterLabel("model", t("requestModel")) }}
+                                </span>
+                            </template>
+                            <el-option disabled class="stats-filter-search-option">
+                                <el-input
+                                    v-model="filterSearchQuery.model"
+                                    :placeholder="t('searchPlaceholder')"
+                                    @click.stop
+                                >
+                                    <template #suffix>
+                                        <el-icon
+                                            class="stats-search-clear-btn"
+                                            :class="{ 'is-visible': filterSearchQuery.model }"
+                                            @click.stop="filterSearchQuery.model = ''"
+                                        >
+                                            <CircleClose />
+                                        </el-icon>
+                                    </template>
+                                </el-input>
+                            </el-option>
                             <el-option :label="t('timeRangeAll')" value="" />
                             <el-option
                                 v-for="item in recordFilterOptions.models"
@@ -1537,10 +1630,41 @@
                         </el-select>
                         <el-select
                             v-model="recordFilters.outcome"
-                            clearable
+                            multiple
                             :placeholder="t('requestOutcome')"
-                            class="record-filter-select"
+                            class="record-filter-select record-filter-select-custom"
+                            @change="handleFilterChange('outcome')"
+                            @visible-change="v => !v && (filterSearchQuery.outcome = '')"
                         >
+                            <template #prefix>
+                                <span
+                                    class="custom-label-text"
+                                    :class="{
+                                        'is-placeholder-label':
+                                            recordFilters.outcome.length === 0 ||
+                                            (recordFilters.outcome.length === 1 && recordFilters.outcome[0] === ''),
+                                    }"
+                                >
+                                    {{ getFilterLabel("outcome", t("requestOutcome")) }}
+                                </span>
+                            </template>
+                            <el-option disabled class="stats-filter-search-option">
+                                <el-input
+                                    v-model="filterSearchQuery.outcome"
+                                    :placeholder="t('searchPlaceholder')"
+                                    @click.stop
+                                >
+                                    <template #suffix>
+                                        <el-icon
+                                            class="stats-search-clear-btn"
+                                            :class="{ 'is-visible': filterSearchQuery.outcome }"
+                                            @click.stop="filterSearchQuery.outcome = ''"
+                                        >
+                                            <CircleClose />
+                                        </el-icon>
+                                    </template>
+                                </el-input>
+                            </el-option>
                             <el-option :label="t('timeRangeAll')" value="" />
                             <el-option
                                 v-for="item in recordFilterOptions.outcomes"
@@ -1551,11 +1675,42 @@
                         </el-select>
                         <el-select
                             v-model="recordFilters.statusCode"
-                            filterable
-                            clearable
+                            multiple
                             :placeholder="t('requestStatus')"
-                            class="record-filter-select"
+                            class="record-filter-select record-filter-select-custom"
+                            @change="handleFilterChange('statusCode')"
+                            @visible-change="v => !v && (filterSearchQuery.statusCode = '')"
                         >
+                            <template #prefix>
+                                <span
+                                    class="custom-label-text"
+                                    :class="{
+                                        'is-placeholder-label':
+                                            recordFilters.statusCode.length === 0 ||
+                                            (recordFilters.statusCode.length === 1 &&
+                                                recordFilters.statusCode[0] === ''),
+                                    }"
+                                >
+                                    {{ getFilterLabel("statusCode", t("requestStatus")) }}
+                                </span>
+                            </template>
+                            <el-option disabled class="stats-filter-search-option">
+                                <el-input
+                                    v-model="filterSearchQuery.statusCode"
+                                    :placeholder="t('searchPlaceholder')"
+                                    @click.stop
+                                >
+                                    <template #suffix>
+                                        <el-icon
+                                            class="stats-search-clear-btn"
+                                            :class="{ 'is-visible': filterSearchQuery.statusCode }"
+                                            @click.stop="filterSearchQuery.statusCode = ''"
+                                        >
+                                            <CircleClose />
+                                        </el-icon>
+                                    </template>
+                                </el-input>
+                            </el-option>
                             <el-option :label="t('timeRangeAll')" value="" />
                             <el-option
                                 v-for="item in recordFilterOptions.statusCodes"
@@ -1566,11 +1721,42 @@
                         </el-select>
                         <el-select
                             v-model="recordFilters.finalAccount"
-                            filterable
-                            clearable
+                            multiple
                             :placeholder="t('requestAccount')"
-                            class="record-filter-select record-filter-select-wide"
+                            class="record-filter-select record-filter-select-wide record-filter-select-custom"
+                            @change="handleFilterChange('finalAccount')"
+                            @visible-change="v => !v && (filterSearchQuery.finalAccount = '')"
                         >
+                            <template #prefix>
+                                <span
+                                    class="custom-label-text"
+                                    :class="{
+                                        'is-placeholder-label':
+                                            recordFilters.finalAccount.length === 0 ||
+                                            (recordFilters.finalAccount.length === 1 &&
+                                                recordFilters.finalAccount[0] === ''),
+                                    }"
+                                >
+                                    {{ getFilterLabel("finalAccount", t("requestAccount")) }}
+                                </span>
+                            </template>
+                            <el-option disabled class="stats-filter-search-option">
+                                <el-input
+                                    v-model="filterSearchQuery.finalAccount"
+                                    :placeholder="t('searchPlaceholder')"
+                                    @click.stop
+                                >
+                                    <template #suffix>
+                                        <el-icon
+                                            class="stats-search-clear-btn"
+                                            :class="{ 'is-visible': filterSearchQuery.finalAccount }"
+                                            @click.stop="filterSearchQuery.finalAccount = ''"
+                                        >
+                                            <CircleClose />
+                                        </el-icon>
+                                    </template>
+                                </el-input>
+                            </el-option>
                             <el-option :label="t('timeRangeAll')" value="" />
                             <el-option
                                 v-for="item in recordFilterOptions.finalAccounts"
@@ -1581,11 +1767,41 @@
                         </el-select>
                         <el-select
                             v-model="recordFilters.clientIp"
-                            filterable
-                            clearable
+                            multiple
                             :placeholder="t('requestIp')"
-                            class="record-filter-select"
+                            class="record-filter-select record-filter-select-custom"
+                            @change="handleFilterChange('clientIp')"
+                            @visible-change="v => !v && (filterSearchQuery.clientIp = '')"
                         >
+                            <template #prefix>
+                                <span
+                                    class="custom-label-text"
+                                    :class="{
+                                        'is-placeholder-label':
+                                            recordFilters.clientIp.length === 0 ||
+                                            (recordFilters.clientIp.length === 1 && recordFilters.clientIp[0] === ''),
+                                    }"
+                                >
+                                    {{ getFilterLabel("clientIp", t("requestIp")) }}
+                                </span>
+                            </template>
+                            <el-option disabled class="stats-filter-search-option">
+                                <el-input
+                                    v-model="filterSearchQuery.clientIp"
+                                    :placeholder="t('searchPlaceholder')"
+                                    @click.stop
+                                >
+                                    <template #suffix>
+                                        <el-icon
+                                            class="stats-search-clear-btn"
+                                            :class="{ 'is-visible': filterSearchQuery.clientIp }"
+                                            @click.stop="filterSearchQuery.clientIp = ''"
+                                        >
+                                            <CircleClose />
+                                        </el-icon>
+                                    </template>
+                                </el-input>
+                            </el-option>
                             <el-option :label="t('timeRangeAll')" value="" />
                             <el-option
                                 v-for="item in recordFilterOptions.clientIps"
@@ -1596,10 +1812,42 @@
                         </el-select>
                         <el-select
                             v-model="recordFilters.attemptCount"
-                            clearable
+                            multiple
                             :placeholder="t('requestAttempts')"
-                            class="record-filter-select record-filter-select-narrow"
+                            class="record-filter-select record-filter-select-narrow record-filter-select-custom"
+                            @change="handleFilterChange('attemptCount')"
+                            @visible-change="v => !v && (filterSearchQuery.attemptCount = '')"
                         >
+                            <template #prefix>
+                                <span
+                                    class="custom-label-text"
+                                    :class="{
+                                        'is-placeholder-label':
+                                            recordFilters.attemptCount.length === 0 ||
+                                            (recordFilters.attemptCount.length === 1 &&
+                                                recordFilters.attemptCount[0] === ''),
+                                    }"
+                                >
+                                    {{ getFilterLabel("attemptCount", t("requestAttempts")) }}
+                                </span>
+                            </template>
+                            <el-option disabled class="stats-filter-search-option">
+                                <el-input
+                                    v-model="filterSearchQuery.attemptCount"
+                                    :placeholder="t('searchPlaceholder')"
+                                    @click.stop
+                                >
+                                    <template #suffix>
+                                        <el-icon
+                                            class="stats-search-clear-btn"
+                                            :class="{ 'is-visible': filterSearchQuery.attemptCount }"
+                                            @click.stop="filterSearchQuery.attemptCount = ''"
+                                        >
+                                            <CircleClose />
+                                        </el-icon>
+                                    </template>
+                                </el-input>
+                            </el-option>
                             <el-option :label="t('timeRangeAll')" value="" />
                             <el-option
                                 v-for="item in recordFilterOptions.attemptCounts"
@@ -1872,7 +2120,8 @@
                                                     :key="mc.key"
                                                     class="breakdown-chip"
                                                 >
-                                                    {{ mc.key }}: {{ mc.count }}
+                                                    {{ mc.key === EMPTY_FILTER_VALUE ? t("emptyValue") : mc.key }}:
+                                                    {{ mc.count }}
                                                 </span>
                                             </div>
                                         </td>
@@ -2079,6 +2328,7 @@
 import { computed, h, nextTick, onBeforeUnmount, onMounted, reactive, ref, watchEffect } from "vue";
 import { useRouter } from "vue-router";
 import { ElMessage, ElMessageBox, ElNotification } from "element-plus";
+import { CircleClose } from "@element-plus/icons-vue";
 import JSZip from "jszip";
 import escapeHtml from "../utils/escapeHtml";
 import I18n from "../utils/i18n";
@@ -2121,6 +2371,18 @@ const statsState = reactive({
 // Time range filter: 'all' | '1h' | '6h' | '24h' | '7d' | '30d'
 const timeRange = ref("all");
 const recordFilters = reactive({
+    apiFormat: [""],
+    attemptCount: [""],
+    clientIp: [""],
+    finalAccount: [""],
+    model: [""],
+    outcome: [""],
+    statusCode: [""],
+    streamMode: [""],
+});
+
+// Search keywords for internal selection searchboxes
+const filterSearchQuery = reactive({
     apiFormat: "",
     attemptCount: "",
     clientIp: "",
@@ -2130,7 +2392,6 @@ const recordFilters = reactive({
     statusCode: "",
     streamMode: "",
 });
-
 const TIME_RANGE_MS = {
     "1h": 60 * 60 * 1000,
     "6h": 6 * 60 * 60 * 1000,
@@ -2143,6 +2404,9 @@ const TIME_RANGE_MS = {
 const EMPTY_FILTER_VALUE = "__EMPTY__";
 const isEmptyFilterField = value =>
     value === null || value === undefined || (typeof value === "string" && !value.trim());
+const isFilterArrayActive = filterArray =>
+    Array.isArray(filterArray) && !(filterArray.length === 0 || (filterArray.length === 1 && filterArray[0] === ""));
+
 const formatAccountValue = (authIndex, accountName) => `${authIndex ?? "unknown"}::${accountName ?? ""}`;
 const getAccountFilterValue = (authIndex, accountName) => {
     if (authIndex === null || authIndex === undefined) {
@@ -2153,7 +2417,9 @@ const getAccountFilterValue = (authIndex, accountName) => {
 
 const timeFilteredRecords = computed(() => {
     if (timeRange.value === "all") return statsState.records;
-    const cutoff = Date.now() - TIME_RANGE_MS[timeRange.value];
+    const items = TIME_RANGE_MS[timeRange.value];
+    if (!items) return statsState.records;
+    const cutoff = Date.now() - items;
     return statsState.records.filter(r => {
         const ts = r.startedAt ? new Date(r.startedAt).getTime() : 0;
         return ts >= cutoff;
@@ -2161,117 +2427,153 @@ const timeFilteredRecords = computed(() => {
 });
 
 const recordFilterOptions = computed(() => {
+    // Stage 1: Get all valid combinations based on internal cascading logic
+    const baseOptions = {
+        apiFormats: new Set(),
+        attemptCounts: new Set(),
+        clientIps: new Set(),
+        finalAccounts: new Map(), // value -> label
+        models: new Set(),
+        outcomes: new Set(),
+        statusCodes: new Set(),
+        streamModes: new Set(),
+    };
+
     const records = timeFilteredRecords.value;
-    const apiFormats = new Set();
-    const streamModes = new Set();
-    const models = new Set();
-    const outcomes = new Set();
-    const statusCodes = new Set();
-    const finalAccounts = new Map();
-    const clientIps = new Set();
-    const attemptCounts = new Set();
+    const filters = recordFilters;
 
     records.forEach(record => {
-        apiFormats.add(isEmptyFilterField(record.apiFormat) ? EMPTY_FILTER_VALUE : record.apiFormat);
-        streamModes.add(isEmptyFilterField(record.streamMode) ? EMPTY_FILTER_VALUE : record.streamMode);
-        models.add(isEmptyFilterField(record.model) ? EMPTY_FILTER_VALUE : record.model);
-        outcomes.add(isEmptyFilterField(record.outcome) ? EMPTY_FILTER_VALUE : record.outcome);
-        statusCodes.add(
-            record.statusCode !== null && record.statusCode !== undefined ? record.statusCode : EMPTY_FILTER_VALUE
-        );
-        clientIps.add(isEmptyFilterField(record.clientIp) ? EMPTY_FILTER_VALUE : record.clientIp);
-        attemptCounts.add(
-            record.attemptCount !== null && record.attemptCount !== undefined ? record.attemptCount : EMPTY_FILTER_VALUE
-        );
-
-        const accountValue = getAccountFilterValue(record.finalAuthIndex, record.finalAccountName);
-        if (!finalAccounts.has(accountValue)) {
-            finalAccounts.set(accountValue, {
-                label:
-                    accountValue === EMPTY_FILTER_VALUE
+        if (isRecordMatched(record, filters, "apiFormat"))
+            baseOptions.apiFormats.add(isEmptyFilterField(record.apiFormat) ? EMPTY_FILTER_VALUE : record.apiFormat);
+        if (isRecordMatched(record, filters, "streamMode"))
+            baseOptions.streamModes.add(isEmptyFilterField(record.streamMode) ? EMPTY_FILTER_VALUE : record.streamMode);
+        if (isRecordMatched(record, filters, "model"))
+            baseOptions.models.add(isEmptyFilterField(record.model) ? EMPTY_FILTER_VALUE : record.model);
+        if (isRecordMatched(record, filters, "outcome"))
+            baseOptions.outcomes.add(isEmptyFilterField(record.outcome) ? EMPTY_FILTER_VALUE : record.outcome);
+        if (isRecordMatched(record, filters, "statusCode"))
+            baseOptions.statusCodes.add(
+                record.statusCode !== null && record.statusCode !== undefined ? record.statusCode : EMPTY_FILTER_VALUE
+            );
+        if (isRecordMatched(record, filters, "clientIp"))
+            baseOptions.clientIps.add(isEmptyFilterField(record.clientIp) ? EMPTY_FILTER_VALUE : record.clientIp);
+        if (isRecordMatched(record, filters, "attemptCount"))
+            baseOptions.attemptCounts.add(
+                record.attemptCount !== null && record.attemptCount !== undefined
+                    ? record.attemptCount
+                    : EMPTY_FILTER_VALUE
+            );
+        if (isRecordMatched(record, filters, "finalAccount")) {
+            const val = getAccountFilterValue(record.finalAuthIndex, record.finalAccountName);
+            if (!baseOptions.finalAccounts.has(val)) {
+                baseOptions.finalAccounts.set(
+                    val,
+                    val === EMPTY_FILTER_VALUE
                         ? t("emptyValue")
-                        : formatAccount(record.finalAuthIndex, record.finalAccountName),
-                value: accountValue,
-            });
+                        : formatAccount(record.finalAuthIndex, record.finalAccountName)
+                );
+            }
         }
     });
 
-    const sortFilterValues = values =>
-        Array.from(values).sort((a, b) => {
-            if (a === EMPTY_FILTER_VALUE) return -1;
-            if (b === EMPTY_FILTER_VALUE) return 1;
-            return String(a).localeCompare(String(b));
-        });
+    // Stage 2: Helper to sort and apply internal search keywords from the top search bars
+    const applySearchAndSort = (items, query, getLabel = null, isNumeric = false) => {
+        let list = Array.from(items);
 
-    const sortNumericFilterValues = values =>
-        Array.from(values).sort((a, b) => {
+        // Filter by keyword
+        if (query) {
+            const q = query.toLowerCase();
+            list = list.filter(item => {
+                const label = getLabel ? getLabel(item) : String(item);
+                return label.toLowerCase().includes(q);
+            });
+        }
+
+        // Sort
+        return list.sort((a, b) => {
             if (a === EMPTY_FILTER_VALUE) return -1;
             if (b === EMPTY_FILTER_VALUE) return 1;
-            return a - b;
+            if (isNumeric) return Number(a) - Number(b);
+            const labelA = getLabel ? getLabel(a) : String(a);
+            const labelB = getLabel ? getLabel(b) : String(b);
+            return labelA.localeCompare(labelB);
         });
+    };
 
     return {
-        apiFormats: sortFilterValues(apiFormats),
-        attemptCounts: sortNumericFilterValues(attemptCounts),
-        clientIps: sortFilterValues(clientIps),
-        finalAccounts: Array.from(finalAccounts.values()).sort((a, b) => a.label.localeCompare(b.label)),
-        models: sortFilterValues(models),
-        outcomes: sortFilterValues(outcomes),
-        statusCodes: sortNumericFilterValues(statusCodes),
-        streamModes: sortFilterValues(streamModes),
+        apiFormats: applySearchAndSort(baseOptions.apiFormats, filterSearchQuery.apiFormat, translateLabel),
+        attemptCounts: applySearchAndSort(
+            baseOptions.attemptCounts,
+            filterSearchQuery.attemptCount,
+            item => (item === EMPTY_FILTER_VALUE ? t("emptyValue") : String(item)),
+            true
+        ),
+        clientIps: applySearchAndSort(baseOptions.clientIps, filterSearchQuery.clientIp, item =>
+            item === EMPTY_FILTER_VALUE ? t("emptyValue") : item
+        ),
+        finalAccounts: applySearchAndSort(
+            Array.from(baseOptions.finalAccounts.keys()),
+            filterSearchQuery.finalAccount,
+            val => baseOptions.finalAccounts.get(val)
+        ).map(val => ({
+            label: baseOptions.finalAccounts.get(val),
+            value: val,
+        })),
+        models: applySearchAndSort(baseOptions.models, filterSearchQuery.model, item =>
+            item === EMPTY_FILTER_VALUE ? t("emptyValue") : item
+        ),
+        outcomes: applySearchAndSort(baseOptions.outcomes, filterSearchQuery.outcome, translateLabel),
+        statusCodes: applySearchAndSort(
+            baseOptions.statusCodes,
+            filterSearchQuery.statusCode,
+            item => (item === EMPTY_FILTER_VALUE ? t("emptyValue") : String(item)),
+            true
+        ),
+        streamModes: applySearchAndSort(baseOptions.streamModes, filterSearchQuery.streamMode, translateLabel),
     };
 });
 
 const hasActiveStatsFilters = computed(
-    () => timeRange.value !== "all" || Object.values(recordFilters).some(value => Boolean(value))
+    () => timeRange.value !== "all" || Object.values(recordFilters).some(value => isFilterArrayActive(value))
 );
 
 // Computed: records filtered by time range + record filters (records are newest-first)
+// Helper to check if a record matches current filters, optionally excluding one field for cascading filters
+const isRecordMatched = (record, filters, excludeField = null) => {
+    const checkMatch = (fieldValue, filterArray) => {
+        // If filters are empty or only contains "All" (""), pass everything
+        if (!filterArray || filterArray.length === 0 || filterArray.includes("")) return true;
+
+        // Handle multiple selections
+        const normalizedActualValue = isEmptyFilterField(fieldValue) ? EMPTY_FILTER_VALUE : fieldValue;
+
+        // Check if the actual value matches any of the selected filter values
+        return filterArray.some(v => String(v) === String(normalizedActualValue));
+    };
+
+    if (excludeField !== "apiFormat" && !checkMatch(record.apiFormat, filters.apiFormat)) return false;
+    if (excludeField !== "streamMode" && !checkMatch(record.streamMode, filters.streamMode)) return false;
+    if (excludeField !== "model" && !checkMatch(record.model, filters.model)) return false;
+    if (excludeField !== "outcome" && !checkMatch(record.outcome, filters.outcome)) return false;
+    if (excludeField !== "statusCode" && !checkMatch(record.statusCode, filters.statusCode)) return false;
+    if (excludeField !== "clientIp" && !checkMatch(record.clientIp, filters.clientIp)) return false;
+    if (excludeField !== "attemptCount" && !checkMatch(record.attemptCount, filters.attemptCount)) return false;
+
+    if (
+        excludeField !== "finalAccount" &&
+        filters.finalAccount &&
+        filters.finalAccount.length > 0 &&
+        !filters.finalAccount.includes("")
+    ) {
+        const accVal = getAccountFilterValue(record.finalAuthIndex, record.finalAccountName);
+        if (!filters.finalAccount.includes(accVal)) return false;
+    }
+
+    return true;
+};
+
 const filteredRecords = computed(() => {
-    return timeFilteredRecords.value.filter(record => {
-        if (recordFilters.apiFormat) {
-            if (recordFilters.apiFormat === EMPTY_FILTER_VALUE) {
-                if (!isEmptyFilterField(record.apiFormat)) return false;
-            } else if (record.apiFormat !== recordFilters.apiFormat) return false;
-        }
-        if (recordFilters.streamMode) {
-            if (recordFilters.streamMode === EMPTY_FILTER_VALUE) {
-                if (!isEmptyFilterField(record.streamMode)) return false;
-            } else if (record.streamMode !== recordFilters.streamMode) return false;
-        }
-        if (recordFilters.model) {
-            if (recordFilters.model === EMPTY_FILTER_VALUE) {
-                if (!isEmptyFilterField(record.model)) return false;
-            } else if ((record.model || "") !== recordFilters.model) return false;
-        }
-        if (recordFilters.outcome) {
-            if (recordFilters.outcome === EMPTY_FILTER_VALUE) {
-                if (!isEmptyFilterField(record.outcome)) return false;
-            } else if (record.outcome !== recordFilters.outcome) return false;
-        }
-        if (recordFilters.statusCode) {
-            if (recordFilters.statusCode === EMPTY_FILTER_VALUE) {
-                if (record.statusCode !== null && record.statusCode !== undefined) return false;
-            } else if (String(record.statusCode ?? "") !== recordFilters.statusCode) return false;
-        }
-        if (
-            recordFilters.finalAccount &&
-            getAccountFilterValue(record.finalAuthIndex, record.finalAccountName) !== recordFilters.finalAccount
-        ) {
-            return false;
-        }
-        if (recordFilters.clientIp) {
-            if (recordFilters.clientIp === EMPTY_FILTER_VALUE) {
-                if (!isEmptyFilterField(record.clientIp)) return false;
-            } else if ((record.clientIp || "") !== recordFilters.clientIp) return false;
-        }
-        if (recordFilters.attemptCount) {
-            if (recordFilters.attemptCount === EMPTY_FILTER_VALUE) {
-                if (record.attemptCount !== null && record.attemptCount !== undefined) return false;
-            } else if (String(record.attemptCount ?? "") !== recordFilters.attemptCount) return false;
-        }
-        return true;
-    });
+    return timeFilteredRecords.value.filter(record => isRecordMatched(record, recordFilters));
 });
 
 // Computed: summary recalculated from filtered records
@@ -2307,11 +2609,11 @@ const filteredSummary = computed(() => {
     const categoryCounts = {};
     const streamModeCounts = {};
     records.forEach(r => {
-        const fmt = r.apiFormat || "unknown";
+        const fmt = isEmptyFilterField(r.apiFormat) ? EMPTY_FILTER_VALUE : r.apiFormat;
         formatCounts[fmt] = (formatCounts[fmt] || 0) + 1;
         const cat = r.requestCategory || "unknown";
         categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
-        const sm = r.streamMode || "nonStream";
+        const sm = isEmptyFilterField(r.streamMode) ? EMPTY_FILTER_VALUE : r.streamMode;
         streamModeCounts[sm] = (streamModeCounts[sm] || 0) + 1;
     });
     const formatBreakdown = Object.entries(formatCounts)
@@ -2369,7 +2671,7 @@ const filteredAccounts = computed(() => {
         if (r.outcome === "success") acc.successCount += 1;
         else if (r.outcome === "aborted") acc.abortedCount += 1;
         else acc.errorCount += 1;
-        const mk = r.model || "unknown";
+        const mk = isEmptyFilterField(r.model) ? EMPTY_FILTER_VALUE : r.model;
         acc.modelCounts[mk] = (acc.modelCounts[mk] || 0) + 1;
     });
     return Object.values(accountMap)
@@ -2500,14 +2802,62 @@ const showAttemptsDetail = record => {
 
 const resetRecordFilters = () => {
     timeRange.value = "all";
-    recordFilters.apiFormat = "";
-    recordFilters.attemptCount = "";
-    recordFilters.clientIp = "";
-    recordFilters.finalAccount = "";
-    recordFilters.model = "";
-    recordFilters.outcome = "";
-    recordFilters.statusCode = "";
-    recordFilters.streamMode = "";
+    recordFilters.apiFormat = [""];
+    recordFilters.attemptCount = [""];
+    recordFilters.clientIp = [""];
+    recordFilters.finalAccount = [""];
+    recordFilters.model = [""];
+    recordFilters.outcome = [""];
+    recordFilters.statusCode = [""];
+    recordFilters.streamMode = [""];
+};
+
+const getFilterLabel = (field, placeholder) => {
+    const selected = recordFilters[field];
+
+    // If empty or only "All" is selected, return the placeholder text
+    if (selected.length === 0 || (selected.length === 1 && selected[0] === "")) {
+        return placeholder;
+    }
+
+    if (selected.length === 1) {
+        const val = selected[0];
+        // Special case for finalAccount which is an array of objects
+        if (field === "finalAccount") {
+            const found = recordFilterOptions.value.finalAccounts.find(opt => opt.value === val);
+            return found ? found.label : val;
+        }
+
+        // Use translateLabel for specific fields that need i18n
+        if (["apiFormat", "streamMode", "outcome"].includes(field)) {
+            return translateLabel(val);
+        }
+
+        // Others are simple strings or numbers
+        return val === EMPTY_FILTER_VALUE ? t("emptyValue") : String(val);
+    }
+    return t("selectedCount", { count: selected.length });
+};
+
+const handleFilterChange = field => {
+    const selected = recordFilters[field];
+
+    if (selected.length === 0) {
+        // If nothing is selected, default back to "All"
+        recordFilters[field] = [""];
+    } else if (selected.length > 1) {
+        // If "All" was previously selected and a specific item is added, remove "All"
+        const hasAll = selected.includes("");
+        const lastSelected = selected[selected.length - 1];
+
+        if (lastSelected === "") {
+            // If "All" was just clicked, clear everything else
+            recordFilters[field] = [""];
+        } else if (hasAll) {
+            // If specific items were clicked while "All" was selected, remove "All"
+            recordFilters[field] = selected.filter(v => v !== "");
+        }
+    }
 };
 
 const scheduleUpdate = () => {
@@ -3833,17 +4183,6 @@ watchEffect(() => {
     padding-bottom: 15px;
 }
 
-.card-title-usage {
-    font-size: 0.9rem;
-    color: @text-secondary;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    font-weight: 600;
-    margin: 0;
-    padding: 0;
-    border-bottom: none;
-}
-
 /* Status Items */
 .status-list {
     display: flex;
@@ -4733,29 +5072,38 @@ watchEffect(() => {
 
 .stats-filters-card {
     margin-bottom: 24px;
-    border-color: rgba(var(--color-primary-rgb), 0.18);
-    background: linear-gradient(180deg, rgba(var(--color-primary-rgb), 0.05) 0%, @background-white 46%);
+    background: @background-white;
+    border: 1px solid @border-light;
+    border-radius: 16px;
+    padding: 24px;
+
+    .card-title {
+        border-bottom: 1px solid @border-light;
+        padding-bottom: 15px;
+        margin-bottom: 20px;
+    }
 }
 
 .stats-filters-header {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     justify-content: space-between;
     gap: 16px;
     flex-wrap: wrap;
+    margin-bottom: 12px;
 }
 
 .stats-filters-copy {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 4px;
 }
 
 .stats-filters-actions {
     display: flex;
     align-items: center;
     justify-content: flex-end;
-    gap: 10px;
+    gap: 12px;
     flex-wrap: wrap;
 }
 
@@ -4764,9 +5112,10 @@ watchEffect(() => {
 }
 
 .stats-record-filters {
-    margin: 18px 0 0;
-    padding-top: 18px;
-    border-top: 1px solid @border-light;
+    margin: 16px 0 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
 }
 
 .records-header {
@@ -4792,6 +5141,110 @@ watchEffect(() => {
     max-height: 60vh;
 }
 
+.record-filter-select-custom {
+    :deep(.el-select__wrapper) {
+        cursor: pointer;
+        height: 36px !important;
+        overflow: hidden;
+    }
+
+    // Completely negate the height impact of tags
+    :deep(.el-select__selection) {
+        padding: 0 !important;
+        margin: 0 !important;
+        height: 100% !important;
+
+        .el-tag {
+            display: none !important;
+        }
+    }
+
+    // Adjust placeholder and prefix positioning
+    :deep(.el-select__placeholder) {
+        display: none !important; // Hide native placeholder
+    }
+
+    // Custom label text style
+    .custom-label-text {
+        position: absolute;
+        left: 12px; // Default alignment for Element Plus
+        top: 50%;
+        transform: translateY(-50%);
+        color: var(--el-text-color-primary);
+        font-weight: 400;
+        max-width: calc(100% - 40px);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        pointer-events: none;
+        z-index: 1;
+
+        &.is-placeholder-label {
+            color: var(--el-text-color-placeholder);
+        }
+    }
+}
+
+// Custom search option at the top of select dropdowns
+.stats-filter-search-option {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: @background-white;
+    padding: 8px 12px !important;
+    height: auto !important;
+    border-bottom: 1px solid @border-light;
+    cursor: default !important;
+    opacity: 1 !important; // Override disabled opacity
+
+    &.is-disabled {
+        background-color: @background-white !important;
+        cursor: default !important;
+        color: inherit !important;
+    }
+
+    :deep(.el-input) {
+        .el-input__wrapper {
+            box-shadow: 0 0 0 1px @border-light inset !important;
+            border-radius: 6px;
+            padding: 0 8px;
+            height: 32px;
+            background-color: @background-white;
+            transition: all @transition-fast;
+            width: 100%;
+            box-sizing: border-box;
+
+            &.is-focus {
+                box-shadow: 0 0 0 1px @primary-color inset !important;
+            }
+        }
+
+        .el-input__inner {
+            padding-right: 24px !important; // Fixed reservation
+        }
+    }
+}
+
+// Fixed-layout clear button to prevent resizing
+.stats-search-clear-btn {
+    font-size: 14px;
+    color: var(--el-text-color-placeholder);
+    cursor: pointer;
+    transition: all @transition-fast;
+    visibility: hidden; // Keep space but hide
+    pointer-events: none;
+    margin-right: 2px;
+
+    &.is-visible {
+        visibility: visible;
+        pointer-events: auto;
+
+        &:hover {
+            color: @primary-color;
+        }
+    }
+}
+
 .record-filter-select {
     width: 132px;
 
@@ -4810,11 +5263,6 @@ watchEffect(() => {
         &.is-focused {
             border-color: @primary-color;
         }
-    }
-
-    :deep(.el-select__placeholder),
-    :deep(.el-select__selected-item) {
-        font-size: 0.82rem !important;
     }
 }
 

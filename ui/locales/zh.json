@@ -201,6 +201,7 @@
     "resetFilters": "重置筛选",
     "response_api": "Response API",
     "running": "运行中",
+    "searchPlaceholder": "搜索关键词...",
     "selectAll": "全选",
     "selectedCount": "已选择 {count} 个",
     "serviceConfig": "服务配置",

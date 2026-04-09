@@ -201,6 +201,7 @@
     "resetFilters": "Reset Filters",
     "response_api": "Response API",
     "running": "Running",
+    "searchPlaceholder": "Search...",
     "selectAll": "Select All",
     "selectedCount": "{count} selected",
     "serviceConfig": "Service Configuration",
