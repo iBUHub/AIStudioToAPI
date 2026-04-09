@@ -2414,6 +2414,12 @@ const getAccountFilterValue = (authIndex, accountName) => {
     }
     return formatAccountValue(authIndex, accountName);
 };
+const getAccountStatsKey = (authIndex, accountName) => {
+    if (authIndex === null || authIndex === undefined) {
+        return isEmptyFilterField(accountName) ? "unassigned" : `unassigned:${accountName}`;
+    }
+    return `${authIndex}:${isEmptyFilterField(accountName) ? "N/A" : accountName}`;
+};
 
 const timeFilteredRecords = computed(() => {
     if (timeRange.value === "all") return statsState.records;
@@ -2626,8 +2632,10 @@ const filteredSummary = computed(() => {
         .map(([key, count]) => ({ count, key }))
         .sort((a, b) => b.count - a.count);
 
-    // Unique accounts from filtered records
-    const uniqueAccounts = new Set(records.map(r => r.finalAuthIndex));
+    // Unique account pairs from filtered records, aligned with backend accountKey semantics
+    const uniqueAccounts = new Set(
+        records.map(r => r.accountKey || getAccountStatsKey(r.finalAuthIndex, r.finalAccountName))
+    );
 
     return {
         abortedCount,
@@ -2651,7 +2659,7 @@ const filteredAccounts = computed(() => {
     if (!records.length) return [];
     const accountMap = {};
     records.forEach(r => {
-        const key = `${r.finalAuthIndex}-${r.finalAccountName}`;
+        const key = r.accountKey || getAccountStatsKey(r.finalAuthIndex, r.finalAccountName);
         if (!accountMap[key]) {
             accountMap[key] = {
                 abortedCount: 0,
