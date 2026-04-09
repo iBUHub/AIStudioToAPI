@@ -1464,15 +1464,152 @@
                                 formatUptime(statsState.summary.uptimeSeconds)
                             }}</span>
                         </span>
-                        <el-select v-model="timeRange" class="time-range-select">
-                            <el-option :label="t('timeRangeAll')" value="all" />
-                            <el-option :label="t('timeRange1h')" value="1h" />
-                            <el-option :label="t('timeRange6h')" value="6h" />
-                            <el-option :label="t('timeRange24h')" value="24h" />
-                            <el-option :label="t('timeRange7d')" value="7d" />
-                        </el-select>
                     </div>
                 </header>
+
+                <section class="status-card stats-filters-card">
+                    <div class="stats-filters-header">
+                        <div class="stats-filters-copy">
+                            <h3 class="card-title-usage">{{ t("usageFilters") }}</h3>
+                        </div>
+                        <div class="stats-filters-actions">
+                            <el-select v-model="timeRange" class="time-range-select stats-time-range-select">
+                                <el-option :label="t('timeRangeAll')" value="all" />
+                                <el-option :label="t('timeRange1h')" value="1h" />
+                                <el-option :label="t('timeRange6h')" value="6h" />
+                                <el-option :label="t('timeRange24h')" value="24h" />
+                                <el-option :label="t('timeRange7d')" value="7d" />
+                                <el-option :label="t('timeRange30d')" value="30d" />
+                            </el-select>
+                            <button
+                                class="record-filter-reset"
+                                :class="{ 'is-active': hasActiveStatsFilters }"
+                                :disabled="!hasActiveStatsFilters"
+                                @click="resetRecordFilters"
+                            >
+                                {{ t("resetFilters") }}
+                            </button>
+                        </div>
+                    </div>
+                    <div class="records-filters stats-record-filters">
+                        <el-select
+                            v-model="recordFilters.apiFormat"
+                            clearable
+                            :placeholder="t('apiFormat')"
+                            class="record-filter-select"
+                        >
+                            <el-option :label="t('timeRangeAll')" value="" />
+                            <el-option
+                                v-for="item in recordFilterOptions.apiFormats"
+                                :key="item"
+                                :label="translateLabel(item)"
+                                :value="item"
+                            />
+                        </el-select>
+                        <el-select
+                            v-model="recordFilters.streamMode"
+                            clearable
+                            :placeholder="t('streamingMode')"
+                            class="record-filter-select"
+                        >
+                            <el-option :label="t('timeRangeAll')" value="" />
+                            <el-option
+                                v-for="item in recordFilterOptions.streamModes"
+                                :key="item"
+                                :label="translateLabel(item)"
+                                :value="item"
+                            />
+                        </el-select>
+                        <el-select
+                            v-model="recordFilters.model"
+                            filterable
+                            clearable
+                            :placeholder="t('requestModel')"
+                            class="record-filter-select record-filter-select-wide"
+                        >
+                            <el-option :label="t('timeRangeAll')" value="" />
+                            <el-option
+                                v-for="item in recordFilterOptions.models"
+                                :key="item"
+                                :label="item === EMPTY_FILTER_VALUE ? t('emptyValue') : item"
+                                :value="item"
+                            />
+                        </el-select>
+                        <el-select
+                            v-model="recordFilters.outcome"
+                            clearable
+                            :placeholder="t('requestOutcome')"
+                            class="record-filter-select"
+                        >
+                            <el-option :label="t('timeRangeAll')" value="" />
+                            <el-option
+                                v-for="item in recordFilterOptions.outcomes"
+                                :key="item"
+                                :label="translateLabel(item)"
+                                :value="item"
+                            />
+                        </el-select>
+                        <el-select
+                            v-model="recordFilters.statusCode"
+                            filterable
+                            clearable
+                            :placeholder="t('requestStatus')"
+                            class="record-filter-select"
+                        >
+                            <el-option :label="t('timeRangeAll')" value="" />
+                            <el-option
+                                v-for="item in recordFilterOptions.statusCodes"
+                                :key="item"
+                                :label="item === EMPTY_FILTER_VALUE ? t('emptyValue') : String(item)"
+                                :value="item === EMPTY_FILTER_VALUE ? item : String(item)"
+                            />
+                        </el-select>
+                        <el-select
+                            v-model="recordFilters.finalAccount"
+                            filterable
+                            clearable
+                            :placeholder="t('requestAccount')"
+                            class="record-filter-select record-filter-select-wide"
+                        >
+                            <el-option :label="t('timeRangeAll')" value="" />
+                            <el-option
+                                v-for="item in recordFilterOptions.finalAccounts"
+                                :key="item.value"
+                                :label="item.label"
+                                :value="item.value"
+                            />
+                        </el-select>
+                        <el-select
+                            v-model="recordFilters.clientIp"
+                            filterable
+                            clearable
+                            :placeholder="t('requestIp')"
+                            class="record-filter-select"
+                        >
+                            <el-option :label="t('timeRangeAll')" value="" />
+                            <el-option
+                                v-for="item in recordFilterOptions.clientIps"
+                                :key="item"
+                                :label="item === EMPTY_FILTER_VALUE ? t('emptyValue') : item"
+                                :value="item"
+                            />
+                        </el-select>
+                        <el-select
+                            v-model="recordFilters.attemptCount"
+                            clearable
+                            :placeholder="t('requestAttempts')"
+                            class="record-filter-select record-filter-select-narrow"
+                        >
+                            <el-option :label="t('timeRangeAll')" value="" />
+                            <el-option
+                                v-for="item in recordFilterOptions.attemptCounts"
+                                :key="item"
+                                :label="item === EMPTY_FILTER_VALUE ? t('emptyValue') : String(item)"
+                                :value="item === EMPTY_FILTER_VALUE ? item : String(item)"
+                            />
+                        </el-select>
+                    </div>
+                </section>
 
                 <div class="stats-grid-v2">
                     <div class="stats-card-v2">
@@ -1981,24 +2118,159 @@ const statsState = reactive({
     },
 });
 
-// Time range filter: 'all' | '1h' | '6h' | '24h' | '7d'
+// Time range filter: 'all' | '1h' | '6h' | '24h' | '7d' | '30d'
 const timeRange = ref("all");
+const recordFilters = reactive({
+    apiFormat: "",
+    attemptCount: "",
+    clientIp: "",
+    finalAccount: "",
+    model: "",
+    outcome: "",
+    statusCode: "",
+    streamMode: "",
+});
 
 const TIME_RANGE_MS = {
     "1h": 60 * 60 * 1000,
     "6h": 6 * 60 * 60 * 1000,
     "7d": 7 * 24 * 60 * 60 * 1000,
     "24h": 24 * 60 * 60 * 1000,
+    "30d": 30 * 24 * 60 * 60 * 1000,
     all: 0,
 };
 
-// Computed: records filtered by time range (records are newest-first)
-const filteredRecords = computed(() => {
+const EMPTY_FILTER_VALUE = "__EMPTY__";
+const isEmptyFilterField = value =>
+    value === null || value === undefined || (typeof value === "string" && !value.trim());
+const formatAccountValue = (authIndex, accountName) => `${authIndex ?? "unknown"}::${accountName ?? ""}`;
+const getAccountFilterValue = (authIndex, accountName) => {
+    if (authIndex === null || authIndex === undefined) {
+        return isEmptyFilterField(accountName) ? EMPTY_FILTER_VALUE : formatAccountValue(authIndex, accountName);
+    }
+    return formatAccountValue(authIndex, accountName);
+};
+
+const timeFilteredRecords = computed(() => {
     if (timeRange.value === "all") return statsState.records;
     const cutoff = Date.now() - TIME_RANGE_MS[timeRange.value];
     return statsState.records.filter(r => {
         const ts = r.startedAt ? new Date(r.startedAt).getTime() : 0;
         return ts >= cutoff;
+    });
+});
+
+const recordFilterOptions = computed(() => {
+    const records = timeFilteredRecords.value;
+    const apiFormats = new Set();
+    const streamModes = new Set();
+    const models = new Set();
+    const outcomes = new Set();
+    const statusCodes = new Set();
+    const finalAccounts = new Map();
+    const clientIps = new Set();
+    const attemptCounts = new Set();
+
+    records.forEach(record => {
+        apiFormats.add(isEmptyFilterField(record.apiFormat) ? EMPTY_FILTER_VALUE : record.apiFormat);
+        streamModes.add(isEmptyFilterField(record.streamMode) ? EMPTY_FILTER_VALUE : record.streamMode);
+        models.add(isEmptyFilterField(record.model) ? EMPTY_FILTER_VALUE : record.model);
+        outcomes.add(isEmptyFilterField(record.outcome) ? EMPTY_FILTER_VALUE : record.outcome);
+        statusCodes.add(
+            record.statusCode !== null && record.statusCode !== undefined ? record.statusCode : EMPTY_FILTER_VALUE
+        );
+        clientIps.add(isEmptyFilterField(record.clientIp) ? EMPTY_FILTER_VALUE : record.clientIp);
+        attemptCounts.add(
+            record.attemptCount !== null && record.attemptCount !== undefined ? record.attemptCount : EMPTY_FILTER_VALUE
+        );
+
+        const accountValue = getAccountFilterValue(record.finalAuthIndex, record.finalAccountName);
+        if (!finalAccounts.has(accountValue)) {
+            finalAccounts.set(accountValue, {
+                label:
+                    accountValue === EMPTY_FILTER_VALUE
+                        ? t("emptyValue")
+                        : formatAccount(record.finalAuthIndex, record.finalAccountName),
+                value: accountValue,
+            });
+        }
+    });
+
+    const sortFilterValues = values =>
+        Array.from(values).sort((a, b) => {
+            if (a === EMPTY_FILTER_VALUE) return -1;
+            if (b === EMPTY_FILTER_VALUE) return 1;
+            return String(a).localeCompare(String(b));
+        });
+
+    const sortNumericFilterValues = values =>
+        Array.from(values).sort((a, b) => {
+            if (a === EMPTY_FILTER_VALUE) return -1;
+            if (b === EMPTY_FILTER_VALUE) return 1;
+            return a - b;
+        });
+
+    return {
+        apiFormats: sortFilterValues(apiFormats),
+        attemptCounts: sortNumericFilterValues(attemptCounts),
+        clientIps: sortFilterValues(clientIps),
+        finalAccounts: Array.from(finalAccounts.values()).sort((a, b) => a.label.localeCompare(b.label)),
+        models: sortFilterValues(models),
+        outcomes: sortFilterValues(outcomes),
+        statusCodes: sortNumericFilterValues(statusCodes),
+        streamModes: sortFilterValues(streamModes),
+    };
+});
+
+const hasActiveStatsFilters = computed(
+    () => timeRange.value !== "all" || Object.values(recordFilters).some(value => Boolean(value))
+);
+
+// Computed: records filtered by time range + record filters (records are newest-first)
+const filteredRecords = computed(() => {
+    return timeFilteredRecords.value.filter(record => {
+        if (recordFilters.apiFormat) {
+            if (recordFilters.apiFormat === EMPTY_FILTER_VALUE) {
+                if (!isEmptyFilterField(record.apiFormat)) return false;
+            } else if (record.apiFormat !== recordFilters.apiFormat) return false;
+        }
+        if (recordFilters.streamMode) {
+            if (recordFilters.streamMode === EMPTY_FILTER_VALUE) {
+                if (!isEmptyFilterField(record.streamMode)) return false;
+            } else if (record.streamMode !== recordFilters.streamMode) return false;
+        }
+        if (recordFilters.model) {
+            if (recordFilters.model === EMPTY_FILTER_VALUE) {
+                if (!isEmptyFilterField(record.model)) return false;
+            } else if ((record.model || "") !== recordFilters.model) return false;
+        }
+        if (recordFilters.outcome) {
+            if (recordFilters.outcome === EMPTY_FILTER_VALUE) {
+                if (!isEmptyFilterField(record.outcome)) return false;
+            } else if (record.outcome !== recordFilters.outcome) return false;
+        }
+        if (recordFilters.statusCode) {
+            if (recordFilters.statusCode === EMPTY_FILTER_VALUE) {
+                if (record.statusCode !== null && record.statusCode !== undefined) return false;
+            } else if (String(record.statusCode ?? "") !== recordFilters.statusCode) return false;
+        }
+        if (
+            recordFilters.finalAccount &&
+            getAccountFilterValue(record.finalAuthIndex, record.finalAccountName) !== recordFilters.finalAccount
+        ) {
+            return false;
+        }
+        if (recordFilters.clientIp) {
+            if (recordFilters.clientIp === EMPTY_FILTER_VALUE) {
+                if (!isEmptyFilterField(record.clientIp)) return false;
+            } else if ((record.clientIp || "") !== recordFilters.clientIp) return false;
+        }
+        if (recordFilters.attemptCount) {
+            if (recordFilters.attemptCount === EMPTY_FILTER_VALUE) {
+                if (record.attemptCount !== null && record.attemptCount !== undefined) return false;
+            } else if (String(record.attemptCount ?? "") !== recordFilters.attemptCount) return false;
+        }
+        return true;
     });
 });
 
@@ -2114,6 +2386,7 @@ const filteredAccounts = computed(() => {
 
 const translateLabel = value => {
     if (!value) return "-";
+    if (value === EMPTY_FILTER_VALUE) return t("emptyValue");
     // Map streamMode backend values to i18n keys
     const keyMap = { fake: "fakeStream", non: "nonStream", real: "realStream" };
     const keyToTranslate = keyMap[value] || (value === "error" ? "failed" : value);
@@ -2223,6 +2496,18 @@ const showAttemptsDetail = record => {
         message: content,
         title: t("attemptsPathTitle"),
     });
+};
+
+const resetRecordFilters = () => {
+    timeRange.value = "all";
+    recordFilters.apiFormat = "";
+    recordFilters.attemptCount = "";
+    recordFilters.clientIp = "";
+    recordFilters.finalAccount = "";
+    recordFilters.model = "";
+    recordFilters.outcome = "";
+    recordFilters.statusCode = "";
+    recordFilters.streamMode = "";
 };
 
 const scheduleUpdate = () => {
@@ -4446,6 +4731,44 @@ watchEffect(() => {
     margin-bottom: 0;
 }
 
+.stats-filters-card {
+    margin-bottom: 24px;
+    border-color: rgba(var(--color-primary-rgb), 0.18);
+    background: linear-gradient(180deg, rgba(var(--color-primary-rgb), 0.05) 0%, @background-white 46%);
+}
+
+.stats-filters-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.stats-filters-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.stats-filters-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.stats-time-range-select {
+    width: 144px;
+}
+
+.stats-record-filters {
+    margin: 18px 0 0;
+    padding-top: 18px;
+    border-top: 1px solid @border-light;
+}
+
 .records-header {
     display: flex;
     justify-content: space-between;
@@ -4458,8 +4781,79 @@ watchEffect(() => {
     font-size: 0.85rem;
 }
 
+.records-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 16px 0;
+}
+
 .records-shell {
     max-height: 60vh;
+}
+
+.record-filter-select {
+    width: 132px;
+
+    :deep(.el-select__wrapper) {
+        background: @background-white;
+        border: 1px solid @border-light;
+        box-shadow: none !important;
+        border-radius: 8px !important;
+        min-height: 36px;
+        transition: all @transition-fast;
+
+        &:hover {
+            border-color: @primary-color;
+        }
+
+        &.is-focused {
+            border-color: @primary-color;
+        }
+    }
+
+    :deep(.el-select__placeholder),
+    :deep(.el-select__selected-item) {
+        font-size: 0.82rem !important;
+    }
+}
+
+.record-filter-select-wide {
+    width: 180px;
+}
+
+.record-filter-select-narrow {
+    width: 110px;
+}
+
+.record-filter-reset {
+    height: 36px;
+    padding: 0 14px;
+    border-radius: 8px;
+    border: 1px solid @border-light;
+    background: @background-white;
+    color: @text-secondary;
+    cursor: pointer;
+    transition: all @transition-fast;
+
+    &:hover {
+        color: @primary-color;
+        border-color: @primary-color;
+    }
+
+    &.is-active {
+        color: @primary-color;
+        border-color: rgba(var(--color-primary-rgb), 0.35);
+        background: rgba(var(--color-primary-rgb), 0.08);
+    }
+
+    &:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+        color: @text-secondary;
+        border-color: @border-light;
+        background: @background-white;
+    }
 }
 
 /* Stats page header: allow meta chips to wrap below title on narrow screens */
@@ -4659,6 +5053,18 @@ watchEffect(() => {
         max-height: 45vh;
     }
 
+    .record-filter-select,
+    .record-filter-select-wide,
+    .record-filter-select-narrow,
+    .record-filter-reset,
+    .stats-time-range-select {
+        width: 100%;
+    }
+
+    .stats-filters-actions {
+        width: 100%;
+    }
+
     .account-cell {
         max-width: 150px;
     }
@@ -4703,6 +5109,10 @@ watchEffect(() => {
         :deep(.el-select__selected-item) {
             font-size: 0.82rem;
         }
+    }
+
+    .stats-filters-card {
+        padding: 18px;
     }
 
     .account-cell {

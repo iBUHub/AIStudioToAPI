@@ -8,8 +8,6 @@
 const fs = require("fs");
 const path = require("path");
 
-const DISPLAY_RECORDS_LIMIT = 1000;
-
 class UsageStatsService {
     constructor(authSource, logger, dataDir) {
         this.authSource = authSource;
@@ -211,8 +209,8 @@ class UsageStatsService {
 
         return {
             accounts,
-            // Return only recent records for display
-            records: this.records.slice(-DISPLAY_RECORDS_LIMIT).reverse(),
+            // Return full request history for display and client-side filtering
+            records: this.records.slice().reverse(),
             startedAt: this.startedAt,
             summary: {
                 abortedCount: this.summary.abortedCount,

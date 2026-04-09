@@ -32,6 +32,7 @@ data/
 
 # Temporary files
 tmp/
+temp/
 ui/dist/
 *.css
 test/
