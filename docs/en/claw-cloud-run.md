@@ -24,6 +24,8 @@ This guide will help you deploy the `aistudio-to-api` service on [Claw Cloud Run
    **Local Storage**:
    - **Capacity**：1
    - **Mount Path**：/app/configs/auth
+   - **Capacity**：1
+   - **Mount Path**：/app/data
 
    **Environment Variables**:
 

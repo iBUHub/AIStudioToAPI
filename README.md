@@ -50,6 +50,7 @@
    API 服务将在 `http://localhost:7860` 上运行。
 
    服务启动后，您可以在浏览器中访问 `http://localhost:7860` 打开 Web 控制台主页，在这里可以查看账号状态和服务状态。
+   请求统计数据会持久化保存到 `/data/usage-stats.jsonl`。
 
 5. 更新到最新版本（已有本地部署时）：
 
@@ -73,6 +74,7 @@ docker run -d \
   --name aistudio-to-api \
   -p 7860:7860 \
   -v /path/to/auth:/app/configs/auth \
+  -v /path/to/data:/app/data \
   -e API_KEYS=your-api-key-1,your-api-key-2 \
   -e TZ=Asia/Shanghai \
   --restart unless-stopped \
@@ -83,8 +85,9 @@ docker run -d \
 
 参数说明：
 
-- `-p 7860:7860`：API 服务器端口（如果使用反向代理，强烈建议改成 127.0.0.1:7860）
+- `-p 7860:7860`：API 服务器端口（如果使用反向代理，强烈建议改成 `127.0.0.1:7860`）
 - `-v /path/to/auth:/app/configs/auth`：挂载包含认证文件的目录
+- `-v /path/to/data:/app/data`：挂载统计数据持久化目录（`/app/data/usage-stats.jsonl`）
 - `-e API_KEYS`：用于身份验证的 API 密钥列表（使用逗号分隔）
 - `-e TZ=Asia/Shanghai`：时区设置（可选，默认使用系统时区）
 
@@ -106,6 +109,8 @@ services:
     volumes:
       # 挂载包含认证文件的目录
       - ./auth:/app/configs/auth
+      # 挂载统计数据持久化目录
+      - ./data:/app/data
     environment:
       # 用于身份验证的 API 密钥列表（使用逗号分隔）
       API_KEYS: your-api-key-1,your-api-key-2
@@ -132,6 +137,7 @@ services:
      --name aistudio-to-api \
      -p 7860:7860 \
      -v /path/to/auth:/app/configs/auth \
+     -v /path/to/data:/app/data \
      -e API_KEYS=your-api-key-1,your-api-key-2 \
      -e TZ=Asia/Shanghai \
      --restart unless-stopped \

@@ -50,6 +50,7 @@ A tool that wraps Google AI Studio web interface to provide OpenAI API, Gemini A
    The API server will be available at `http://localhost:7860`
 
    After the service starts, you can access `http://localhost:7860` in your browser to open the web console homepage, where you can view account status and service status.
+   Request usage statistics are persisted locally at `/data/usage-stats.jsonl`.
 
 5. Update to the latest version (for existing local deployments):
 
@@ -73,6 +74,7 @@ docker run -d \
   --name aistudio-to-api \
   -p 7860:7860 \
   -v /path/to/auth:/app/configs/auth \
+  -v /path/to/data:/app/data \
   -e API_KEYS=your-api-key-1,your-api-key-2 \
   -e TZ=America/New_York \
   --restart unless-stopped \
@@ -85,6 +87,7 @@ Parameters:
 
 - `-p 7860:7860`: API server port (if using a reverse proxy, strongly consider `127.0.0.1:7860`)
 - `-v /path/to/auth:/app/configs/auth`: Mount directory containing auth files
+- `-v /path/to/data:/app/data`: Mount persistent data directory for usage statistics (`/app/data/usage-stats.jsonl`)
 - `-e API_KEYS`: Comma-separated list of API keys for authentication
 - `-e TZ=America/New_York`: Timezone for logs (optional, defaults to system timezone)
 
@@ -106,6 +109,8 @@ services:
     volumes:
       # Mount directory containing auth files
       - ./auth:/app/configs/auth
+      # Mount persistent data directory for usage statistics
+      - ./data:/app/data
     environment:
       # Comma-separated list of API keys for authentication
       API_KEYS: your-api-key-1,your-api-key-2
@@ -130,6 +135,7 @@ If you prefer to build the Docker image yourself, you can use the following comm
      --name aistudio-to-api \
      -p 7860:7860 \
      -v /path/to/auth:/app/configs/auth \
+     -v /path/to/data:/app/data \
      -e API_KEYS=your-api-key-1,your-api-key-2 \
      -e TZ=America/New_York \
      --restart unless-stopped \

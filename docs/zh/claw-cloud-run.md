@@ -24,6 +24,8 @@
    **Local Storage**:
    - **Capacity**：1
    - **Mount Path**：/app/configs/auth
+   - **Capacity**：1
+   - **Mount Path**：/app/data
 
    **环境变量（Environment Variables）**:
 
