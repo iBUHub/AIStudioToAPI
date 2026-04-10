@@ -1484,7 +1484,11 @@
                             <h3 class="card-title">{{ t("usageFilters") }}</h3>
                         </div>
                         <div v-if="!isStatsFiltersMobile" class="stats-filters-actions">
-                            <el-select v-model="timeRange" class="time-range-select stats-time-range-select">
+                            <el-select
+                                v-model="timeRange"
+                                popper-class="stats-filter-select-dropdown"
+                                class="time-range-select stats-time-range-select"
+                            >
                                 <el-option :label="t('timeRangeAll')" value="all" />
                                 <el-option :label="t('timeRange1h')" value="1h" />
                                 <el-option :label="t('timeRange6h')" value="6h" />
@@ -1520,7 +1524,11 @@
                     </div>
                     <div v-show="!isStatsFiltersMobile || !statsFiltersCollapsed" class="stats-filters-body">
                         <div v-if="isStatsFiltersMobile" class="stats-filters-actions">
-                            <el-select v-model="timeRange" class="time-range-select stats-time-range-select">
+                            <el-select
+                                v-model="timeRange"
+                                popper-class="stats-filter-select-dropdown"
+                                class="time-range-select stats-time-range-select"
+                            >
                                 <el-option :label="t('timeRangeAll')" value="all" />
                                 <el-option :label="t('timeRange1h')" value="1h" />
                                 <el-option :label="t('timeRange6h')" value="6h" />
@@ -1541,6 +1549,7 @@
                             <el-select
                                 v-model="recordFilters.apiFormat"
                                 multiple
+                                popper-class="stats-filter-select-dropdown"
                                 :placeholder="t('apiFormat')"
                                 class="record-filter-select record-filter-select-custom"
                                 @change="handleFilterChange('apiFormat')"
@@ -1587,6 +1596,7 @@
                             <el-select
                                 v-model="recordFilters.streamMode"
                                 multiple
+                                popper-class="stats-filter-select-dropdown"
                                 :placeholder="t('streamingMode')"
                                 class="record-filter-select record-filter-select-custom"
                                 @change="handleFilterChange('streamMode')"
@@ -1633,6 +1643,7 @@
                             <el-select
                                 v-model="recordFilters.model"
                                 multiple
+                                popper-class="stats-filter-select-dropdown"
                                 :placeholder="t('requestModel')"
                                 class="record-filter-select record-filter-select-wide record-filter-select-custom"
                                 @change="handleFilterChange('model')"
@@ -1678,6 +1689,7 @@
                             <el-select
                                 v-model="recordFilters.outcome"
                                 multiple
+                                popper-class="stats-filter-select-dropdown"
                                 :placeholder="t('requestOutcome')"
                                 class="record-filter-select record-filter-select-custom"
                                 @change="handleFilterChange('outcome')"
@@ -1723,6 +1735,7 @@
                             <el-select
                                 v-model="recordFilters.statusCode"
                                 multiple
+                                popper-class="stats-filter-select-dropdown"
                                 :placeholder="t('requestStatus')"
                                 class="record-filter-select record-filter-select-custom"
                                 @change="handleFilterChange('statusCode')"
@@ -1769,6 +1782,7 @@
                             <el-select
                                 v-model="recordFilters.finalAccount"
                                 multiple
+                                popper-class="stats-filter-select-dropdown"
                                 :placeholder="t('requestAccount')"
                                 class="record-filter-select record-filter-select-wide record-filter-select-custom"
                                 @change="handleFilterChange('finalAccount')"
@@ -1815,6 +1829,7 @@
                             <el-select
                                 v-model="recordFilters.clientIp"
                                 multiple
+                                popper-class="stats-filter-select-dropdown"
                                 :placeholder="t('requestIp')"
                                 class="record-filter-select record-filter-select-custom"
                                 @change="handleFilterChange('clientIp')"
@@ -1861,6 +1876,7 @@
                             <el-select
                                 v-model="recordFilters.attemptCount"
                                 multiple
+                                popper-class="stats-filter-select-dropdown"
                                 :placeholder="t('requestAttempts')"
                                 class="record-filter-select record-filter-select-narrow record-filter-select-custom"
                                 @change="handleFilterChange('attemptCount')"
@@ -5429,6 +5445,23 @@ watchEffect(() => {
         border-color: @border-light;
         background: @background-white;
     }
+}
+
+:global(.el-popper.stats-filter-select-dropdown) {
+    max-width: calc(100vw - 24px);
+}
+
+:global(.el-popper.stats-filter-select-dropdown .el-scrollbar__wrap) {
+    overflow-x: auto !important;
+}
+
+:global(.el-popper.stats-filter-select-dropdown .el-select-dropdown__list) {
+    min-width: max-content;
+}
+
+:global(.el-popper.stats-filter-select-dropdown .el-select-dropdown__item),
+:global(.el-popper.stats-filter-select-dropdown .stats-filter-search-option) {
+    white-space: nowrap;
 }
 
 /* Stats page header: allow meta chips to wrap below title on narrow screens */
