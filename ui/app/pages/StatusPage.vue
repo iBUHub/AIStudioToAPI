@@ -2202,10 +2202,30 @@
                                                 <span
                                                     v-for="mc in item.modelCounts"
                                                     :key="mc.key"
-                                                    class="breakdown-chip"
+                                                    class="usage-tag-compact"
+                                                    :style="{
+                                                        '--progress':
+                                                            (item.totalRequests > 0
+                                                                ? (mc.count / item.totalRequests) * 100
+                                                                : 0) + '%',
+                                                        '--error-progress':
+                                                            (mc.count > 0 ? (mc.error / mc.count) * 100 : 0) + '%',
+                                                    }"
                                                 >
-                                                    {{ mc.key === EMPTY_FILTER_VALUE ? t("emptyValue") : mc.key }}:
-                                                    {{ mc.count }}
+                                                    <span
+                                                        class="tag-label"
+                                                        :title="
+                                                            mc.key === EMPTY_FILTER_VALUE ? t('emptyValue') : mc.key
+                                                        "
+                                                    >
+                                                        {{ mc.key === EMPTY_FILTER_VALUE ? t("emptyValue") : mc.key }}
+                                                    </span>
+                                                    <span class="tag-count">
+                                                        {{ mc.count }}
+                                                        <span v-if="mc.error > 0" class="tag-error-count"
+                                                            >({{ mc.error }})</span
+                                                        >
+                                                    </span>
                                                 </span>
                                             </div>
                                         </td>
@@ -3018,15 +3038,27 @@ const filteredAccounts = computed(() => {
         if (r.outcome === "success") acc.successCount += 1;
         else if (r.outcome === "aborted") acc.abortedCount += 1;
         else acc.errorCount += 1;
+
         const mk = isEmptyFilterField(r.model) ? EMPTY_FILTER_VALUE : r.model;
-        acc.modelCounts[mk] = (acc.modelCounts[mk] || 0) + 1;
+        if (!acc.modelCounts[mk]) {
+            acc.modelCounts[mk] = { error: 0, total: 0 };
+        }
+        acc.modelCounts[mk].total += 1;
+        if (r.outcome === "error") {
+            acc.modelCounts[mk].error += 1;
+        }
     });
+
     return Object.values(accountMap)
         .map(acc => ({
             ...acc,
             avgDurationMs: acc.totalRequests > 0 ? Math.round(acc.totalDurationMs / acc.totalRequests) : 0,
             modelCounts: Object.entries(acc.modelCounts)
-                .map(([key, count]) => ({ count, key }))
+                .map(([key, stats]) => ({
+                    count: stats.total,
+                    error: stats.error,
+                    key,
+                }))
                 .sort((a, b) => b.count - a.count),
             successRate: acc.totalRequests > 0 ? Number(((acc.successCount / acc.totalRequests) * 100).toFixed(1)) : 0,
         }))
@@ -5462,17 +5494,129 @@ watchEffect(() => {
 .breakdown-list {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: 6px;
+    align-items: center;
 }
 
-.breakdown-chip {
+.usage-tag-compact {
+    position: relative;
     display: inline-flex;
     align-items: center;
-    padding: 6px 10px;
-    border-radius: 999px;
-    background: @background-light;
-    color: @text-secondary;
-    font-size: 0.85rem;
+    padding: 0;
+    border-radius: 6px;
+    background: var(--bg-tag-default, rgba(0, 0, 0, 0.03));
+    border: 1px solid @border-light;
+    font-size: 0.82rem;
+    overflow: hidden;
+    height: 24px;
+    z-index: 1;
+    transition: all 0.2s;
+
+    &:hover {
+        border-color: @primary-color;
+        box-shadow: 0 2px 6px rgba(var(--color-primary-rgb), 0.1);
+    }
+
+    &::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        top: 0;
+        height: 100%;
+        width: var(--progress, 0%);
+        background: linear-gradient(
+            to right,
+            rgba(var(--color-error-rgb), var(--usage-tag-error-alpha)) 0%,
+            rgba(var(--color-error-rgb), var(--usage-tag-error-alpha)) var(--error-progress, 0%),
+            rgba(var(--color-success-rgb), var(--usage-tag-success-alpha)) var(--error-progress, 0%),
+            rgba(var(--color-success-rgb), var(--usage-tag-success-alpha)) 100%
+        );
+        z-index: -1;
+        transition: width 0.6s cubic-bezier(0.1, 0, 0.2, 1);
+    }
+
+    .tag-label {
+        padding: 0 8px;
+        color: @text-primary;
+        font-weight: 500;
+        max-width: 150px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .tag-count {
+        background: rgba(0, 0, 0, 0.04);
+        height: 100%;
+        display: flex;
+        align-items: center;
+        padding: 0 6px;
+        color: @text-secondary;
+        font-weight: 700;
+        font-family: @font-family-mono;
+        font-size: 0.75rem;
+        border-left: 1px solid @border-light;
+        gap: 4px;
+    }
+
+    .tag-error-count {
+        color: @error-color;
+        font-weight: 900;
+    }
+}
+
+.usage-tag-more {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 24px;
+    padding: 0 8px;
+    border-radius: 6px;
+    background: var(--bg-hover);
+    color: @primary-color;
+    font-size: 0.75rem;
+    font-weight: 700;
+    cursor: help;
+    border: 1px dashed rgba(var(--color-primary-rgb), 0.4);
+    transition: all 0.2s;
+
+    &:hover {
+        background: rgba(var(--color-primary-rgb), 0.1);
+        border-style: solid;
+        transform: scale(1.05);
+    }
+}
+
+.tooltip-model-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 6px 4px;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.tooltip-model-item {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    font-size: 0.8rem;
+    padding: 2px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+
+    &:last-child {
+        border-bottom: none;
+    }
+
+    .model-name-tip {
+        color: rgba(255, 255, 255, 0.7);
+    }
+
+    .model-count-tip {
+        color: #fff;
+        font-weight: 700;
+        font-family: @font-family-mono;
+    }
 }
 
 .records-card {
