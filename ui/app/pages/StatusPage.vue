@@ -2245,7 +2245,20 @@
                                                 >{{ record.attemptCount }}</span
                                             >
                                         </td>
-                                        <td class="mono truncate-cell">{{ record.clientIp || "-" }}</td>
+                                        <td class="mono truncate-cell">
+                                            <el-tooltip
+                                                :content="record.clientIp || '-'"
+                                                placement="top"
+                                                effect="dark"
+                                                :hide-after="0"
+                                                :show-after="150"
+                                                :disabled="!record.clientIp"
+                                            >
+                                                <span class="request-ip-text">
+                                                    {{ record.clientIp || "-" }}
+                                                </span>
+                                            </el-tooltip>
+                                        </td>
                                     </tr>
                                 </tbody>
                             </table>
@@ -5534,6 +5547,15 @@ watchEffect(() => {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.request-ip-text {
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: bottom;
 }
 
 /* Time column in request records: sticky + fixed width */
