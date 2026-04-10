@@ -2225,7 +2225,7 @@
                         <div v-if="filteredRecords.length === 0" class="empty-state">
                             {{ t("noRequestRecords") }}
                         </div>
-                        <div v-else class="table-scroll-wrapper records-scroll-wrapper">
+                        <div v-else ref="recordsTableWrapper" class="table-scroll-wrapper records-scroll-wrapper">
                             <table class="data-table fixed-header-table">
                                 <thead>
                                     <tr>
@@ -2243,7 +2243,7 @@
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <tr v-for="record in filteredRecords" :key="record.sequence">
+                                    <tr v-for="record in paginatedRecords" :key="record.sequence">
                                         <td class="sticky-time-col">{{ formatDateTime(record.startedAt) }}</td>
                                         <td class="mono truncate-cell">{{ record.requestId }}</td>
                                         <td>{{ translateLabel(record.apiFormat) }}</td>
@@ -2297,6 +2297,97 @@
                                     </tr>
                                 </tbody>
                             </table>
+                        </div>
+                        <div v-if="filteredRecords.length > 0" class="records-pagination">
+                            <div class="records-pagination-summary">
+                                <span>{{ t("paginationRange", recordsPaginationRange) }}</span>
+                                <label class="records-pagination-size">
+                                    <span>{{ t("paginationPageSize") }}</span>
+                                    <select
+                                        class="records-pagination-select"
+                                        :value="recordsPageSize"
+                                        @change="handleRecordsPageSizeChange"
+                                    >
+                                        <option v-for="size in RECORDS_PAGE_SIZE_OPTIONS" :key="size" :value="size">
+                                            {{ size }}
+                                        </option>
+                                    </select>
+                                </label>
+                            </div>
+                            <div class="records-pagination-controls">
+                                <button
+                                    class="records-pagination-btn"
+                                    type="button"
+                                    :disabled="recordsCurrentPage === 1"
+                                    @click="setRecordsPage(1)"
+                                >
+                                    {{ t("paginationFirst") }}
+                                </button>
+                                <button
+                                    class="records-pagination-btn"
+                                    type="button"
+                                    :disabled="recordsCurrentPage === 1"
+                                    @click="setRecordsPage(recordsCurrentPage - 1)"
+                                >
+                                    {{ t("paginationPrevious") }}
+                                </button>
+                                <div class="records-pagination-pages">
+                                    <template v-for="item in recordsPaginationItems" :key="item.key">
+                                        <span
+                                            v-if="item.type === 'ellipsis'"
+                                            class="records-pagination-ellipsis"
+                                            aria-hidden="true"
+                                        >
+                                            ...
+                                        </span>
+                                        <button
+                                            v-else
+                                            class="records-pagination-btn records-pagination-page"
+                                            :class="{ 'is-active': item.page === recordsCurrentPage }"
+                                            type="button"
+                                            :aria-current="item.page === recordsCurrentPage ? 'page' : undefined"
+                                            @click="setRecordsPage(item.page)"
+                                        >
+                                            {{ item.page }}
+                                        </button>
+                                    </template>
+                                </div>
+                                <button
+                                    class="records-pagination-btn"
+                                    type="button"
+                                    :disabled="recordsCurrentPage === recordsTotalPages"
+                                    @click="setRecordsPage(recordsCurrentPage + 1)"
+                                >
+                                    {{ t("paginationNext") }}
+                                </button>
+                                <button
+                                    class="records-pagination-btn"
+                                    type="button"
+                                    :disabled="recordsCurrentPage === recordsTotalPages"
+                                    @click="setRecordsPage(recordsTotalPages)"
+                                >
+                                    {{ t("paginationLast") }}
+                                </button>
+                                <label class="records-pagination-jump">
+                                    <span>{{ t("paginationJumpTo") }}</span>
+                                    <input
+                                        v-model="recordsPageJumpInput"
+                                        class="records-pagination-input"
+                                        type="number"
+                                        inputmode="numeric"
+                                        min="1"
+                                        :max="recordsTotalPages"
+                                        @keydown.enter.prevent="submitRecordsPageJump"
+                                    />
+                                    <button
+                                        class="records-pagination-btn records-pagination-go"
+                                        type="button"
+                                        @click="submitRecordsPageJump"
+                                    >
+                                        {{ t("paginationGo") }}
+                                    </button>
+                                </label>
+                            </div>
                         </div>
                     </section>
                 </div>
@@ -2490,6 +2581,11 @@ const filterSearchQuery = reactive({
     statusCode: "",
     streamMode: "",
 });
+const recordsTableWrapper = ref(null);
+const recordsCurrentPage = ref(1);
+const recordsPageSize = ref(10);
+const recordsPageJumpInput = ref("");
+const RECORDS_PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 
 const STATS_FILTERS_MOBILE_MEDIA_QUERY = "(max-width: 767px)";
 const isStatsFiltersMobile = ref(false);
@@ -2742,6 +2838,89 @@ const filteredRecords = computed(() => {
     return timeFilteredRecords.value.filter(record => isRecordMatched(record, recordFilters));
 });
 
+const recordsTotalPages = computed(() => Math.max(1, Math.ceil(filteredRecords.value.length / recordsPageSize.value)));
+
+const clampRecordsPage = page => {
+    const normalizedPage = Number(page);
+    if (!Number.isFinite(normalizedPage)) return 1;
+    return Math.min(Math.max(Math.trunc(normalizedPage), 1), recordsTotalPages.value);
+};
+
+const setRecordsPage = page => {
+    recordsCurrentPage.value = clampRecordsPage(page);
+    recordsPageJumpInput.value = "";
+};
+
+const paginatedRecords = computed(() => {
+    const startIndex = (recordsCurrentPage.value - 1) * recordsPageSize.value;
+    return filteredRecords.value.slice(startIndex, startIndex + recordsPageSize.value);
+});
+
+const recordsPaginationRange = computed(() => {
+    const total = filteredRecords.value.length;
+    if (!total) return { end: 0, start: 0, total: 0 };
+
+    const start = (recordsCurrentPage.value - 1) * recordsPageSize.value + 1;
+    const end = Math.min(start + paginatedRecords.value.length - 1, total);
+    return { end, start, total };
+});
+
+const buildRecordsPaginationItems = (currentPage, totalPages, siblingCount = 1, boundaryCount = 1) => {
+    if (totalPages <= 0) return [];
+
+    const visiblePages = new Set();
+
+    for (let offset = 0; offset < boundaryCount; offset += 1) {
+        visiblePages.add(offset + 1);
+        visiblePages.add(totalPages - offset);
+    }
+
+    for (let page = currentPage - siblingCount; page <= currentPage + siblingCount; page += 1) {
+        visiblePages.add(page);
+    }
+
+    const sortedPages = Array.from(visiblePages)
+        .filter(page => page >= 1 && page <= totalPages)
+        .sort((a, b) => a - b);
+
+    const items = [];
+    let previousPage = 0;
+
+    sortedPages.forEach(page => {
+        if (previousPage) {
+            if (page - previousPage === 2) {
+                items.push({ key: `page-${previousPage + 1}`, page: previousPage + 1, type: "page" });
+            } else if (page - previousPage > 2) {
+                items.push({ key: `ellipsis-${previousPage}-${page}`, type: "ellipsis" });
+            }
+        }
+
+        items.push({ key: `page-${page}`, page, type: "page" });
+        previousPage = page;
+    });
+
+    return items;
+};
+
+const recordsPaginationItems = computed(() =>
+    buildRecordsPaginationItems(recordsCurrentPage.value, recordsTotalPages.value)
+);
+
+const recordsPaginationResetKey = computed(() =>
+    [
+        timeRange.value,
+        normalizedCustomTimeRange.value ? normalizedCustomTimeRange.value.map(item => item.getTime()).join("|") : "",
+        recordFilters.apiFormat.join("|"),
+        recordFilters.attemptCount.join("|"),
+        recordFilters.clientIp.join("|"),
+        recordFilters.finalAccount.join("|"),
+        recordFilters.model.join("|"),
+        recordFilters.outcome.join("|"),
+        recordFilters.statusCode.join("|"),
+        recordFilters.streamMode.join("|"),
+    ].join("::")
+);
+
 // Computed: summary recalculated from filtered records
 const filteredSummary = computed(() => {
     const records = filteredRecords.value;
@@ -2991,6 +3170,48 @@ watch(
     },
     { flush: "sync" }
 );
+
+watch(
+    [() => filteredRecords.value.length, recordsPageSize],
+    () => {
+        const nextPage = clampRecordsPage(recordsCurrentPage.value);
+        if (nextPage !== recordsCurrentPage.value) {
+            recordsCurrentPage.value = nextPage;
+        }
+    },
+    { flush: "sync" }
+);
+
+watch(recordsPaginationResetKey, () => {
+    recordsCurrentPage.value = 1;
+    recordsPageJumpInput.value = "";
+});
+
+watch(
+    recordsCurrentPage,
+    async () => {
+        await nextTick();
+        if (recordsTableWrapper.value) {
+            recordsTableWrapper.value.scrollTop = 0;
+        }
+    },
+    { flush: "post" }
+);
+
+const handleRecordsPageSizeChange = event => {
+    const nextSize = Number(event?.target?.value);
+    if (!Number.isFinite(nextSize) || nextSize <= 0) return;
+
+    const firstVisibleIndex = (recordsCurrentPage.value - 1) * recordsPageSize.value;
+    recordsPageSize.value = nextSize;
+    recordsCurrentPage.value = Math.floor(firstVisibleIndex / nextSize) + 1;
+    recordsPageJumpInput.value = "";
+};
+
+const submitRecordsPageJump = () => {
+    if (!recordsPageJumpInput.value) return;
+    setRecordsPage(recordsPageJumpInput.value);
+};
 
 const getFilterLabel = (field, placeholder) => {
     const selected = recordFilters[field];
@@ -5364,6 +5585,151 @@ watchEffect(() => {
 
 .records-shell {
     max-height: 60vh;
+}
+
+.records-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-top: 20px;
+    padding: 12px 16px;
+    background: rgba(var(--color-primary-rgb), 0.02);
+    border-radius: @border-radius-lg;
+    border: 1px solid @border-light;
+}
+
+.records-pagination-summary,
+.records-pagination-controls,
+.records-pagination-pages,
+.records-pagination-size,
+.records-pagination-jump {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.records-pagination-summary,
+.records-pagination-size span,
+.records-pagination-jump span {
+    color: @text-secondary;
+    font-size: 0.85rem;
+    font-weight: 500;
+}
+
+.records-pagination-btn,
+.records-pagination-select,
+.records-pagination-input {
+    height: 32px;
+    line-height: 30px;
+    border: 1px solid @border-color;
+    border-radius: @border-radius-md;
+    background: @background-white;
+    color: @text-secondary;
+    font-size: 0.85rem;
+    transition: all @transition-fast;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    vertical-align: middle;
+
+    &:hover:not(:disabled) {
+        border-color: @primary-color;
+        color: @primary-color;
+        box-shadow: 0 3px 8px rgba(var(--color-primary-rgb), 0.15);
+    }
+
+    &:active:not(:disabled) {
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+    }
+
+    &:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+        background: @background-light;
+        border-color: @border-light;
+        box-shadow: none;
+    }
+}
+
+.records-pagination-btn {
+    padding: 0 12px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+
+    &.is-active {
+        color: @text-on-primary;
+        border-color: @primary-color;
+        background: @primary-color;
+        box-shadow: 0 2px 6px rgba(var(--color-primary-rgb), 0.35);
+
+        &:hover {
+            color: @text-on-primary;
+            background: @primary-hover-color;
+            border-color: @primary-hover-color;
+        }
+    }
+}
+
+.records-pagination-page {
+    min-width: 32px;
+    padding: 0;
+}
+
+.records-pagination-ellipsis {
+    min-width: 20px;
+    text-align: center;
+    color: @text-secondary;
+    font-size: 0.85rem;
+    letter-spacing: 1px;
+    line-height: 32px;
+}
+
+.records-pagination-select,
+.records-pagination-input {
+    padding: 0 8px;
+    outline: none;
+    border-color: @border-light;
+
+    &:focus {
+        border-color: @primary-color;
+        box-shadow: 0 0 0 3px rgba(var(--color-primary-rgb), 0.12);
+    }
+}
+
+.records-pagination-select {
+    min-width: 70px;
+    cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23666' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    padding-right: 24px;
+    line-height: 1;
+}
+
+.records-pagination-input {
+    width: 50px;
+    text-align: center;
+    padding: 0;
+
+    &::-webkit-inner-spin-button,
+    &::-webkit-outer-spin-button {
+        opacity: 0.1;
+    }
+}
+
+.records-pagination-go {
+    min-width: 50px;
+    background: transparent;
+    border-color: @border-light;
+
+    &:hover:not(:disabled) {
+        background: rgba(var(--color-primary-rgb), 0.05);
+    }
 }
 
 .record-filter-select-custom {
