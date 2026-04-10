@@ -2212,12 +2212,7 @@
                                                             (mc.count > 0 ? (mc.error / mc.count) * 100 : 0) + '%',
                                                     }"
                                                 >
-                                                    <span
-                                                        class="tag-label"
-                                                        :title="
-                                                            mc.key === EMPTY_FILTER_VALUE ? t('emptyValue') : mc.key
-                                                        "
-                                                    >
+                                                    <span class="tag-label">
                                                         {{ mc.key === EMPTY_FILTER_VALUE ? t("emptyValue") : mc.key }}
                                                     </span>
                                                     <span class="tag-count">
@@ -5539,9 +5534,6 @@ watchEffect(() => {
         padding: 0 8px;
         color: @text-primary;
         font-weight: 500;
-        max-width: 150px;
-        overflow: hidden;
-        text-overflow: ellipsis;
         white-space: nowrap;
     }
 
@@ -6106,6 +6098,10 @@ watchEffect(() => {
             background: @text-secondary;
         }
     }
+
+    &::-webkit-scrollbar-corner {
+        background: transparent;
+    }
 }
 
 .fixed-header-table {
@@ -6121,8 +6117,8 @@ watchEffect(() => {
     th {
         position: sticky;
         top: 0;
-        z-index: 1;
-        background: linear-gradient(rgba(0, 0, 0, 0.02), rgba(0, 0, 0, 0.02)), @background-white;
+        z-index: 10;
+        background: @background-light;
         /* Use box-shadow for bottom border to prevent sticky border-collapse disappearance */
         box-shadow: inset 0 -1px 0 @border-light;
     }
@@ -6131,7 +6127,7 @@ watchEffect(() => {
     td:first-child {
         position: sticky;
         left: 0;
-        z-index: 2;
+        z-index: 5;
     }
 
     td:first-child {
@@ -6140,7 +6136,8 @@ watchEffect(() => {
     }
 
     th:first-child {
-        z-index: 3;
+        z-index: 11;
+        background: @background-light;
         /* Intersecting cell gets combined left and bottom shadows */
         box-shadow: inset -1px -1px 0 @border-light;
     }
