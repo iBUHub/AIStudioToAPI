@@ -1495,6 +1495,7 @@
                                 <el-option :label="t('timeRange24h')" value="24h" />
                                 <el-option :label="t('timeRange7d')" value="7d" />
                                 <el-option :label="t('timeRange30d')" value="30d" />
+                                <el-option :label="t('timeRangeCustom')" value="custom" />
                             </el-select>
                             <button
                                 class="record-filter-reset"
@@ -1535,6 +1536,7 @@
                                 <el-option :label="t('timeRange24h')" value="24h" />
                                 <el-option :label="t('timeRange7d')" value="7d" />
                                 <el-option :label="t('timeRange30d')" value="30d" />
+                                <el-option :label="t('timeRangeCustom')" value="custom" />
                             </el-select>
                             <button
                                 class="record-filter-reset"
@@ -1544,6 +1546,23 @@
                             >
                                 {{ t("resetFilters") }}
                             </button>
+                        </div>
+                        <div v-if="timeRange === 'custom'" class="stats-custom-range">
+                            <span class="stats-custom-range-label">{{ t("customTimeRange") }}</span>
+                            <el-date-picker
+                                v-model="customTimeRange"
+                                type="datetimerange"
+                                class="stats-custom-range-picker"
+                                popper-class="stats-filter-select-dropdown stats-date-range-dropdown"
+                                :placement="isStatsFiltersMobile ? 'bottom-start' : 'bottom'"
+                                :teleported="!isStatsFiltersMobile"
+                                :clearable="false"
+                                :default-time="DATE_PICKER_DEFAULT_TIME"
+                                :editable="false"
+                                :range-separator="'~'"
+                                :start-placeholder="t('customTimeRangeStart')"
+                                :end-placeholder="t('customTimeRangeEnd')"
+                            />
                         </div>
                         <div class="records-filters stats-record-filters">
                             <el-select
@@ -2403,7 +2422,7 @@
 </template>
 
 <script setup>
-import { computed, h, nextTick, onBeforeUnmount, onMounted, reactive, ref, watchEffect } from "vue";
+import { computed, h, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch, watchEffect } from "vue";
 import { useRouter } from "vue-router";
 import { ElMessage, ElMessageBox, ElNotification } from "element-plus";
 import { CircleClose } from "@element-plus/icons-vue";
@@ -2446,8 +2465,9 @@ const statsState = reactive({
     },
 });
 
-// Time range filter: 'all' | '1h' | '6h' | '24h' | '7d' | '30d'
+// Time range filter: 'all' | '1h' | '6h' | '24h' | '7d' | '30d' | 'custom'
 const timeRange = ref("all");
+const customTimeRange = ref([]);
 const recordFilters = reactive({
     apiFormat: [""],
     attemptCount: [""],
@@ -2509,6 +2529,26 @@ const TIME_RANGE_MS = {
     "30d": 30 * 24 * 60 * 60 * 1000,
     all: 0,
 };
+const DEFAULT_CUSTOM_TIME_RANGE = "24h";
+const DATE_PICKER_DEFAULT_TIME = [new Date(2000, 0, 1, 0, 0, 0), new Date(2000, 0, 1, 23, 59, 59)];
+
+const buildRelativeTimeRange = rangeKey => {
+    const duration = TIME_RANGE_MS[rangeKey];
+    if (!duration) return null;
+    const end = new Date();
+    return [new Date(end.getTime() - duration), end];
+};
+
+const isValidCustomTimeRange = range =>
+    Array.isArray(range) &&
+    range.length === 2 &&
+    range.every(item => item instanceof Date && !Number.isNaN(item.getTime()));
+
+const normalizedCustomTimeRange = computed(() => {
+    if (!isValidCustomTimeRange(customTimeRange.value)) return null;
+    const [start, end] = customTimeRange.value;
+    return start.getTime() <= end.getTime() ? [start, end] : [end, start];
+});
 
 const EMPTY_FILTER_VALUE = "__EMPTY__";
 const isEmptyFilterField = value =>
@@ -2532,6 +2572,17 @@ const getAccountStatsKey = (authIndex, accountName) => {
 
 const timeFilteredRecords = computed(() => {
     if (timeRange.value === "all") return statsState.records;
+    if (timeRange.value === "custom") {
+        const range = normalizedCustomTimeRange.value;
+        if (!range) return statsState.records;
+        const [start, end] = range;
+        const startTs = start.getTime();
+        const endTs = end.getTime();
+        return statsState.records.filter(record => {
+            const ts = record.startedAt ? new Date(record.startedAt).getTime() : 0;
+            return ts >= startTs && ts <= endTs;
+        });
+    }
     const items = TIME_RANGE_MS[timeRange.value];
     if (!items) return statsState.records;
     const cutoff = Date.now() - items;
@@ -2919,6 +2970,7 @@ const showAttemptsDetail = record => {
 
 const resetRecordFilters = () => {
     timeRange.value = "all";
+    customTimeRange.value = [];
     recordFilters.apiFormat = [""];
     recordFilters.attemptCount = [""];
     recordFilters.clientIp = [""];
@@ -2928,6 +2980,17 @@ const resetRecordFilters = () => {
     recordFilters.statusCode = [""];
     recordFilters.streamMode = [""];
 };
+
+watch(
+    timeRange,
+    (newValue, oldValue) => {
+        if (newValue !== "custom") return;
+        if (normalizedCustomTimeRange.value) return;
+        customTimeRange.value =
+            buildRelativeTimeRange(oldValue) || buildRelativeTimeRange(DEFAULT_CUSTOM_TIME_RANGE) || [];
+    },
+    { flush: "sync" }
+);
 
 const getFilterLabel = (field, placeholder) => {
     const selected = recordFilters[field];
@@ -5254,6 +5317,25 @@ watchEffect(() => {
     width: 144px;
 }
 
+.stats-custom-range {
+    margin: 16px 0 0;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.stats-custom-range-label {
+    color: @text-secondary;
+    font-size: 0.85rem;
+    white-space: nowrap;
+}
+
+.stats-custom-range-picker {
+    width: min(100%, 360px);
+}
+
 .stats-record-filters {
     margin: 16px 0 0;
     display: flex;
@@ -5464,6 +5546,10 @@ watchEffect(() => {
     white-space: nowrap;
 }
 
+:global(.el-popper.stats-date-range-dropdown) {
+    max-width: calc(100vw - 24px);
+}
+
 /* Stats page header: allow meta chips to wrap below title on narrow screens */
 .stats-page-header {
     display: flex;
@@ -5647,6 +5733,24 @@ watchEffect(() => {
 }
 
 @media (max-width: 768px) {
+    :global(.el-popper.stats-date-range-dropdown) {
+        width: calc(100vw - 24px) !important;
+        max-width: calc(100vw - 24px) !important;
+        max-height: min(78vh, 560px);
+        overflow: auto;
+        overscroll-behavior: contain;
+        -webkit-overflow-scrolling: touch;
+        touch-action: pan-x pan-y;
+    }
+
+    :global(.el-popper.stats-date-range-dropdown .el-picker-panel) {
+        min-width: 620px;
+    }
+
+    :global(.el-popper.stats-date-range-dropdown .el-picker-panel__body-wrapper) {
+        overflow: visible;
+    }
+
     .stats-page-header {
         flex-direction: column;
         align-items: flex-start;
@@ -5674,11 +5778,21 @@ watchEffect(() => {
     .record-filter-select-wide,
     .record-filter-select-narrow,
     .record-filter-reset,
-    .stats-time-range-select {
+    .stats-time-range-select,
+    .stats-custom-range-picker {
         width: 100%;
     }
 
     .stats-filters-actions {
+        width: 100%;
+    }
+
+    .stats-custom-range {
+        align-items: stretch;
+        justify-content: flex-start;
+    }
+
+    .stats-custom-range-label {
         width: 100%;
     }
 
