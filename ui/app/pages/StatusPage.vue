@@ -1467,12 +1467,59 @@
                     </div>
                 </header>
 
-                <section class="status-card stats-filters-card">
-                    <div class="stats-filters-header">
+                <section
+                    class="status-card stats-filters-card"
+                    :class="{ 'is-collapsed-mobile': isStatsFiltersMobile && statsFiltersCollapsed }"
+                >
+                    <div
+                        class="stats-filters-header"
+                        :class="{ 'is-collapsible': isStatsFiltersMobile }"
+                        :role="isStatsFiltersMobile ? 'button' : null"
+                        :tabindex="isStatsFiltersMobile ? 0 : null"
+                        :aria-expanded="isStatsFiltersMobile ? String(!statsFiltersCollapsed) : null"
+                        @click="toggleStatsFilters"
+                        @keydown="handleStatsFiltersHeaderKeydown"
+                    >
                         <div class="stats-filters-copy">
                             <h3 class="card-title">{{ t("usageFilters") }}</h3>
                         </div>
-                        <div class="stats-filters-actions">
+                        <div v-if="!isStatsFiltersMobile" class="stats-filters-actions">
+                            <el-select v-model="timeRange" class="time-range-select stats-time-range-select">
+                                <el-option :label="t('timeRangeAll')" value="all" />
+                                <el-option :label="t('timeRange1h')" value="1h" />
+                                <el-option :label="t('timeRange6h')" value="6h" />
+                                <el-option :label="t('timeRange24h')" value="24h" />
+                                <el-option :label="t('timeRange7d')" value="7d" />
+                                <el-option :label="t('timeRange30d')" value="30d" />
+                            </el-select>
+                            <button
+                                class="record-filter-reset"
+                                :class="{ 'is-active': hasActiveStatsFilters }"
+                                :disabled="!hasActiveStatsFilters"
+                                @click.stop="resetRecordFilters"
+                            >
+                                {{ t("resetFilters") }}
+                            </button>
+                        </div>
+                        <span class="stats-filters-toggle-indicator" :class="{ 'is-collapsed': statsFiltersCollapsed }">
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="18"
+                                height="18"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                aria-hidden="true"
+                            >
+                                <polyline points="6 9 12 15 18 9"></polyline>
+                            </svg>
+                        </span>
+                    </div>
+                    <div v-show="!isStatsFiltersMobile || !statsFiltersCollapsed" class="stats-filters-body">
+                        <div v-if="isStatsFiltersMobile" class="stats-filters-actions">
                             <el-select v-model="timeRange" class="time-range-select stats-time-range-select">
                                 <el-option :label="t('timeRangeAll')" value="all" />
                                 <el-option :label="t('timeRange1h')" value="1h" />
@@ -1490,372 +1537,374 @@
                                 {{ t("resetFilters") }}
                             </button>
                         </div>
-                    </div>
-                    <div class="records-filters stats-record-filters">
-                        <el-select
-                            v-model="recordFilters.apiFormat"
-                            multiple
-                            :placeholder="t('apiFormat')"
-                            class="record-filter-select record-filter-select-custom"
-                            @change="handleFilterChange('apiFormat')"
-                            @visible-change="v => !v && (filterSearchQuery.apiFormat = '')"
-                        >
-                            <template #prefix>
-                                <span
-                                    class="custom-label-text"
-                                    :class="{
-                                        'is-placeholder-label':
-                                            recordFilters.apiFormat.length === 0 ||
-                                            (recordFilters.apiFormat.length === 1 && recordFilters.apiFormat[0] === ''),
-                                    }"
-                                >
-                                    {{ getFilterLabel("apiFormat", t("apiFormat")) }}
-                                </span>
-                            </template>
-                            <el-option disabled class="stats-filter-search-option">
-                                <el-input
-                                    v-model="filterSearchQuery.apiFormat"
-                                    :placeholder="t('searchPlaceholder')"
-                                    @click.stop
-                                >
-                                    <template #suffix>
-                                        <el-icon
-                                            class="stats-search-clear-btn"
-                                            :class="{ 'is-visible': filterSearchQuery.apiFormat }"
-                                            @click.stop="filterSearchQuery.apiFormat = ''"
-                                        >
-                                            <CircleClose />
-                                        </el-icon>
-                                    </template>
-                                </el-input>
-                            </el-option>
-                            <el-option :label="t('timeRangeAll')" value="" />
-                            <el-option
-                                v-for="item in recordFilterOptions.apiFormats"
-                                :key="item"
-                                :label="translateLabel(item)"
-                                :value="item"
-                            />
-                        </el-select>
-                        <el-select
-                            v-model="recordFilters.streamMode"
-                            multiple
-                            :placeholder="t('streamingMode')"
-                            class="record-filter-select record-filter-select-custom"
-                            @change="handleFilterChange('streamMode')"
-                            @visible-change="v => !v && (filterSearchQuery.streamMode = '')"
-                        >
-                            <template #prefix>
-                                <span
-                                    class="custom-label-text"
-                                    :class="{
-                                        'is-placeholder-label':
-                                            recordFilters.streamMode.length === 0 ||
-                                            (recordFilters.streamMode.length === 1 &&
-                                                recordFilters.streamMode[0] === ''),
-                                    }"
-                                >
-                                    {{ getFilterLabel("streamMode", t("streamingMode")) }}
-                                </span>
-                            </template>
-                            <el-option disabled class="stats-filter-search-option">
-                                <el-input
-                                    v-model="filterSearchQuery.streamMode"
-                                    :placeholder="t('searchPlaceholder')"
-                                    @click.stop
-                                >
-                                    <template #suffix>
-                                        <el-icon
-                                            class="stats-search-clear-btn"
-                                            :class="{ 'is-visible': filterSearchQuery.streamMode }"
-                                            @click.stop="filterSearchQuery.streamMode = ''"
-                                        >
-                                            <CircleClose />
-                                        </el-icon>
-                                    </template>
-                                </el-input>
-                            </el-option>
-                            <el-option :label="t('timeRangeAll')" value="" />
-                            <el-option
-                                v-for="item in recordFilterOptions.streamModes"
-                                :key="item"
-                                :label="translateLabel(item)"
-                                :value="item"
-                            />
-                        </el-select>
-                        <el-select
-                            v-model="recordFilters.model"
-                            multiple
-                            :placeholder="t('requestModel')"
-                            class="record-filter-select record-filter-select-wide record-filter-select-custom"
-                            @change="handleFilterChange('model')"
-                            @visible-change="v => !v && (filterSearchQuery.model = '')"
-                        >
-                            <template #prefix>
-                                <span
-                                    class="custom-label-text"
-                                    :class="{
-                                        'is-placeholder-label':
-                                            recordFilters.model.length === 0 ||
-                                            (recordFilters.model.length === 1 && recordFilters.model[0] === ''),
-                                    }"
-                                >
-                                    {{ getFilterLabel("model", t("requestModel")) }}
-                                </span>
-                            </template>
-                            <el-option disabled class="stats-filter-search-option">
-                                <el-input
-                                    v-model="filterSearchQuery.model"
-                                    :placeholder="t('searchPlaceholder')"
-                                    @click.stop
-                                >
-                                    <template #suffix>
-                                        <el-icon
-                                            class="stats-search-clear-btn"
-                                            :class="{ 'is-visible': filterSearchQuery.model }"
-                                            @click.stop="filterSearchQuery.model = ''"
-                                        >
-                                            <CircleClose />
-                                        </el-icon>
-                                    </template>
-                                </el-input>
-                            </el-option>
-                            <el-option :label="t('timeRangeAll')" value="" />
-                            <el-option
-                                v-for="item in recordFilterOptions.models"
-                                :key="item"
-                                :label="item === EMPTY_FILTER_VALUE ? t('emptyValue') : item"
-                                :value="item"
-                            />
-                        </el-select>
-                        <el-select
-                            v-model="recordFilters.outcome"
-                            multiple
-                            :placeholder="t('requestOutcome')"
-                            class="record-filter-select record-filter-select-custom"
-                            @change="handleFilterChange('outcome')"
-                            @visible-change="v => !v && (filterSearchQuery.outcome = '')"
-                        >
-                            <template #prefix>
-                                <span
-                                    class="custom-label-text"
-                                    :class="{
-                                        'is-placeholder-label':
-                                            recordFilters.outcome.length === 0 ||
-                                            (recordFilters.outcome.length === 1 && recordFilters.outcome[0] === ''),
-                                    }"
-                                >
-                                    {{ getFilterLabel("outcome", t("requestOutcome")) }}
-                                </span>
-                            </template>
-                            <el-option disabled class="stats-filter-search-option">
-                                <el-input
-                                    v-model="filterSearchQuery.outcome"
-                                    :placeholder="t('searchPlaceholder')"
-                                    @click.stop
-                                >
-                                    <template #suffix>
-                                        <el-icon
-                                            class="stats-search-clear-btn"
-                                            :class="{ 'is-visible': filterSearchQuery.outcome }"
-                                            @click.stop="filterSearchQuery.outcome = ''"
-                                        >
-                                            <CircleClose />
-                                        </el-icon>
-                                    </template>
-                                </el-input>
-                            </el-option>
-                            <el-option :label="t('timeRangeAll')" value="" />
-                            <el-option
-                                v-for="item in recordFilterOptions.outcomes"
-                                :key="item"
-                                :label="translateLabel(item)"
-                                :value="item"
-                            />
-                        </el-select>
-                        <el-select
-                            v-model="recordFilters.statusCode"
-                            multiple
-                            :placeholder="t('requestStatus')"
-                            class="record-filter-select record-filter-select-custom"
-                            @change="handleFilterChange('statusCode')"
-                            @visible-change="v => !v && (filterSearchQuery.statusCode = '')"
-                        >
-                            <template #prefix>
-                                <span
-                                    class="custom-label-text"
-                                    :class="{
-                                        'is-placeholder-label':
-                                            recordFilters.statusCode.length === 0 ||
-                                            (recordFilters.statusCode.length === 1 &&
-                                                recordFilters.statusCode[0] === ''),
-                                    }"
-                                >
-                                    {{ getFilterLabel("statusCode", t("requestStatus")) }}
-                                </span>
-                            </template>
-                            <el-option disabled class="stats-filter-search-option">
-                                <el-input
-                                    v-model="filterSearchQuery.statusCode"
-                                    :placeholder="t('searchPlaceholder')"
-                                    @click.stop
-                                >
-                                    <template #suffix>
-                                        <el-icon
-                                            class="stats-search-clear-btn"
-                                            :class="{ 'is-visible': filterSearchQuery.statusCode }"
-                                            @click.stop="filterSearchQuery.statusCode = ''"
-                                        >
-                                            <CircleClose />
-                                        </el-icon>
-                                    </template>
-                                </el-input>
-                            </el-option>
-                            <el-option :label="t('timeRangeAll')" value="" />
-                            <el-option
-                                v-for="item in recordFilterOptions.statusCodes"
-                                :key="item"
-                                :label="item === EMPTY_FILTER_VALUE ? t('emptyValue') : String(item)"
-                                :value="item === EMPTY_FILTER_VALUE ? item : String(item)"
-                            />
-                        </el-select>
-                        <el-select
-                            v-model="recordFilters.finalAccount"
-                            multiple
-                            :placeholder="t('requestAccount')"
-                            class="record-filter-select record-filter-select-wide record-filter-select-custom"
-                            @change="handleFilterChange('finalAccount')"
-                            @visible-change="v => !v && (filterSearchQuery.finalAccount = '')"
-                        >
-                            <template #prefix>
-                                <span
-                                    class="custom-label-text"
-                                    :class="{
-                                        'is-placeholder-label':
-                                            recordFilters.finalAccount.length === 0 ||
-                                            (recordFilters.finalAccount.length === 1 &&
-                                                recordFilters.finalAccount[0] === ''),
-                                    }"
-                                >
-                                    {{ getFilterLabel("finalAccount", t("requestAccount")) }}
-                                </span>
-                            </template>
-                            <el-option disabled class="stats-filter-search-option">
-                                <el-input
-                                    v-model="filterSearchQuery.finalAccount"
-                                    :placeholder="t('searchPlaceholder')"
-                                    @click.stop
-                                >
-                                    <template #suffix>
-                                        <el-icon
-                                            class="stats-search-clear-btn"
-                                            :class="{ 'is-visible': filterSearchQuery.finalAccount }"
-                                            @click.stop="filterSearchQuery.finalAccount = ''"
-                                        >
-                                            <CircleClose />
-                                        </el-icon>
-                                    </template>
-                                </el-input>
-                            </el-option>
-                            <el-option :label="t('timeRangeAll')" value="" />
-                            <el-option
-                                v-for="item in recordFilterOptions.finalAccounts"
-                                :key="item.value"
-                                :label="item.label"
-                                :value="item.value"
-                            />
-                        </el-select>
-                        <el-select
-                            v-model="recordFilters.clientIp"
-                            multiple
-                            :placeholder="t('requestIp')"
-                            class="record-filter-select record-filter-select-custom"
-                            @change="handleFilterChange('clientIp')"
-                            @visible-change="v => !v && (filterSearchQuery.clientIp = '')"
-                        >
-                            <template #prefix>
-                                <span
-                                    class="custom-label-text"
-                                    :class="{
-                                        'is-placeholder-label':
-                                            recordFilters.clientIp.length === 0 ||
-                                            (recordFilters.clientIp.length === 1 && recordFilters.clientIp[0] === ''),
-                                    }"
-                                >
-                                    {{ getFilterLabel("clientIp", t("requestIp")) }}
-                                </span>
-                            </template>
-                            <el-option disabled class="stats-filter-search-option">
-                                <el-input
-                                    v-model="filterSearchQuery.clientIp"
-                                    :placeholder="t('searchPlaceholder')"
-                                    @click.stop
-                                >
-                                    <template #suffix>
-                                        <el-icon
-                                            class="stats-search-clear-btn"
-                                            :class="{ 'is-visible': filterSearchQuery.clientIp }"
-                                            @click.stop="filterSearchQuery.clientIp = ''"
-                                        >
-                                            <CircleClose />
-                                        </el-icon>
-                                    </template>
-                                </el-input>
-                            </el-option>
-                            <el-option :label="t('timeRangeAll')" value="" />
-                            <el-option
-                                v-for="item in recordFilterOptions.clientIps"
-                                :key="item"
-                                :label="item === EMPTY_FILTER_VALUE ? t('emptyValue') : item"
-                                :value="item"
-                            />
-                        </el-select>
-                        <el-select
-                            v-model="recordFilters.attemptCount"
-                            multiple
-                            :placeholder="t('requestAttempts')"
-                            class="record-filter-select record-filter-select-narrow record-filter-select-custom"
-                            @change="handleFilterChange('attemptCount')"
-                            @visible-change="v => !v && (filterSearchQuery.attemptCount = '')"
-                        >
-                            <template #prefix>
-                                <span
-                                    class="custom-label-text"
-                                    :class="{
-                                        'is-placeholder-label':
-                                            recordFilters.attemptCount.length === 0 ||
-                                            (recordFilters.attemptCount.length === 1 &&
-                                                recordFilters.attemptCount[0] === ''),
-                                    }"
-                                >
-                                    {{ getFilterLabel("attemptCount", t("requestAttempts")) }}
-                                </span>
-                            </template>
-                            <el-option disabled class="stats-filter-search-option">
-                                <el-input
-                                    v-model="filterSearchQuery.attemptCount"
-                                    :placeholder="t('searchPlaceholder')"
-                                    @click.stop
-                                >
-                                    <template #suffix>
-                                        <el-icon
-                                            class="stats-search-clear-btn"
-                                            :class="{ 'is-visible': filterSearchQuery.attemptCount }"
-                                            @click.stop="filterSearchQuery.attemptCount = ''"
-                                        >
-                                            <CircleClose />
-                                        </el-icon>
-                                    </template>
-                                </el-input>
-                            </el-option>
-                            <el-option :label="t('timeRangeAll')" value="" />
-                            <el-option
-                                v-for="item in recordFilterOptions.attemptCounts"
-                                :key="item"
-                                :label="item === EMPTY_FILTER_VALUE ? t('emptyValue') : String(item)"
-                                :value="item === EMPTY_FILTER_VALUE ? item : String(item)"
-                            />
-                        </el-select>
+                        <div class="records-filters stats-record-filters">
+                            <el-select
+                                v-model="recordFilters.apiFormat"
+                                multiple
+                                :placeholder="t('apiFormat')"
+                                class="record-filter-select record-filter-select-custom"
+                                @change="handleFilterChange('apiFormat')"
+                                @visible-change="v => !v && (filterSearchQuery.apiFormat = '')"
+                            >
+                                <template #prefix>
+                                    <span
+                                        class="custom-label-text"
+                                        :class="{
+                                            'is-placeholder-label':
+                                                recordFilters.apiFormat.length === 0 ||
+                                                (recordFilters.apiFormat.length === 1 &&
+                                                    recordFilters.apiFormat[0] === ''),
+                                        }"
+                                    >
+                                        {{ getFilterLabel("apiFormat", t("apiFormat")) }}
+                                    </span>
+                                </template>
+                                <el-option disabled class="stats-filter-search-option">
+                                    <el-input
+                                        v-model="filterSearchQuery.apiFormat"
+                                        :placeholder="t('searchPlaceholder')"
+                                        @click.stop
+                                    >
+                                        <template #suffix>
+                                            <el-icon
+                                                class="stats-search-clear-btn"
+                                                :class="{ 'is-visible': filterSearchQuery.apiFormat }"
+                                                @click.stop="filterSearchQuery.apiFormat = ''"
+                                            >
+                                                <CircleClose />
+                                            </el-icon>
+                                        </template>
+                                    </el-input>
+                                </el-option>
+                                <el-option :label="t('timeRangeAll')" value="" />
+                                <el-option
+                                    v-for="item in recordFilterOptions.apiFormats"
+                                    :key="item"
+                                    :label="translateLabel(item)"
+                                    :value="item"
+                                />
+                            </el-select>
+                            <el-select
+                                v-model="recordFilters.streamMode"
+                                multiple
+                                :placeholder="t('streamingMode')"
+                                class="record-filter-select record-filter-select-custom"
+                                @change="handleFilterChange('streamMode')"
+                                @visible-change="v => !v && (filterSearchQuery.streamMode = '')"
+                            >
+                                <template #prefix>
+                                    <span
+                                        class="custom-label-text"
+                                        :class="{
+                                            'is-placeholder-label':
+                                                recordFilters.streamMode.length === 0 ||
+                                                (recordFilters.streamMode.length === 1 &&
+                                                    recordFilters.streamMode[0] === ''),
+                                        }"
+                                    >
+                                        {{ getFilterLabel("streamMode", t("streamingMode")) }}
+                                    </span>
+                                </template>
+                                <el-option disabled class="stats-filter-search-option">
+                                    <el-input
+                                        v-model="filterSearchQuery.streamMode"
+                                        :placeholder="t('searchPlaceholder')"
+                                        @click.stop
+                                    >
+                                        <template #suffix>
+                                            <el-icon
+                                                class="stats-search-clear-btn"
+                                                :class="{ 'is-visible': filterSearchQuery.streamMode }"
+                                                @click.stop="filterSearchQuery.streamMode = ''"
+                                            >
+                                                <CircleClose />
+                                            </el-icon>
+                                        </template>
+                                    </el-input>
+                                </el-option>
+                                <el-option :label="t('timeRangeAll')" value="" />
+                                <el-option
+                                    v-for="item in recordFilterOptions.streamModes"
+                                    :key="item"
+                                    :label="translateLabel(item)"
+                                    :value="item"
+                                />
+                            </el-select>
+                            <el-select
+                                v-model="recordFilters.model"
+                                multiple
+                                :placeholder="t('requestModel')"
+                                class="record-filter-select record-filter-select-wide record-filter-select-custom"
+                                @change="handleFilterChange('model')"
+                                @visible-change="v => !v && (filterSearchQuery.model = '')"
+                            >
+                                <template #prefix>
+                                    <span
+                                        class="custom-label-text"
+                                        :class="{
+                                            'is-placeholder-label':
+                                                recordFilters.model.length === 0 ||
+                                                (recordFilters.model.length === 1 && recordFilters.model[0] === ''),
+                                        }"
+                                    >
+                                        {{ getFilterLabel("model", t("requestModel")) }}
+                                    </span>
+                                </template>
+                                <el-option disabled class="stats-filter-search-option">
+                                    <el-input
+                                        v-model="filterSearchQuery.model"
+                                        :placeholder="t('searchPlaceholder')"
+                                        @click.stop
+                                    >
+                                        <template #suffix>
+                                            <el-icon
+                                                class="stats-search-clear-btn"
+                                                :class="{ 'is-visible': filterSearchQuery.model }"
+                                                @click.stop="filterSearchQuery.model = ''"
+                                            >
+                                                <CircleClose />
+                                            </el-icon>
+                                        </template>
+                                    </el-input>
+                                </el-option>
+                                <el-option :label="t('timeRangeAll')" value="" />
+                                <el-option
+                                    v-for="item in recordFilterOptions.models"
+                                    :key="item"
+                                    :label="item === EMPTY_FILTER_VALUE ? t('emptyValue') : item"
+                                    :value="item"
+                                />
+                            </el-select>
+                            <el-select
+                                v-model="recordFilters.outcome"
+                                multiple
+                                :placeholder="t('requestOutcome')"
+                                class="record-filter-select record-filter-select-custom"
+                                @change="handleFilterChange('outcome')"
+                                @visible-change="v => !v && (filterSearchQuery.outcome = '')"
+                            >
+                                <template #prefix>
+                                    <span
+                                        class="custom-label-text"
+                                        :class="{
+                                            'is-placeholder-label':
+                                                recordFilters.outcome.length === 0 ||
+                                                (recordFilters.outcome.length === 1 && recordFilters.outcome[0] === ''),
+                                        }"
+                                    >
+                                        {{ getFilterLabel("outcome", t("requestOutcome")) }}
+                                    </span>
+                                </template>
+                                <el-option disabled class="stats-filter-search-option">
+                                    <el-input
+                                        v-model="filterSearchQuery.outcome"
+                                        :placeholder="t('searchPlaceholder')"
+                                        @click.stop
+                                    >
+                                        <template #suffix>
+                                            <el-icon
+                                                class="stats-search-clear-btn"
+                                                :class="{ 'is-visible': filterSearchQuery.outcome }"
+                                                @click.stop="filterSearchQuery.outcome = ''"
+                                            >
+                                                <CircleClose />
+                                            </el-icon>
+                                        </template>
+                                    </el-input>
+                                </el-option>
+                                <el-option :label="t('timeRangeAll')" value="" />
+                                <el-option
+                                    v-for="item in recordFilterOptions.outcomes"
+                                    :key="item"
+                                    :label="translateLabel(item)"
+                                    :value="item"
+                                />
+                            </el-select>
+                            <el-select
+                                v-model="recordFilters.statusCode"
+                                multiple
+                                :placeholder="t('requestStatus')"
+                                class="record-filter-select record-filter-select-custom"
+                                @change="handleFilterChange('statusCode')"
+                                @visible-change="v => !v && (filterSearchQuery.statusCode = '')"
+                            >
+                                <template #prefix>
+                                    <span
+                                        class="custom-label-text"
+                                        :class="{
+                                            'is-placeholder-label':
+                                                recordFilters.statusCode.length === 0 ||
+                                                (recordFilters.statusCode.length === 1 &&
+                                                    recordFilters.statusCode[0] === ''),
+                                        }"
+                                    >
+                                        {{ getFilterLabel("statusCode", t("requestStatus")) }}
+                                    </span>
+                                </template>
+                                <el-option disabled class="stats-filter-search-option">
+                                    <el-input
+                                        v-model="filterSearchQuery.statusCode"
+                                        :placeholder="t('searchPlaceholder')"
+                                        @click.stop
+                                    >
+                                        <template #suffix>
+                                            <el-icon
+                                                class="stats-search-clear-btn"
+                                                :class="{ 'is-visible': filterSearchQuery.statusCode }"
+                                                @click.stop="filterSearchQuery.statusCode = ''"
+                                            >
+                                                <CircleClose />
+                                            </el-icon>
+                                        </template>
+                                    </el-input>
+                                </el-option>
+                                <el-option :label="t('timeRangeAll')" value="" />
+                                <el-option
+                                    v-for="item in recordFilterOptions.statusCodes"
+                                    :key="item"
+                                    :label="item === EMPTY_FILTER_VALUE ? t('emptyValue') : String(item)"
+                                    :value="item === EMPTY_FILTER_VALUE ? item : String(item)"
+                                />
+                            </el-select>
+                            <el-select
+                                v-model="recordFilters.finalAccount"
+                                multiple
+                                :placeholder="t('requestAccount')"
+                                class="record-filter-select record-filter-select-wide record-filter-select-custom"
+                                @change="handleFilterChange('finalAccount')"
+                                @visible-change="v => !v && (filterSearchQuery.finalAccount = '')"
+                            >
+                                <template #prefix>
+                                    <span
+                                        class="custom-label-text"
+                                        :class="{
+                                            'is-placeholder-label':
+                                                recordFilters.finalAccount.length === 0 ||
+                                                (recordFilters.finalAccount.length === 1 &&
+                                                    recordFilters.finalAccount[0] === ''),
+                                        }"
+                                    >
+                                        {{ getFilterLabel("finalAccount", t("requestAccount")) }}
+                                    </span>
+                                </template>
+                                <el-option disabled class="stats-filter-search-option">
+                                    <el-input
+                                        v-model="filterSearchQuery.finalAccount"
+                                        :placeholder="t('searchPlaceholder')"
+                                        @click.stop
+                                    >
+                                        <template #suffix>
+                                            <el-icon
+                                                class="stats-search-clear-btn"
+                                                :class="{ 'is-visible': filterSearchQuery.finalAccount }"
+                                                @click.stop="filterSearchQuery.finalAccount = ''"
+                                            >
+                                                <CircleClose />
+                                            </el-icon>
+                                        </template>
+                                    </el-input>
+                                </el-option>
+                                <el-option :label="t('timeRangeAll')" value="" />
+                                <el-option
+                                    v-for="item in recordFilterOptions.finalAccounts"
+                                    :key="item.value"
+                                    :label="item.label"
+                                    :value="item.value"
+                                />
+                            </el-select>
+                            <el-select
+                                v-model="recordFilters.clientIp"
+                                multiple
+                                :placeholder="t('requestIp')"
+                                class="record-filter-select record-filter-select-custom"
+                                @change="handleFilterChange('clientIp')"
+                                @visible-change="v => !v && (filterSearchQuery.clientIp = '')"
+                            >
+                                <template #prefix>
+                                    <span
+                                        class="custom-label-text"
+                                        :class="{
+                                            'is-placeholder-label':
+                                                recordFilters.clientIp.length === 0 ||
+                                                (recordFilters.clientIp.length === 1 &&
+                                                    recordFilters.clientIp[0] === ''),
+                                        }"
+                                    >
+                                        {{ getFilterLabel("clientIp", t("requestIp")) }}
+                                    </span>
+                                </template>
+                                <el-option disabled class="stats-filter-search-option">
+                                    <el-input
+                                        v-model="filterSearchQuery.clientIp"
+                                        :placeholder="t('searchPlaceholder')"
+                                        @click.stop
+                                    >
+                                        <template #suffix>
+                                            <el-icon
+                                                class="stats-search-clear-btn"
+                                                :class="{ 'is-visible': filterSearchQuery.clientIp }"
+                                                @click.stop="filterSearchQuery.clientIp = ''"
+                                            >
+                                                <CircleClose />
+                                            </el-icon>
+                                        </template>
+                                    </el-input>
+                                </el-option>
+                                <el-option :label="t('timeRangeAll')" value="" />
+                                <el-option
+                                    v-for="item in recordFilterOptions.clientIps"
+                                    :key="item"
+                                    :label="item === EMPTY_FILTER_VALUE ? t('emptyValue') : item"
+                                    :value="item"
+                                />
+                            </el-select>
+                            <el-select
+                                v-model="recordFilters.attemptCount"
+                                multiple
+                                :placeholder="t('requestAttempts')"
+                                class="record-filter-select record-filter-select-narrow record-filter-select-custom"
+                                @change="handleFilterChange('attemptCount')"
+                                @visible-change="v => !v && (filterSearchQuery.attemptCount = '')"
+                            >
+                                <template #prefix>
+                                    <span
+                                        class="custom-label-text"
+                                        :class="{
+                                            'is-placeholder-label':
+                                                recordFilters.attemptCount.length === 0 ||
+                                                (recordFilters.attemptCount.length === 1 &&
+                                                    recordFilters.attemptCount[0] === ''),
+                                        }"
+                                    >
+                                        {{ getFilterLabel("attemptCount", t("requestAttempts")) }}
+                                    </span>
+                                </template>
+                                <el-option disabled class="stats-filter-search-option">
+                                    <el-input
+                                        v-model="filterSearchQuery.attemptCount"
+                                        :placeholder="t('searchPlaceholder')"
+                                        @click.stop
+                                    >
+                                        <template #suffix>
+                                            <el-icon
+                                                class="stats-search-clear-btn"
+                                                :class="{ 'is-visible': filterSearchQuery.attemptCount }"
+                                                @click.stop="filterSearchQuery.attemptCount = ''"
+                                            >
+                                                <CircleClose />
+                                            </el-icon>
+                                        </template>
+                                    </el-input>
+                                </el-option>
+                                <el-option :label="t('timeRangeAll')" value="" />
+                                <el-option
+                                    v-for="item in recordFilterOptions.attemptCounts"
+                                    :key="item"
+                                    :label="item === EMPTY_FILTER_VALUE ? t('emptyValue') : String(item)"
+                                    :value="item === EMPTY_FILTER_VALUE ? item : String(item)"
+                                />
+                            </el-select>
+                        </div>
                     </div>
                 </section>
 
@@ -2392,6 +2441,37 @@ const filterSearchQuery = reactive({
     statusCode: "",
     streamMode: "",
 });
+
+const STATS_FILTERS_MOBILE_MEDIA_QUERY = "(max-width: 767px)";
+const isStatsFiltersMobile = ref(false);
+const statsFiltersCollapsed = ref(false);
+let statsFiltersMobileMediaQuery = null;
+
+const syncStatsFiltersViewport = mediaQueryList => {
+    const isMobile = mediaQueryList.matches;
+    const wasMobile = isStatsFiltersMobile.value;
+
+    isStatsFiltersMobile.value = isMobile;
+
+    if (isMobile && !wasMobile) {
+        statsFiltersCollapsed.value = true;
+    } else if (!isMobile) {
+        statsFiltersCollapsed.value = false;
+    }
+};
+
+const toggleStatsFilters = () => {
+    if (!isStatsFiltersMobile.value) return;
+    statsFiltersCollapsed.value = !statsFiltersCollapsed.value;
+};
+
+const handleStatsFiltersHeaderKeydown = event => {
+    if (!isStatsFiltersMobile.value) return;
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    toggleStatsFilters();
+};
+
 const TIME_RANGE_MS = {
     "1h": 60 * 60 * 1000,
     "6h": 6 * 60 * 60 * 1000,
@@ -4015,6 +4095,11 @@ onMounted(() => {
             state.logs = t("loading");
         }
     });
+
+    statsFiltersMobileMediaQuery = window.matchMedia(STATS_FILTERS_MOBILE_MEDIA_QUERY);
+    syncStatsFiltersViewport(statsFiltersMobileMediaQuery);
+    statsFiltersMobileMediaQuery.addEventListener("change", syncStatsFiltersViewport);
+
     updateContent().finally(scheduleUpdate);
     fetchUsageStats().finally(scheduleUpdate);
 
@@ -4029,6 +4114,9 @@ onBeforeUnmount(() => {
     isActive = false;
     if (updateTimer) {
         clearTimeout(updateTimer);
+    }
+    if (statsFiltersMobileMediaQuery) {
+        statsFiltersMobileMediaQuery.removeEventListener("change", syncStatsFiltersViewport);
     }
     // Clean up global function
     delete window.__copyEnvVar;
@@ -5086,9 +5174,9 @@ watchEffect(() => {
     padding: 24px;
 
     .card-title {
-        border-bottom: 1px solid @border-light;
-        padding-bottom: 15px;
-        margin-bottom: 20px;
+        margin: 0;
+        border-bottom: none;
+        padding-bottom: 0;
     }
 }
 
@@ -5097,14 +5185,32 @@ watchEffect(() => {
     align-items: center;
     justify-content: space-between;
     gap: 16px;
-    flex-wrap: wrap;
-    margin-bottom: 12px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid @border-light;
+}
+
+.stats-filters-body {
+    margin-top: 16px;
 }
 
 .stats-filters-copy {
     display: flex;
     flex-direction: column;
     gap: 4px;
+}
+
+.stats-filters-toggle-indicator {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    color: @text-secondary;
+    transition:
+        transform @transition-fast,
+        color @transition-fast;
+
+    &.is-collapsed {
+        transform: rotate(-90deg);
+    }
 }
 
 .stats-filters-actions {
@@ -5519,6 +5625,31 @@ watchEffect(() => {
 
     .stats-filters-actions {
         width: 100%;
+    }
+
+    .stats-filters-header {
+        &.is-collapsible {
+            cursor: pointer;
+            user-select: none;
+
+            &:focus-visible {
+                outline: 2px solid rgba(var(--color-primary-rgb), 0.28);
+                outline-offset: 4px;
+            }
+        }
+    }
+
+    .stats-filters-toggle-indicator {
+        display: inline-flex;
+    }
+
+    .stats-filters-card {
+        &.is-collapsed-mobile {
+            .stats-filters-header {
+                padding-bottom: 0;
+                border-bottom: none;
+            }
+        }
     }
 
     .account-cell {
