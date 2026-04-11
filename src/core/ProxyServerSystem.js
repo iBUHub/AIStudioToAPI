@@ -449,7 +449,6 @@ class ProxyServerSystem extends EventEmitter {
         });
 
         // Serve static files from ui/dist (Vite build output)
-        const path = require("path");
         app.use(express.static(path.join(__dirname, "..", "..", "ui", "dist")));
 
         // Serve additional public assets under ui/public

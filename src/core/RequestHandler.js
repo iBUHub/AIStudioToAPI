@@ -3673,7 +3673,13 @@ class RequestHandler {
                 } else if (res.__proxyResponseStreamMode === "fake") {
                     // Request-scoped fake stream mode - try to send an SSE-style error chunk
                     try {
-                        this._sendErrorChunkToClient(res, `Processing failed: ${errorMsg}`);
+                        let status = 500;
+                        if (error instanceof QueueTimeoutError || error.code === "QUEUE_TIMEOUT") {
+                            status = 504;
+                        } else if (this._isConnectionResetError(error)) {
+                            status = 503;
+                        }
+                        this._sendErrorChunkToClient(res, `Processing failed: ${errorMsg}`, status);
                     } catch (writeError) {
                         const writeErrorMsg = String(writeError?.message ?? writeError);
                         this.logger.error(`[Request] Failed to write error chunk: ${writeErrorMsg}`);
@@ -3724,13 +3730,13 @@ class RequestHandler {
         );
     }
 
-    _sendErrorChunkToClient(res, message) {
+    _sendErrorChunkToClient(res, message, statusCode = 500) {
         if (!res.headersSent) {
             res.setHeader("Content-Type", "text/event-stream");
             res.setHeader("Cache-Control", "no-cache");
             res.setHeader("Connection", "keep-alive");
         }
-        this._markTrackedResponseError(res, message, 500);
+        this._markTrackedResponseError(res, message, statusCode);
         // Check if response is still writable before attempting to write
         if (this._isResponseWritable(res)) {
             try {
