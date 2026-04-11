@@ -251,7 +251,7 @@ class UsageStatsService {
 
             for (const line of lines) {
                 try {
-                    const record = JSON.parse(line);
+                    const record = this._normalizeLoadedRecord(JSON.parse(line));
                     this.records.push(record);
                     if (record.sequence > this.sequence) {
                         this.sequence = record.sequence;
@@ -318,8 +318,9 @@ class UsageStatsService {
     }
 
     _updateSummary(record) {
+        const durationMs = this._normalizeDurationMs(record.durationMs);
         this.summary.totalRequests += 1;
-        this.summary.totalDurationMs += record.durationMs;
+        this.summary.totalDurationMs += durationMs;
 
         if (record.outcome === "success") {
             this.summary.successCount += 1;
@@ -338,6 +339,7 @@ class UsageStatsService {
     }
 
     _updateAccountStats(record) {
+        const durationMs = this._normalizeDurationMs(record.durationMs);
         const accountKey = record.accountKey || this._buildAccountKey(record.finalAuthIndex, record.finalAccountName);
         const existing = this.accountStats.get(accountKey) || {
             abortedCount: 0,
@@ -359,7 +361,7 @@ class UsageStatsService {
         existing.modelCounts[modelKey] = (existing.modelCounts[modelKey] || 0) + 1;
         existing.lastPath = record.path || existing.lastPath;
         existing.lastUsedAt = record.finishedAt;
-        existing.totalDurationMs += record.durationMs;
+        existing.totalDurationMs += durationMs;
         existing.totalRequests += 1;
 
         if (record.outcome === "success") {
@@ -382,6 +384,20 @@ class UsageStatsService {
             return outcome;
         }
         return "error";
+    }
+
+    _normalizeDurationMs(value) {
+        const durationMs = Number(value);
+        return Number.isFinite(durationMs) && durationMs >= 0 ? durationMs : 0;
+    }
+
+    _normalizeLoadedRecord(record) {
+        return {
+            ...record,
+            durationMs: this._normalizeDurationMs(record?.durationMs),
+            outcome: this._normalizeOutcome(record?.outcome),
+            statusCode: Number.isFinite(Number(record?.statusCode)) ? Number(record.statusCode) : null,
+        };
     }
 
     _normalizeAuthIndex(value) {
