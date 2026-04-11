@@ -66,8 +66,8 @@ class BrowserManager {
         // Map: authIndex -> { success: boolean, failed: boolean }
         this._wsInitState = new Map();
 
-        // Target URL for AI Studio app
-        this.targetUrl = "https://ai.studio/apps/c48c6178-8dad-4d16-8de7-bb78d265482c";
+        // Target URL for Gemini Canvas (provides API key auto-injection for generativelanguage.googleapis.com)
+        this.targetUrl = "https://gemini.google.com/share/fe24c455a570";
 
         // Chromium launch args for performance optimization
         this.launchArgs = [
@@ -83,6 +83,8 @@ class BrowserManager {
             "--disable-sync",
             "--metrics-recording-only",
             "--mute-audio",
+            // Allow ws://127.0.0.1:9998 WebSocket from HTTPS pages (build.js connects to local WS server)
+            "--allow-running-insecure-content",
         ];
 
         // Use custom executable path if provided, otherwise let patchright use its bundled Chromium
@@ -147,7 +149,7 @@ class BrowserManager {
         this.logger.info(`${logPrefix} ⏳ Waiting for WebSocket initialization (timeout: ${timeout / 1000}s)...`);
 
         const startTime = Date.now();
-        const checkInterval = 1000; // Check every 1 second
+        const checkInterval = 500; // Check every 500ms
 
         try {
             while (Date.now() - startTime < timeout) {
@@ -168,9 +170,22 @@ class BrowserManager {
                 // Read state fresh each iteration
                 const state = this._wsInitState.get(authIndex);
 
-                // Check if initialization succeeded
+                // Check if initialization succeeded (via console message)
                 if (state && state.success) {
                     return true;
+                }
+
+                // Also check ConnectionRegistry directly (handles cases where console
+                // events are not captured, e.g. when build.js is injected via page.evaluate)
+                if (this.connectionRegistry) {
+                    const conn = this.connectionRegistry.getConnectionByAuth(authIndex, false);
+                    if (conn) {
+                        this.logger.info(
+                            `${logPrefix} ✅ WebSocket connection detected via ConnectionRegistry`
+                        );
+                        if (state) state.success = true;
+                        return true;
+                    }
                 }
 
                 // Check if initialization failed
@@ -200,7 +215,6 @@ class BrowserManager {
                 await page.waitForTimeout(checkInterval);
             }
 
-            // Timeout reached
             this.logger.error(`${logPrefix} ⏱️ WebSocket initialization timeout after ${timeout / 1000}s`);
             return false;
         } catch (error) {
@@ -298,6 +312,83 @@ class BrowserManager {
      * Helper: Generate a consistent numeric seed from a string
      * Used to keep fingerprints consistent for the same account index
      */
+    /**
+     * Wait for the Gemini Canvas iframe to appear and inject build.js into it via frame.evaluate().
+     */
+    async _injectBuildScriptIntoIframe(page, authIndex) {
+        const logPrefix = `[Context#${authIndex}]`;
+
+        // Find the App/Canvas iframe (blob: URL on *.usercontent.goog for Gemini Canvas)
+        let appFrame = null;
+        for (let i = 0; i < 30; i++) {
+            // Check if WS already connected
+            if (this.connectionRegistry) {
+                const conn = this.connectionRegistry.getConnectionByAuth(authIndex, false);
+                if (conn) {
+                    this.logger.info(`${logPrefix} WebSocket already connected, skipping iframe injection`);
+                    return;
+                }
+            }
+            appFrame = page.frames().find(f => {
+                const url = f.url();
+                return url.includes("usercontent.goog") ||
+                       (url.startsWith("blob:") && url.includes("usercontent"));
+            });
+            if (appFrame) break;
+            await page.waitForTimeout(500);
+        }
+
+        if (!appFrame) {
+            this.logger.warn(`${logPrefix} App/Canvas iframe not found`);
+            return;
+        }
+
+        this.logger.info(`${logPrefix} Found iframe: ${appFrame.url().substring(0, 80)}...`);
+
+        // Inject authIndex via frame.evaluate() and send postMessage to resolve __authIndexReady.
+        // This works even for blob: URLs where route interception is not possible.
+        try {
+            await appFrame.evaluate((idx) => {
+                window.chrome = window.chrome || {};
+                window.chrome._contextId = idx;
+                // Dispatch fake authIndexResponse to resolve the pending __authIndexReady promise
+                window.postMessage({ type: "authIndexResponse", authIndex: idx }, "*");
+            }, authIndex);
+            this.logger.info(`${logPrefix} authIndex ${authIndex} injected into iframe via evaluate`);
+        } catch (e) {
+            this.logger.warn(`${logPrefix} iframe evaluate failed: ${e.message}`);
+        }
+
+        // Wait briefly for the iframe's code to initialize WS connection
+        await page.waitForTimeout(3000);
+
+        // Check if WS connected
+        if (this.connectionRegistry) {
+            const conn = this.connectionRegistry.getConnectionByAuth(authIndex, false);
+            if (conn) {
+                this.logger.info(`${logPrefix} WebSocket connected after iframe injection`);
+                return;
+            }
+        }
+
+        // Fallback: inject build.js directly
+        this.logger.info(`${logPrefix} iframe's own code failed, injecting build.js directly...`);
+        const buildPath = path.join(__dirname, "..", "..", "scripts", "client", "build.js");
+        let buildContent = fs.readFileSync(buildPath, "utf-8");
+        buildContent = buildContent.replace(/document\.body\.innerHTML\s*=\s*"";?/g, "// (removed)");
+
+        try {
+            await appFrame.evaluate(`
+                window.chrome = window.chrome || {};
+                window.chrome._contextId = ${authIndex};
+                ${buildContent}
+            `);
+            this.logger.info(`${logPrefix} build.js injected into iframe (fallback mode)`);
+        } catch (e) {
+            this.logger.error(`${logPrefix} Failed to inject build.js: ${e.message}`);
+        }
+    }
+
     _generateIdentitySeed(str) {
         let hashValue = 0;
         for (let i = 0; i < str.length; i++) {
@@ -829,13 +920,17 @@ class BrowserManager {
         try {
             this.logger.debug(`${logPrefix} 🔍 Checking for Launch button...`);
 
-            // Try to find Launch button with multiple selectors
+            // Try to find Launch/Continue button with multiple selectors
             const launchSelectors = [
                 'button:text("Launch")',
                 'button:has-text("Launch")',
                 'button[aria-label*="Launch"]',
                 'button span:has-text("Launch")',
                 'div[role="button"]:has-text("Launch")',
+                'button:text("Continue")',
+                'button:has-text("Continue")',
+                'button:text("继续")',
+                'button:has-text("继续")',
             ];
 
             let clicked = false;
@@ -1923,18 +2018,21 @@ class BrowserManager {
             // Try to click Launch button if it exists (not a popup, but a page button)
             await this._tryClickLaunchButton(page, `[Context#${authIndex}]`);
 
+            // Wait for the Gemini Canvas iframe, then inject build.js into it.
+            await this._injectBuildScriptIntoIframe(page, authIndex);
+
             // Wait for WebSocket initialization (no retry)
             // Check if initialization already succeeded (console listener may have detected it)
             const wsState = this._wsInitState.get(authIndex);
             if (wsState && wsState.success) {
                 this.logger.info(`[Context#${authIndex}] ✅ WebSocket already initialized, skipping wait`);
             } else {
-                // Wait for WebSocket initialization (60 second timeout)
+                // Wait for WebSocket initialization (10 second timeout — short for local WS)
                 // This will throw an abort error if the context is aborted during wait
                 const initSuccess = await this._waitForWebSocketInit(
                     page,
                     `[Context#${authIndex}]`,
-                    60000,
+                    10000,
                     authIndex,
                     isBackgroundTask
                 );

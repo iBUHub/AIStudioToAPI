@@ -46,6 +46,11 @@ module.exports = defineConfig({
                 changeOrigin: true,
                 target: "http://localhost:7860",
             },
+            "/screencast": {
+                changeOrigin: true,
+                target: "http://localhost:7860",
+                ws: true,
+            },
         },
         strictPort: true,
     },
