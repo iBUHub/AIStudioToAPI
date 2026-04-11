@@ -22,10 +22,12 @@
    - **Public Access**：开启（Toggle **On**，后面的网址选项不用动）。
 
    **Local Storage**:
-   - **Capacity**：1
-   - **Mount Path**：/app/configs/auth
-   - **Capacity**：1
-   - **Mount Path**：/app/data
+   - **存储卷 1**
+     - **Capacity**：1
+     - **Mount Path**：/app/configs/auth
+   - **存储卷 2**
+     - **Capacity**：1
+     - **Mount Path**：/app/data
 
    **环境变量（Environment Variables）**:
 
