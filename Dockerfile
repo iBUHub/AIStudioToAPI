@@ -3,11 +3,10 @@ FROM node:24-slim
 
 WORKDIR /app
 
-# Install system dependencies required for Playwright/Camoufox browser, VNC, and dev tools (git)
+# Install system dependencies required for Patchright/Chromium headless
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
-    unzip \
     libasound2 \
     libatk-bridge2.0-0 \
     libatk1.0-0 \
@@ -29,9 +28,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxrandr2 \
     libxss1 \
     libxtst6 \
-    xvfb \
-    x11vnc \
-    websockify \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
@@ -41,30 +37,8 @@ COPY package*.json ./
 RUN npm install --no-audit --no-fund --ignore-scripts \
     && npm cache clean --force
 
-# Download and extract Camoufox browser binary
-# Layer is cached unless CAMOUFOX_URL argument changes
-# Automatically selects architecture-specific binary if URL not provided
-ARG CAMOUFOX_URL
-RUN ARCH=$(uname -m) && \
-    if [ -z "$CAMOUFOX_URL" ]; then \
-    if [ "$ARCH" = "x86_64" ]; then \
-    CAMOUFOX_URL="https://github.com/daijro/camoufox/releases/download/v135.0.1-beta.24/camoufox-135.0.1-beta.24-lin.x86_64.zip"; \
-    elif [ "$ARCH" = "aarch64" ]; then \
-    CAMOUFOX_URL="https://github.com/daijro/camoufox/releases/download/v135.0.1-beta.24/camoufox-135.0.1-beta.24-lin.arm64.zip"; \
-    else \
-    echo "Unsupported architecture: $ARCH" && exit 1; \
-    fi; \
-    fi && \
-    mkdir -p camoufox-linux && \
-    curl -sSL ${CAMOUFOX_URL} -o camoufox.zip && \
-    unzip -q camoufox.zip -d /tmp/cf || true && \
-    if [ -f /tmp/cf/camoufox ]; then \
-    mv /tmp/cf/* camoufox-linux/; \
-    else \
-    mv /tmp/cf/*/* camoufox-linux/; \
-    fi && \
-    rm -rf /tmp/cf camoufox.zip && \
-    chmod +x /app/camoufox-linux/camoufox
+# Install Patchright Chromium browser (anti-detection)
+RUN npx patchright install chromium
 
 # Copy application source code with proper ownership
 # Layer is rebuilt when source code changes
@@ -90,8 +64,7 @@ USER root
 EXPOSE 7860
 
 # Configure runtime environment
-ENV NODE_ENV=production \
-    CAMOUFOX_EXECUTABLE_PATH=/app/camoufox-linux/camoufox
+ENV NODE_ENV=production
 
 # Health check for container orchestration platforms
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \

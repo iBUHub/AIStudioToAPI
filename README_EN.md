@@ -11,7 +11,7 @@ A tool that wraps Google AI Studio web interface to provide OpenAI API, Gemini A
 - 👥 **Multi-Account Support**: Support multiple Google accounts logged in simultaneously for fast switching without re-login
 - 🔧 **Tool Calls Support**: OpenAI, Gemini, and Anthropic APIs all support Tool Calls (Function Calling)
 - 📝 **Model Support**: Access to various Gemini models through AI Studio, including image generation and TTS (text-to-speech) models
-- 🎨 **Homepage Display Control**: Provides a visual web console with account management, VNC login, and more
+- 🎨 **Homepage Display Control**: Provides a visual web console with account management, auth file upload, and more
 
 ## 🚀 Quick Start
 
@@ -24,24 +24,27 @@ A tool that wraps Google AI Studio web interface to provide OpenAI API, Gemini A
    cd AIStudioToAPI
    ```
 
-2. Run the setup script:
+2. Install the Chromium browser:
 
    ```bash
-   npm run setup-auth
+   npx patchright install chromium
    ```
 
-   This script will:
-   - Automatically download the Camoufox browser (a privacy-focused Firefox fork)
-   - Launch the browser and navigate to AI Studio automatically
-   - Save your authentication credentials locally (auth files are stored in `/configs/auth`)
+3. Extract authentication credentials:
 
-   > 💡 **Tip:** If downloading the Camoufox browser fails or takes too long, you can manually download it from [here](https://github.com/daijro/camoufox/releases/tag/v135.0.1-beta.24), and set the environment variable `CAMOUFOX_EXECUTABLE_PATH` to the path of the browser executable (both absolute and relative paths are supported).
+   ```bash
+   npm run extract-auth
+   ```
 
-3. Configure Environment Variables (Optional):
+   This script will extract Google account authentication credentials from your browser and save them to the `configs/auth` directory.
+
+   > 💡 **Tip:** If you need to use a custom Chromium browser path, set the environment variable `BROWSER_EXECUTABLE_PATH` to the path of the browser executable (both absolute and relative paths are supported).
+
+4. Configure Environment Variables (Optional):
 
    Copy `.env.example` in the root directory to `.env`, and modify settings in `.env` as needed (e.g., port, API Key).
 
-4. Start the service:
+5. Start the service:
 
    ```bash
    npm start
@@ -52,14 +55,14 @@ A tool that wraps Google AI Studio web interface to provide OpenAI API, Gemini A
    After the service starts, you can access `http://localhost:7860` in your browser to open the web console homepage, where you can view account status and service status.
    Request usage statistics are persisted locally at `/data/usage-stats.jsonl`.
 
-5. Update to the latest version (for existing local deployments):
+6. Update to the latest version (for existing local deployments):
 
    ```bash
    git pull
    npm install
    ```
 
-> ⚠ **Note:** Running directly does not support adding accounts via VNC online. You need to use the `npm run setup-auth` script to add accounts. VNC login is only available in Docker deployments.
+> ⚠ **Note:** Running directly requires the `npm run extract-auth` script to extract auth files for adding accounts.
 
 ### 🐋 Docker Deployment
 
@@ -144,18 +147,11 @@ If you prefer to build the Docker image yourself, you can use the following comm
 
 #### 🔑 Step 2: Account Management
 
-After deployment, you need to add Google accounts using one of these methods:
+After deployment, you need to add Google accounts by uploading auth files:
 
-**Method 1: VNC-Based Login (Recommended)**
+**Upload Auth Files**
 
-- Access the deployed service address in your browser (e.g., `http://your-server:7860`) and click the "Add User" button
-- You'll be redirected to a VNC page with a browser instance
-- Log in to your Google account, then click the "Save" button after login is complete
-- The account will be automatically saved as `auth-N.json` (N starts from 0)
-
-**Method 2: Upload Auth Files**
-
-- Run `npm run setup-auth` on your local machine to generate auth files (refer to steps 1 and 2 of [Run Directly](#-run-directly-windows--macos--linux)), the auth files are in `/configs/auth`
+- Run `npm run extract-auth` on your local machine to extract auth files (refer to steps 1 through 3 of [Run Directly](#-run-directly-windows--macos--linux)), the auth files are in `configs/auth`
 - In the web console, click "Upload Auth" to upload the auth JSON file, or manually upload to the mounted `/path/to/auth` directory
 
 > 💡 **Tip**: You can also download auth files from an existing container and upload them to a new container. Click the "Download Auth" button for the corresponding account in the web console to download the auth file.
@@ -245,7 +241,7 @@ This endpoint forwards requests to the official Gemini API format endpoint.
 | `SWITCH_ON_USES`                | Number of requests before automatically switching accounts (`0` to disable).                                                                                                                                                                                          | `40`      |
 | `FAILURE_THRESHOLD`             | Number of consecutive failures before switching accounts (`0` to disable).                                                                                                                                                                                            | `3`       |
 | `IMMEDIATE_SWITCH_STATUS_CODES` | HTTP status codes that trigger immediate account switching (comma-separated, set to empty to disable).                                                                                                                                                                | `429,503` |
-| `MAX_CONTEXTS`                  | Maximum number of accounts that can be logged in simultaneously. Accounts logged in simultaneously can switch faster without re-login. Higher values consume more memory (approx: 1 account ~700MB, 2 accounts ~950MB, 3 accounts ~1100MB). Set to `0` for unlimited. | `1`       |
+| `MAX_CONTEXTS`                  | Maximum number of accounts that can be logged in simultaneously. Accounts logged in simultaneously can switch faster without re-login. Higher values consume more memory (approx: 1 account ~300MB, 2 accounts ~550MB, 3 accounts ~750MB). Set to `0` for unlimited. | `1`       |
 | `HTTP_PROXY`                    | HTTP proxy address for accessing Google services.                                                                                                                                                                                                                     | None      |
 | `HTTPS_PROXY`                   | HTTPS proxy address for accessing Google services.                                                                                                                                                                                                                    | None      |
 | `NO_PROXY`                      | Comma-separated list of addresses to bypass the proxy. The project automatically bypasses local addresses (localhost, 127.0.0.1 and 0.0.0.0), so manual local bypass configuration is usually not required.                                                           | None      |
@@ -258,7 +254,7 @@ This endpoint forwards requests to the official Gemini API format endpoint.
 | `FORCE_THINKING`           | Force enable thinking mode for all requests.                                                                               | `false`       |
 | `FORCE_WEB_SEARCH`         | Force enable web search for all requests.                                                                                  | `false`       |
 | `FORCE_URL_CONTEXT`        | Force enable URL context for all requests.                                                                                 | `false`       |
-| `CAMOUFOX_EXECUTABLE_PATH` | Path to the Camoufox browser executable (supports both absolute and relative paths). Only required if manually downloaded. | Auto-detected |
+| `BROWSER_EXECUTABLE_PATH` | Path to the Chromium browser executable (supports both absolute and relative paths). Only required when using a custom browser path. | Auto-detected |
 
 ### ⚡ Account Auto-fill
 
@@ -266,7 +262,7 @@ To simplify the login process for multiple accounts, you can configure the `user
 
 1. Create `users.csv` in the project root.
 2. Format: `email,password` (one per line).
-3. Run `npm run setup-auth` and select the account when prompted.
+3. Run `npm run extract-auth` and select the account when prompted.
 
 > 📖 For detailed configuration instructions, see: [Account Auto-fill Guide](docs/en/auto-fill-guide.md)
 

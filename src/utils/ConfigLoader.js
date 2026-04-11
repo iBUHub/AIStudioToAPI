@@ -75,7 +75,11 @@ class ConfigLoader {
             const parsed = parseInt(process.env.MAX_CONTEXTS, 10);
             config.maxContexts = Number.isFinite(parsed) ? Math.max(0, parsed) : config.maxContexts;
         }
-        if (process.env.CAMOUFOX_EXECUTABLE_PATH) config.browserExecutablePath = process.env.CAMOUFOX_EXECUTABLE_PATH;
+        if (process.env.BROWSER_EXECUTABLE_PATH) {
+            config.browserExecutablePath = process.env.BROWSER_EXECUTABLE_PATH;
+        } else if (process.env.CAMOUFOX_EXECUTABLE_PATH) {
+            config.browserExecutablePath = process.env.CAMOUFOX_EXECUTABLE_PATH;
+        }
         if (process.env.API_KEYS) {
             config.apiKeys = process.env.API_KEYS.split(",");
         }

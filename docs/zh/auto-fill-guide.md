@@ -19,7 +19,7 @@ your-email-2@gmail.com,your-password-2
 运行设置脚本：
 
 ```bash
-npm run setup-auth
+npm run extract-auth
 ```
 
 在控制台中，根据提示选择要使用的账号即可。脚本将自动打开浏览器并填入所选账号的凭据。

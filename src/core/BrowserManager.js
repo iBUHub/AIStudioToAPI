@@ -1,13 +1,13 @@
 /**
  * File: src/core/BrowserManager.js
- * Description: Browser manager for launching and controlling headless Firefox instances with authentication contexts
+ * Description: Browser manager for launching and controlling headless Chromium instances with authentication contexts
  *
  * Author: Ellinav, iBenzene, bbbugg, 挈挈
  */
 
 const fs = require("fs");
 const path = require("path");
-const { firefox, devices } = require("playwright");
+const { chromium } = require("patchright");
 const os = require("os");
 
 const { parseProxyFromEnv } = require("../utils/ProxyUtils");
@@ -69,68 +69,24 @@ class BrowserManager {
         // Target URL for AI Studio app
         this.targetUrl = "https://ai.studio/apps/c48c6178-8dad-4d16-8de7-bb78d265482c";
 
-        // Firefox/Camoufox does not use Chromium-style command line args.
-        // We keep this empty; Camoufox has its own anti-fingerprinting optimizations built-in.
-        this.launchArgs = [];
+        // Chromium launch args for performance optimization
+        this.launchArgs = [
+            "--disable-background-timer-throttling",
+            "--disable-backgrounding-occluded-windows",
+            "--disable-renderer-backgrounding",
+            "--disable-gpu",
+            "--disable-software-rasterizer",
+            "--dns-prefetch-disable",
+            "--disable-dev-shm-usage",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--disable-sync",
+            "--metrics-recording-only",
+            "--mute-audio",
+        ];
 
-        // Firefox-specific preferences for optimization (passed to firefox.launch)
-        this.firefoxUserPrefs = {
-            "app.update.enabled": false, // Disable auto updates
-            "browser.cache.disk.enable": false, // Disable disk cache
-            "browser.ping-centre.telemetry": false, // Disable ping telemetry
-            "browser.safebrowsing.enabled": false, // Disable safe browsing
-            "browser.safebrowsing.malware.enabled": false, // Disable malware check
-            "browser.safebrowsing.phishing.enabled": false, // Disable phishing check
-            "browser.search.update": false, // Disable search engine auto-update
-            "browser.shell.checkDefaultBrowser": false, // Skip default browser check
-            "browser.tabs.warnOnClose": false, // No warning on closing tabs
-            "datareporting.policy.dataSubmissionEnabled": false, // Disable data reporting
-            "dom.min_background_timeout_value": 1, // Disable background tab timer throttling (default: 1000ms)
-            "dom.min_timeout_value": 1, // Reduce global minimum timer interval (default: 4ms per HTML5 spec)
-            "dom.min_tracking_background_timeout_value": 1, // Disable tracking script background throttling (default: 10000ms)
-            "dom.timeout.background_budget_regeneration_rate": 200, // Increase budget regeneration rate to prevent budget exhaustion
-            "dom.timeout.background_throttling_max_budget": 100, // Increase max timer budget to reduce throttling frequency
-            "dom.timeout.budget_throttling_max_delay": 0, // Disable budget-based forced delay (default: 11250ms)
-            "dom.timeout.throttling_delay": 2147483647, // Prevent throttling from ever activating (default: 50ms)
-            "dom.webnotifications.enabled": false, // Disable notifications
-            "extensions.update.enabled": false, // Disable extension auto-update
-            "general.smoothScroll": false, // Disable smooth scrolling
-            "gfx.webrender.all": false, // Disable WebRender (GPU-based renderer)
-            "layers.acceleration.disabled": true, // Disable GPU hardware acceleration
-            "media.autoplay.default": 5, // 5 = Block all autoplay
-            "media.volume_scale": "0.0", // Mute audio
-            "network.dns.disablePrefetch": true, // Disable DNS prefetching
-            "network.http.speculative-parallel-limit": 0, // Disable speculative connections
-            "network.prefetch-next": false, // Disable link prefetching
-            "permissions.default.geo": 0, // 0 = Always deny geolocation
-            "services.sync.enabled": false, // Disable Firefox Sync
-            "toolkit.cosmeticAnimations.enabled": false, // Disable UI animations
-            "toolkit.telemetry.archive.enabled": false, // Disable telemetry archive
-            "toolkit.telemetry.enabled": false, // Disable telemetry
-            "toolkit.telemetry.unified": false, // Disable unified telemetry
-        };
-
-        if (this.config.browserExecutablePath) {
-            this.browserExecutablePath = this.config.browserExecutablePath;
-        } else {
-            const platform = os.platform();
-            if (platform === "linux") {
-                this.browserExecutablePath = path.join(process.cwd(), "camoufox-linux", "camoufox");
-            } else if (platform === "win32") {
-                this.browserExecutablePath = path.join(process.cwd(), "camoufox", "camoufox.exe");
-            } else if (platform === "darwin") {
-                this.browserExecutablePath = path.join(
-                    process.cwd(),
-                    "camoufox-macos",
-                    "Camoufox.app",
-                    "Contents",
-                    "MacOS",
-                    "camoufox"
-                );
-            } else {
-                throw new Error(`Unsupported operating system: ${platform}`);
-            }
-        }
+        // Use custom executable path if provided, otherwise let patchright use its bundled Chromium
+        this.browserExecutablePath = this.config.browserExecutablePath || null;
     }
 
     get currentAuthIndex() {
@@ -1293,58 +1249,6 @@ class BrowserManager {
         }
     }
 
-    async launchBrowserForVNC(extraArgs = {}) {
-        this.logger.info("🚀 [VNC] Launching a new, separate, headful browser instance for VNC session...");
-        if (!fs.existsSync(this.browserExecutablePath)) {
-            throw new Error(`Browser executable not found at path: ${this.browserExecutablePath}`);
-        }
-
-        const proxyConfig = parseProxyFromEnv();
-        if (proxyConfig) {
-            this.logger.info(`[VNC] 🌐 Using proxy: ${proxyConfig.server}`);
-        }
-
-        // This browser instance is temporary and specific to the VNC session.
-        // It does NOT affect the main `this.browser` used for the API proxy.
-        const vncBrowser = await firefox.launch({
-            args: this.launchArgs,
-            env: {
-                ...process.env,
-                ...extraArgs.env,
-            },
-            executablePath: this.browserExecutablePath,
-            firefoxUserPrefs: this.firefoxUserPrefs,
-            // Must be false for VNC to be visible.
-            headless: false,
-            ...(proxyConfig ? { proxy: proxyConfig } : {}),
-        });
-
-        vncBrowser.on("disconnected", () => {
-            this.logger.warn("ℹ️ [VNC] The temporary VNC browser instance has been disconnected.");
-        });
-
-        this.logger.info("✅ [VNC] Temporary VNC browser instance launched successfully.");
-
-        let contextOptions = {};
-        if (extraArgs.isMobile) {
-            this.logger.info("[VNC] Mobile device detected. Applying mobile user-agent, viewport, and touch events.");
-            const mobileDevice = devices["Pixel 5"];
-            contextOptions = {
-                hasTouch: mobileDevice.hasTouch,
-                userAgent: mobileDevice.userAgent,
-                viewport: { height: 915, width: 412 }, // Set a specific portrait viewport
-            };
-        }
-
-        const context = await vncBrowser.newContext(
-            proxyConfig ? { ...contextOptions, proxy: proxyConfig } : contextOptions
-        );
-        this.logger.info("✅ [VNC] VNC browser context successfully created.");
-
-        // Return both the browser and context so the caller can manage their lifecycle.
-        return { browser: vncBrowser, context };
-    }
-
     /**
      * Preload a pool of contexts at startup
      * Synchronously initializes the first context, then starts remaining in background
@@ -1460,14 +1364,13 @@ class BrowserManager {
 
         const proxyConfig = parseProxyFromEnv();
         this.logger.info("🚀 [Browser] Launching main browser instance...");
-        if (!fs.existsSync(this.browserExecutablePath)) {
+        if (this.browserExecutablePath && !fs.existsSync(this.browserExecutablePath)) {
             this._currentAuthIndex = -1;
             throw new Error(`Browser executable not found at path: ${this.browserExecutablePath}`);
         }
-        this.browser = await firefox.launch({
+        this.browser = await chromium.launch({
             args: this.launchArgs,
-            executablePath: this.browserExecutablePath,
-            firefoxUserPrefs: this.firefoxUserPrefs,
+            ...(this.browserExecutablePath ? { executablePath: this.browserExecutablePath } : {}),
             headless: true,
             ...(proxyConfig ? { proxy: proxyConfig } : {}),
         });

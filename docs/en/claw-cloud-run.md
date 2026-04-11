@@ -15,7 +15,7 @@ This guide will help you deploy the `aistudio-to-api` service on [Claw Cloud Run
    - **CPU**: `0.5`
    - **Memory**: `1G`
 
-   > 💡 **Tip**: If you need to log in via VNC, **1G Memory** might not be sufficient for the browser. It is recommended to temporarily adjust the configuration to **0.2 CPU / 2G Memory** for the VNC login process, and then revert to **0.5 CPU / 1G Memory** after logging in.
+   > 💡 **Tip**: If you need multiple accounts logged in simultaneously (`MAX_CONTEXTS` > 1), you may need to increase the memory allocation.
 
    **Network**:
    - **Container Port**: `7860`
@@ -49,17 +49,11 @@ This guide will help you deploy the `aistudio-to-api` service on [Claw Cloud Run
 
 ## 🔑 Account Management
 
-After deployment, you need to add Google accounts. There are two methods:
+After deployment, you need to add Google accounts by uploading auth files:
 
-**Method 1: VNC-Based Login (Recommended)**
+**Upload Auth Files**
 
-- Access the deployed service address in your browser and click the "Add User" button
-- You'll be redirected to a VNC page with a browser instance
-- Log in to your Google account, then click the "Save" button after login is complete
-
-**Method 2: Upload Auth Files**
-
-- Run `npm run setup-auth` on your local machine to generate auth files (refer to steps 1 and 2 of [Run Directly](../../README_EN.md#-run-directly-windows--macos--linux) in the main README), the auth files are in `/configs/auth`
+- Run `npm run extract-auth` on your local machine to extract auth files (refer to steps 1 through 3 of [Run Directly](../../README_EN.md#-run-directly-windows--macos--linux) in the main README), the auth files are in `configs/auth`
 - In the web console, click "Upload Auth" to upload the auth JSON file
 
 > 💡 **Tip**: You can also download auth files from an existing server and upload them to a new server. Click the "Download Auth" button for the corresponding account in the web console to download the auth file.

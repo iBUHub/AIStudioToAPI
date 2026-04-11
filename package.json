@@ -13,8 +13,7 @@
         "preview:ui": "vite preview",
         "start": "cross-env NODE_ENV=production node main.js",
         "prestart": "npm run build:ui",
-        "save-auth": "node scripts/auth/saveAuth.js",
-        "setup-auth": "node scripts/auth/setupAuth.js",
+        "extract-auth": "node scripts/auth/extractAuth.js",
         "prepare": "husky install",
         "lint": "eslint . && stylelint \"ui/**/*.{css,less}\"",
         "lint:fix": "eslint . --fix && stylelint \"ui/**/*.{css,less}\" --fix",
@@ -35,7 +34,7 @@
         "express-session": "^1.18.0",
         "jszip": "^3.10.1",
         "mime-types": "^3.0.2",
-        "playwright": "^1.53.1",
+        "patchright": "^1.53.1",
         "ws": "^8.17.0"
     },
     "devDependencies": {

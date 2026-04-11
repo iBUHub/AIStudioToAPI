@@ -11,7 +11,7 @@
 - 👥 **多账号支持**：支持多个 Google 账号同时登录，快速切换无需重新登录
 - 🔧 **支持工具调用**：OpenAI、Gemini 和 Anthropic 接口均支持 Tool Calls (Function Calling)
 - 📝 **模型支持**：通过 AI Studio 访问各种 Gemini 模型，包括生图模型和 TTS 语音合成模型
-- 🎨 **主页展示控制**：提供可视化的 Web 控制台，支持账号管理、VNC 登录等操作
+- 🎨 **主页展示控制**：提供可视化的 Web 控制台，支持账号管理、认证文件上传等操作
 
 ## 🚀 快速开始
 
@@ -24,24 +24,27 @@
    cd AIStudioToAPI
    ```
 
-2. 运行快速设置脚本：
+2. 安装 Chromium 浏览器：
 
    ```bash
-   npm run setup-auth
+   npx patchright install chromium
    ```
 
-   该脚本将：
-   - 自动下载 Camoufox 浏览器（一个注重隐私的 Firefox 分支）
-   - 启动浏览器并自动导航到 AI Studio
-   - 在本地保存您的身份验证凭据（auth 文件位于 `/configs/auth`）
+3. 提取身份验证凭据：
 
-   > 💡 **提示：** 如果下载 Camoufox 浏览器失败或等待太久，可以自行点击 [此处](https://github.com/daijro/camoufox/releases/tag/v135.0.1-beta.24) 下载，然后设置环境变量 `CAMOUFOX_EXECUTABLE_PATH` 为可执行文件的路径（支持绝对和相对路径）。
+   ```bash
+   npm run extract-auth
+   ```
 
-3. 配置环境变量（可选）：
+   该脚本将从您的浏览器中提取 Google 账号的身份验证凭据，并保存到 `configs/auth` 目录。
+
+   > 💡 **提示：** 如果需要使用自定义的 Chromium 浏览器路径，可以设置环境变量 `BROWSER_EXECUTABLE_PATH` 为可执行文件的路径（支持绝对和相对路径）。
+
+4. 配置环境变量（可选）：
 
    复制根目录下的 `.env.example` 为 `.env`，并在 `.env` 中按需修改配置（如端口、API 密钥等）。
 
-4. 启动服务：
+5. 启动服务：
 
    ```bash
    npm start
@@ -52,14 +55,14 @@
    服务启动后，您可以在浏览器中访问 `http://localhost:7860` 打开 Web 控制台主页，在这里可以查看账号状态和服务状态。
    请求统计数据会持久化保存到 `/data/usage-stats.jsonl`。
 
-5. 更新到最新版本（已有本地部署时）：
+6. 更新到最新版本（已有本地部署时）：
 
    ```bash
    git pull
    npm install
    ```
 
-> ⚠ **注意：** 直接运行不支持通过 VNC 在线添加账号，需要使用 `npm run setup-auth` 脚本添加账号。当前 VNC 登录功能仅在 Docker 容器中可用。
+> ⚠ **注意：** 直接运行需要使用 `npm run extract-auth` 脚本提取认证文件来添加账号。
 
 ### 🐋 Docker 部署
 
@@ -146,18 +149,11 @@ services:
 
 #### 🔑 步骤 2：账号管理
 
-部署后，您需要使用以下方式之一添加 Google 账号：
+部署后，您需要通过上传认证文件来添加 Google 账号：
 
-**方法 1：VNC 登录（推荐）**
+**上传认证文件**
 
-- 在浏览器中访问部署的服务地址（例如 `http://your-server:7860`）并点击「添加账号」按钮
-- 将跳转到 VNC 页面，显示浏览器实例
-- 登录您的 Google 账号，登录完成后点击「保存」按钮
-- 账号将自动保存为 `auth-N.json`（N 从 0 开始）
-
-**方法 2：上传认证文件**
-
-- 在本地机器上运行 `npm run setup-auth` 生成认证文件（参考 [直接运行](#-直接运行windows--macos--linux) 的 1 和 2），认证文件在 `/configs/auth`
+- 在本地机器上运行 `npm run extract-auth` 提取认证文件（参考 [直接运行](#-直接运行windows--macos--linux) 的 1 至 3），认证文件在 `configs/auth`
 - 在网页控制台，点击「上传 Auth」，上传 auth 的 JSON 文件，或手动上传到挂载的 `/path/to/auth` 目录
 
 > 💡 **提示**：您也可以从已有的容器下载 auth 文件，然后上传到新的容器。在网页控制台点击对应账号的「下载 Auth」按钮即可下载 auth 文件。
@@ -247,7 +243,7 @@ services:
 | `SWITCH_ON_USES`                | 自动切换帐户前允许的请求次数（设为 `0` 禁用）。                                                                                                                     | `40`      |
 | `FAILURE_THRESHOLD`             | 切换帐户前允许的连续失败次数（设为 `0` 禁用）。                                                                                                                     | `3`       |
 | `IMMEDIATE_SWITCH_STATUS_CODES` | 触发立即切换帐户的 HTTP 状态码（逗号分隔，设为空值以禁用）。                                                                                                        | `429,503` |
-| `MAX_CONTEXTS`                  | 最大同时登录的账号数量。同时登录的账号切换更快，无需重新登录。数值越大内存消耗越高（约：1 个账号 ~700MB，2 个账号 ~950MB，3 个账号 ~1100MB）。设为 `0` 表示无限制。 | `1`       |
+| `MAX_CONTEXTS`                  | 最大同时登录的账号数量。同时登录的账号切换更快，无需重新登录。数值越大内存消耗越高（约：1 个账号 ~300MB，2 个账号 ~550MB，3 个账号 ~750MB）。设为 `0` 表示无限制。 | `1`       |
 | `HTTP_PROXY`                    | 用于访问 Google 服务的 HTTP 代理地址。                                                                                                                              | 无        |
 | `HTTPS_PROXY`                   | 用于访问 Google 服务的 HTTPS 代理地址。                                                                                                                             | 无        |
 | `NO_PROXY`                      | 不经过代理的地址列表（逗号分隔）。项目已内置自动绕过本地地址（localhost, 127.0.0.1, 0.0.0.0），通常无需手动配置本地绕过。                                           | 无        |
@@ -260,7 +256,7 @@ services:
 | `FORCE_THINKING`           | 强制为所有请求启用思考模式。                                                        | `false`  |
 | `FORCE_WEB_SEARCH`         | 强制为所有请求启用网络搜索。                                                        | `false`  |
 | `FORCE_URL_CONTEXT`        | 强制为所有请求启用 URL 上下文。                                                     | `false`  |
-| `CAMOUFOX_EXECUTABLE_PATH` | Camoufox 浏览器的可执行文件路径（支持绝对或相对路径）。仅在手动下载浏览器时需配置。 | 自动检测 |
+| `BROWSER_EXECUTABLE_PATH` | Chromium 浏览器的可执行文件路径（支持绝对或相对路径）。仅在使用自定义浏览器路径时需配置。 | 自动检测 |
 
 ### ⚡ 账号自动填充
 
@@ -268,7 +264,7 @@ services:
 
 1. 在项目根目录创建 `users.csv`。
 2. 格式为：`email,password`（每行一个）。
-3. 运行 `npm run setup-auth` 后按提示选择账号。
+3. 运行 `npm run extract-auth` 后按提示选择账号。
 
 > 📖 详细配置说明请参阅：[账号自动填充指南](docs/zh/auto-fill-guide.md)
 

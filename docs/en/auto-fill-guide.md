@@ -19,7 +19,7 @@ your-email-2@gmail.com,your-password-2
 Run the setup script:
 
 ```bash
-npm run setup-auth
+npm run extract-auth
 ```
 
 When prompted in the terminal, select the account you want to use. The script will automatically open the browser and fill in the selected account's credentials.

@@ -43,7 +43,7 @@ server {
         # 禁用缓冲区以支持流式响应
         proxy_buffering off;
 
-	    # WebSocket 支持（访问 VNC 时需要）
+	    # WebSocket 支持
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "Upgrade";
@@ -91,7 +91,7 @@ location / {
     # 禁用缓冲区
     proxy_buffering off;
 
-	# WebSocket 支持（访问 VNC 时需要）
+	# WebSocket 支持
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "Upgrade";
