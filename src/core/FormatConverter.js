@@ -62,15 +62,15 @@ class FormatConverter {
 
     /**
      * Parse streaming mode suffix from model name.
-     * Supports `-real` or `-fake` (case-insensitive) after any thinking suffix has been applied,
-     * and before an optional trailing `-search` suffix is stripped. The combined suffix order is:
-     * thinking -> streaming -> search.
+     * Only matches a trailing `-real` or `-fake` (case-insensitive).
+     * Callers should strip any trailing `-search` suffix before invoking this helper, so the
+     * combined suffix order remains: thinking -> streaming -> search.
      *
      * Examples:
      * - gemini-3-flash-preview-minimal-fake -> { cleanModelName: "gemini-3-flash-preview-minimal", streamingMode: "fake" }
      * - gemini-3-flash-preview(minimal)-fake -> { cleanModelName: "gemini-3-flash-preview(minimal)", streamingMode: "fake" }
      * - gemini-3-flash-preview-fake-minimal -> no match (thinking must come before streaming)
-     * - gemini-3-flash-preview(minimal)-fake-search -> parse `-fake` after stripping the trailing `-search`
+     * - gemini-3-flash-preview(minimal)-fake-search -> no direct match here; callers strip `-search` first
      *
      * @param {string} modelName - Original model name
      * @returns {{ cleanModelName: string, streamingMode: ("real"|"fake"|null) }}

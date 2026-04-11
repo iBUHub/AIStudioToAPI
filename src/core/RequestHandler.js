@@ -3557,7 +3557,6 @@ class RequestHandler {
             const rawModelName = modelPathMatch[2];
             const pathSuffix = modelPathMatch[3];
 
-            const FormatConverter = require("./FormatConverter");
             const { cleanModelName: searchStrippedModel, forceWebSearch: parsedForceWebSearch } =
                 FormatConverter.parseModelWebSearchSuffix(rawModelName);
             const { cleanModelName: streamStrippedModel, streamingMode: parsedStreamingMode } =
