@@ -56,16 +56,6 @@ class ScreencastAuth {
      * Handle a new WebSocket connection for screencast
      */
     async handleConnection(ws) {
-        // Screencast requires headed mode (headless: false) which needs a display server.
-        // In Docker/headless environments without X server, reject early with a clear message.
-        if (process.env.DISPLAY === undefined && process.platform === "linux") {
-            this._sendStatus(ws, "error",
-                "Screencast login is not available in headless environments (no display server). " +
-                "Please use auth file upload instead.");
-            ws.close();
-            return;
-        }
-
         if (this.session) {
             this._sendStatus(ws, "error", "Another screencast session is already active.");
             ws.close();
@@ -111,9 +101,13 @@ class ScreencastAuth {
         const browserManager = this.serverSystem.browserManager;
         const proxyConfig = parseProxyFromEnv();
 
+        // Use headed mode on desktop (bypasses Google anti-automation detection).
+        // Fall back to headless in Docker/headless environments (no X server).
+        // Patchright's headless mode has built-in anti-detection, so login still works.
+        const hasDisplay = process.platform !== "linux" || !!process.env.DISPLAY;
         const launchOptions = {
             args: [...browserManager.launchArgs, "--disable-blink-features=AutomationControlled"],
-            headless: false,
+            headless: !hasDisplay,
             ...(browserManager.browserExecutablePath
                 ? { executablePath: browserManager.browserExecutablePath }
                 : {}),
