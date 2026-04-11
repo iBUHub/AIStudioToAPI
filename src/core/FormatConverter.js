@@ -62,11 +62,15 @@ class FormatConverter {
 
     /**
      * Parse streaming mode suffix from model name.
-     * Only supports the LAST hyphen token: `-real` or `-fake` (case-insensitive).
+     * Supports `-real` or `-fake` (case-insensitive) after any thinking suffix has been applied,
+     * and before an optional trailing `-search` suffix is stripped. The combined suffix order is:
+     * thinking -> streaming -> search.
      *
      * Examples:
      * - gemini-3-flash-preview-minimal-fake -> { cleanModelName: "gemini-3-flash-preview-minimal", streamingMode: "fake" }
-     * - gemini-3-flash-preview-fake-minimal -> no match (streaming suffix must be last)
+     * - gemini-3-flash-preview(minimal)-fake -> { cleanModelName: "gemini-3-flash-preview(minimal)", streamingMode: "fake" }
+     * - gemini-3-flash-preview-fake-minimal -> no match (thinking must come before streaming)
+     * - gemini-3-flash-preview(minimal)-fake-search -> parse `-fake` after stripping the trailing `-search`
      *
      * @param {string} modelName - Original model name
      * @returns {{ cleanModelName: string, streamingMode: ("real"|"fake"|null) }}
@@ -474,10 +478,11 @@ class FormatConverter {
         // [DEBUG] Log incoming messages for troubleshooting
         this.logger.debug(`[Adapter] Debug: incoming OpenAI Body = ${JSON.stringify(openaiBody, null, 2)}`);
 
-        // Parse model suffixes in fixed order:
-        // 1) web search override: only `-search` at the end
-        // 2) streaming override: only `-real` / `-fake` at the end
-        // 3) thinkingLevel override: `-minimal` / `(minimal)` etc.
+        // Parse model suffixes in reverse stripping order:
+        // 1) web search override: only trailing `-search`
+        // 2) streaming override: trailing `-real` / `-fake` after any thinking suffix
+        // 3) thinkingLevel override: trailing `-minimal` / `(minimal)` etc.
+        // Combined user-facing suffix order: thinking -> streaming -> search
         const rawModel = openaiBody.model || "gemini-2.5-flash-lite";
         const { cleanModelName: searchStrippedModel, forceWebSearch: modelForceWebSearch } =
             FormatConverter.parseModelWebSearchSuffix(rawModel);
@@ -937,6 +942,12 @@ class FormatConverter {
      * 2. Apply safety settings
      * 3. Log final request body
      * @param {object} googleRequest - The Gemini request object to finalize
+     * @param {object} [options={}] - Per-request tool injection overrides.
+     * @param {boolean} [options.forceWebSearch] - When truthy, force-enable `googleSearch` for this request even
+     * if `serverSystem.forceWebSearch` is disabled. Falsy values fall back to the global setting. Current callers
+     * use this for model-name-driven overrides such as the `-search` suffix.
+     * @param {boolean} [options.forceUrlContext] - When truthy, force-enable `urlContext` for this request even if
+     * `serverSystem.forceUrlContext` is disabled. Falsy values fall back to the global setting.
      * @private
      */
     _finalizeGoogleRequest(googleRequest, options = {}) {
@@ -2019,10 +2030,11 @@ class FormatConverter {
         // [DEBUG] Log incoming messages
         this.logger.debug(`[Adapter] Debug: incoming Claude Body = ${JSON.stringify(claudeBody, null, 2)}`);
 
-        // Parse model suffixes in fixed order:
-        // 1) web search override: only `-search` at the end
-        // 2) streaming override: only `-real` / `-fake` at the end
-        // 3) thinkingLevel override: `-minimal` / `(minimal)` etc.
+        // Parse model suffixes in reverse stripping order:
+        // 1) web search override: only trailing `-search`
+        // 2) streaming override: trailing `-real` / `-fake` after any thinking suffix
+        // 3) thinkingLevel override: trailing `-minimal` / `(minimal)` etc.
+        // Combined user-facing suffix order: thinking -> streaming -> search
         const rawModel = claudeBody.model || "gemini-2.5-flash-lite";
         const { cleanModelName: searchStrippedModel, forceWebSearch: modelForceWebSearch } =
             FormatConverter.parseModelWebSearchSuffix(rawModel);
@@ -2802,10 +2814,11 @@ class FormatConverter {
             `[Adapter] Debug: incoming OpenAI Response API Body = ${JSON.stringify(responseBody, null, 2)}`
         );
 
-        // Parse model suffixes in fixed order:
-        // 1) web search override: only `-search` at the end
-        // 2) streaming override: only `-real` / `-fake` at the end
-        // 3) thinkingLevel override: `-minimal` / `(minimal)` etc.
+        // Parse model suffixes in reverse stripping order:
+        // 1) web search override: only trailing `-search`
+        // 2) streaming override: trailing `-real` / `-fake` after any thinking suffix
+        // 3) thinkingLevel override: trailing `-minimal` / `(minimal)` etc.
+        // Combined user-facing suffix order: thinking -> streaming -> search
         const rawModel = responseBody.model || "gemini-2.5-flash-lite";
         const { cleanModelName: searchStrippedModel, forceWebSearch: modelForceWebSearch } =
             FormatConverter.parseModelWebSearchSuffix(rawModel);
