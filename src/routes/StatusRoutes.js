@@ -174,7 +174,6 @@ class StatusRoutes {
                 snapshot || {
                     accounts: [],
                     records: [],
-                    startedAt: new Date().toISOString(),
                     summary: {
                         abortedCount: 0,
                         activeRequests: 0,

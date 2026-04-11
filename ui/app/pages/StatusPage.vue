@@ -6621,10 +6621,6 @@ watchEffect(() => {
         */
         height: calc(100vh - 106px); /* Keeping the old logic for mobile specific height if needed */
     }
-
-    .stats-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
 }
 
 // Media query: Desktop (>=768px)

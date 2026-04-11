@@ -14,6 +14,7 @@ class UsageStatsService {
         this.logger = logger;
         this.dataDir = dataDir || path.join(process.cwd(), "data");
         this.statsFilePath = path.join(this.dataDir, "usage-stats.jsonl");
+        this.appendPromise = Promise.resolve();
 
         // Ensure data directory exists
         if (!fs.existsSync(this.dataDir)) {
@@ -204,7 +205,7 @@ class UsageStatsService {
             }))
             .sort((a, b) => {
                 if (b.totalRequests !== a.totalRequests) return b.totalRequests - a.totalRequests;
-                return b.lastUsedAt.localeCompare(a.lastUsedAt);
+                return (b.lastUsedAt || "").localeCompare(a.lastUsedAt || "");
             });
 
         return {
@@ -262,13 +263,15 @@ class UsageStatsService {
     }
 
     _appendRecord(record) {
-        try {
-            fs.appendFileSync(this.statsFilePath, JSON.stringify(record) + "\n", "utf-8");
-        } catch (err) {
-            if (this.logger) {
-                this.logger.warn(`[UsageStats] Failed to append record: ${err.message}`);
-            }
-        }
+        const line = JSON.stringify(record) + "\n";
+        this.appendPromise = this.appendPromise
+            .catch(() => {})
+            .then(() => fs.promises.appendFile(this.statsFilePath, line, "utf-8"))
+            .catch(err => {
+                if (this.logger) {
+                    this.logger.warn(`[UsageStats] Failed to append record: ${err.message}`);
+                }
+            });
     }
 
     _recalculateFromRecords() {
