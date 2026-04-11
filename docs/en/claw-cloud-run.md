@@ -22,10 +22,12 @@ This guide will help you deploy the `aistudio-to-api` service on [Claw Cloud Run
    - **Public Access**: Toggle **On** (Leave the URL usage as is).
 
    **Local Storage**:
-   - **Capacity**：1
-   - **Mount Path**：/app/configs/auth
-   - **Capacity**：1
-   - **Mount Path**：/app/data
+   - **Storage 1**
+     - **Capacity**：1
+     - **Mount Path**：/app/configs/auth
+   - **Storage 2**
+     - **Capacity**：1
+     - **Mount Path**：/app/data
 
    **Environment Variables**:
 
