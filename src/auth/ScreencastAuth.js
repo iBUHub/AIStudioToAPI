@@ -56,6 +56,16 @@ class ScreencastAuth {
      * Handle a new WebSocket connection for screencast
      */
     async handleConnection(ws) {
+        // Screencast requires headed mode (headless: false) which needs a display server.
+        // In Docker/headless environments without X server, reject early with a clear message.
+        if (process.env.DISPLAY === undefined && process.platform === "linux") {
+            this._sendStatus(ws, "error",
+                "Screencast login is not available in headless environments (no display server). " +
+                "Please use auth file upload instead.");
+            ws.close();
+            return;
+        }
+
         if (this.session) {
             this._sendStatus(ws, "error", "Another screencast session is already active.");
             ws.close();
