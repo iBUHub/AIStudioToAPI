@@ -6104,6 +6104,10 @@ watchEffect(() => {
     }
 }
 
+.records-scroll-wrapper {
+    max-height: none !important;
+}
+
 .fixed-header-table {
     width: max-content;
     min-width: 100%;
