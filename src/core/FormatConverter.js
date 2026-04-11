@@ -37,6 +37,30 @@ class FormatConverter {
     };
 
     /**
+     * Parse web search suffix from model name.
+     * Only supports the LAST hyphen token: `-search` (case-insensitive).
+     *
+     * Examples:
+     * - gemini-3-flash-preview-minimal-search -> { cleanModelName: "gemini-3-flash-preview-minimal", forceWebSearch: true }
+     * - gemini-3-flash-preview-search-minimal -> no match (search suffix must be last)
+     *
+     * @param {string} modelName - Original model name
+     * @returns {{ cleanModelName: string, forceWebSearch: boolean }}
+     */
+    static parseModelWebSearchSuffix(modelName) {
+        if (!modelName || typeof modelName !== "string") {
+            return { cleanModelName: modelName, forceWebSearch: false };
+        }
+
+        const match = modelName.match(/^(.+)-search$/i);
+        if (!match) {
+            return { cleanModelName: modelName, forceWebSearch: false };
+        }
+
+        return { cleanModelName: match[1], forceWebSearch: true };
+    }
+
+    /**
      * Parse streaming mode suffix from model name.
      * Only supports the LAST hyphen token: `-real` or `-fake` (case-insensitive).
      *
@@ -170,6 +194,28 @@ class FormatConverter {
                         Object.prototype.hasOwnProperty.call(tool, toolKey)
                     )
             )
+        );
+    }
+
+    static hasGeminiToolKey(tool, keys) {
+        return !!(
+            tool &&
+            typeof tool === "object" &&
+            keys.some(toolKey => Object.prototype.hasOwnProperty.call(tool, toolKey))
+        );
+    }
+
+    static hasGeminiGoogleSearchTool(tools) {
+        return (
+            Array.isArray(tools) &&
+            tools.some(tool => FormatConverter.hasGeminiToolKey(tool, ["googleSearch", "google_search"]))
+        );
+    }
+
+    static hasGeminiUrlContextTool(tools) {
+        return (
+            Array.isArray(tools) &&
+            tools.some(tool => FormatConverter.hasGeminiToolKey(tool, ["urlContext", "url_context"]))
         );
     }
 
@@ -429,17 +475,25 @@ class FormatConverter {
         this.logger.debug(`[Adapter] Debug: incoming OpenAI Body = ${JSON.stringify(openaiBody, null, 2)}`);
 
         // Parse model suffixes in fixed order:
-        // 1) streaming override: only `-real` / `-fake` at the end
-        // 2) thinkingLevel override: `-minimal` / `(minimal)` etc.
+        // 1) web search override: only `-search` at the end
+        // 2) streaming override: only `-real` / `-fake` at the end
+        // 3) thinkingLevel override: `-minimal` / `(minimal)` etc.
         const rawModel = openaiBody.model || "gemini-2.5-flash-lite";
+        const { cleanModelName: searchStrippedModel, forceWebSearch: modelForceWebSearch } =
+            FormatConverter.parseModelWebSearchSuffix(rawModel);
         const { cleanModelName: streamStrippedModel, streamingMode: modelStreamingMode } =
-            FormatConverter.parseModelStreamingModeSuffix(rawModel);
+            FormatConverter.parseModelStreamingModeSuffix(searchStrippedModel);
         const { cleanModelName, thinkingLevel: modelThinkingLevel } =
             FormatConverter.parseModelThinkingLevel(streamStrippedModel);
 
+        if (modelForceWebSearch) {
+            this.logger.info(
+                `[Adapter] Detected webSearch suffix in model name: "${rawModel}" -> model="${searchStrippedModel}", forceWebSearch=true`
+            );
+        }
         if (modelStreamingMode) {
             this.logger.info(
-                `[Adapter] Detected streamingMode suffix in model name: "${rawModel}" -> model="${streamStrippedModel}", streamingMode="${modelStreamingMode}"`
+                `[Adapter] Detected streamingMode suffix in model name: "${searchStrippedModel}" -> model="${streamStrippedModel}", streamingMode="${modelStreamingMode}"`
             );
         }
         if (modelThinkingLevel) {
@@ -872,7 +926,7 @@ class FormatConverter {
             }
         }
 
-        this._finalizeGoogleRequest(googleRequest);
+        this._finalizeGoogleRequest(googleRequest, { forceWebSearch: modelForceWebSearch });
         this.logger.info("[Adapter] OpenAI to Google translation complete.");
         return { cleanModelName, googleRequest, modelStreamingMode };
     }
@@ -885,9 +939,12 @@ class FormatConverter {
      * @param {object} googleRequest - The Gemini request object to finalize
      * @private
      */
-    _finalizeGoogleRequest(googleRequest) {
+    _finalizeGoogleRequest(googleRequest, options = {}) {
+        const forceWebSearch = options.forceWebSearch || this.serverSystem.forceWebSearch;
+        const forceUrlContext = options.forceUrlContext || this.serverSystem.forceUrlContext;
+
         // Force web search and URL context
-        if (this.serverSystem.forceWebSearch || this.serverSystem.forceUrlContext) {
+        if (forceWebSearch || forceUrlContext) {
             if (!googleRequest.tools) {
                 googleRequest.tools = [];
             }
@@ -895,8 +952,8 @@ class FormatConverter {
             const toolsToAdd = [];
 
             // Handle Google Search
-            if (this.serverSystem.forceWebSearch) {
-                const hasSearch = googleRequest.tools.some(t => t.googleSearch);
+            if (forceWebSearch) {
+                const hasSearch = FormatConverter.hasGeminiGoogleSearchTool(googleRequest.tools);
                 if (!hasSearch) {
                     googleRequest.tools.push({ googleSearch: {} });
                     toolsToAdd.push("googleSearch");
@@ -904,8 +961,8 @@ class FormatConverter {
             }
 
             // Handle URL Context
-            if (this.serverSystem.forceUrlContext) {
-                const hasUrlContext = googleRequest.tools.some(t => t.urlContext);
+            if (forceUrlContext) {
+                const hasUrlContext = FormatConverter.hasGeminiUrlContextTool(googleRequest.tools);
                 if (!hasUrlContext) {
                     googleRequest.tools.push({ urlContext: {} });
                     toolsToAdd.push("urlContext");
@@ -1963,17 +2020,25 @@ class FormatConverter {
         this.logger.debug(`[Adapter] Debug: incoming Claude Body = ${JSON.stringify(claudeBody, null, 2)}`);
 
         // Parse model suffixes in fixed order:
-        // 1) streaming override: only `-real` / `-fake` at the end
-        // 2) thinkingLevel override: `-minimal` / `(minimal)` etc.
+        // 1) web search override: only `-search` at the end
+        // 2) streaming override: only `-real` / `-fake` at the end
+        // 3) thinkingLevel override: `-minimal` / `(minimal)` etc.
         const rawModel = claudeBody.model || "gemini-2.5-flash-lite";
+        const { cleanModelName: searchStrippedModel, forceWebSearch: modelForceWebSearch } =
+            FormatConverter.parseModelWebSearchSuffix(rawModel);
         const { cleanModelName: streamStrippedModel, streamingMode: modelStreamingMode } =
-            FormatConverter.parseModelStreamingModeSuffix(rawModel);
+            FormatConverter.parseModelStreamingModeSuffix(searchStrippedModel);
         const { cleanModelName, thinkingLevel: modelThinkingLevel } =
             FormatConverter.parseModelThinkingLevel(streamStrippedModel);
 
+        if (modelForceWebSearch) {
+            this.logger.info(
+                `[Adapter] Detected webSearch suffix in model name: "${rawModel}" -> model="${searchStrippedModel}", forceWebSearch=true`
+            );
+        }
         if (modelStreamingMode) {
             this.logger.info(
-                `[Adapter] Detected streamingMode suffix in model name: "${rawModel}" -> model="${streamStrippedModel}", streamingMode="${modelStreamingMode}"`
+                `[Adapter] Detected streamingMode suffix in model name: "${searchStrippedModel}" -> model="${streamStrippedModel}", streamingMode="${modelStreamingMode}"`
             );
         }
         if (modelThinkingLevel) {
@@ -2337,7 +2402,7 @@ class FormatConverter {
             // If web search tool was found, ensure googleSearch is added to tools
             if (hasWebSearchTool) {
                 if (!googleRequest.tools) googleRequest.tools = [];
-                if (!googleRequest.tools.some(t => t.googleSearch)) {
+                if (!FormatConverter.hasGeminiGoogleSearchTool(googleRequest.tools)) {
                     googleRequest.tools.push({ googleSearch: {} });
                 }
             }
@@ -2345,7 +2410,7 @@ class FormatConverter {
             // If web fetch tool was found, ensure urlContext is added to tools
             if (hasUrlContextTool) {
                 if (!googleRequest.tools) googleRequest.tools = [];
-                if (!googleRequest.tools.some(t => t.urlContext)) {
+                if (!FormatConverter.hasGeminiUrlContextTool(googleRequest.tools)) {
                     googleRequest.tools.push({ urlContext: {} });
                 }
             }
@@ -2379,7 +2444,7 @@ class FormatConverter {
             );
         }
 
-        this._finalizeGoogleRequest(googleRequest);
+        this._finalizeGoogleRequest(googleRequest, { forceWebSearch: modelForceWebSearch });
         this.logger.info("[Adapter] Claude to Google translation complete.");
         return { cleanModelName, googleRequest, modelStreamingMode };
     }
@@ -2738,17 +2803,25 @@ class FormatConverter {
         );
 
         // Parse model suffixes in fixed order:
-        // 1) streaming override: only `-real` / `-fake` at the end
-        // 2) thinkingLevel override: `-minimal` / `(minimal)` etc.
+        // 1) web search override: only `-search` at the end
+        // 2) streaming override: only `-real` / `-fake` at the end
+        // 3) thinkingLevel override: `-minimal` / `(minimal)` etc.
         const rawModel = responseBody.model || "gemini-2.5-flash-lite";
+        const { cleanModelName: searchStrippedModel, forceWebSearch: modelForceWebSearch } =
+            FormatConverter.parseModelWebSearchSuffix(rawModel);
         const { cleanModelName: streamStrippedModel, streamingMode: modelStreamingMode } =
-            FormatConverter.parseModelStreamingModeSuffix(rawModel);
+            FormatConverter.parseModelStreamingModeSuffix(searchStrippedModel);
         const { cleanModelName, thinkingLevel: modelThinkingLevel } =
             FormatConverter.parseModelThinkingLevel(streamStrippedModel);
 
+        if (modelForceWebSearch) {
+            this.logger.info(
+                `[Adapter] Detected webSearch suffix in model name: "${rawModel}" -> model="${searchStrippedModel}", forceWebSearch=true`
+            );
+        }
         if (modelStreamingMode) {
             this.logger.info(
-                `[Adapter] Detected streamingMode suffix in model name: "${rawModel}" -> model="${streamStrippedModel}", streamingMode="${modelStreamingMode}"`
+                `[Adapter] Detected streamingMode suffix in model name: "${searchStrippedModel}" -> model="${streamStrippedModel}", streamingMode="${modelStreamingMode}"`
             );
         }
         if (modelThinkingLevel) {
@@ -3098,8 +3171,10 @@ class FormatConverter {
                 if (!googleRequest.tools) {
                     googleRequest.tools = [];
                 }
-                googleRequest.tools.push({ googleSearch: {} });
-                this.logger.info("[Adapter] Added googleSearch tool for OpenAI Response API web_search_preview");
+                if (!FormatConverter.hasGeminiGoogleSearchTool(googleRequest.tools)) {
+                    googleRequest.tools.push({ googleSearch: {} });
+                    this.logger.info("[Adapter] Added googleSearch tool for OpenAI Response API web_search_preview");
+                }
             }
         }
 
@@ -3109,11 +3184,7 @@ class FormatConverter {
 
             const ensureGoogleSearchTool = () => {
                 if (!googleRequest.tools) googleRequest.tools = [];
-                if (
-                    !googleRequest.tools.some(
-                        t => t && typeof t === "object" && Object.prototype.hasOwnProperty.call(t, "googleSearch")
-                    )
-                ) {
+                if (!FormatConverter.hasGeminiGoogleSearchTool(googleRequest.tools)) {
                     googleRequest.tools.push({ googleSearch: {} });
                 }
             };
@@ -3227,7 +3298,7 @@ class FormatConverter {
             }
         }
 
-        this._finalizeGoogleRequest(googleRequest);
+        this._finalizeGoogleRequest(googleRequest, { forceWebSearch: modelForceWebSearch });
         this.logger.info("[Adapter] OpenAI Response API to Google translation complete.");
         return { cleanModelName, googleRequest, modelStreamingMode };
     }

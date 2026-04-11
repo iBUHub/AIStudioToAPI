@@ -3543,13 +3543,14 @@ class RequestHandler {
 
         this.logger.debug(`[Proxy] Debug: incoming Gemini Body (Google Native) = ${JSON.stringify(bodyObj, null, 2)}`);
 
-        // Parse thinkingLevel suffix from model name in native Gemini generation requests
+        // Parse model suffixes from model name in native Gemini generation requests
         // Only handle generation requests: /v1beta/models/{modelName}:generateContent or :streamGenerateContent
         const modelPathMatch = cleanPath.match(
             /^(\/v1beta\/models\/)([^:]+)(:(generateContent|streamGenerateContent).*)$/
         );
         let modelThinkingLevel = null;
         let modelStreamingMode = null;
+        let modelForceWebSearch = false;
 
         if (modelPathMatch) {
             const pathPrefix = modelPathMatch[1];
@@ -3557,16 +3558,25 @@ class RequestHandler {
             const pathSuffix = modelPathMatch[3];
 
             const FormatConverter = require("./FormatConverter");
+            const { cleanModelName: searchStrippedModel, forceWebSearch: parsedForceWebSearch } =
+                FormatConverter.parseModelWebSearchSuffix(rawModelName);
             const { cleanModelName: streamStrippedModel, streamingMode: parsedStreamingMode } =
-                FormatConverter.parseModelStreamingModeSuffix(rawModelName);
+                FormatConverter.parseModelStreamingModeSuffix(searchStrippedModel);
             const { cleanModelName, thinkingLevel: parsedThinkingLevel } =
                 FormatConverter.parseModelThinkingLevel(streamStrippedModel);
+            modelForceWebSearch = parsedForceWebSearch;
             modelStreamingMode = parsedStreamingMode;
             modelThinkingLevel = parsedThinkingLevel;
 
+            if (modelForceWebSearch) {
+                this.logger.info(
+                    `[Proxy] Detected webSearch suffix in model path: "${rawModelName}" -> model="${searchStrippedModel}", forceWebSearch=true`
+                );
+            }
+
             if (modelStreamingMode) {
                 this.logger.info(
-                    `[Proxy] Detected streamingMode suffix in model path: "${rawModelName}" -> model="${streamStrippedModel}", streamingMode="${modelStreamingMode}"`
+                    `[Proxy] Detected streamingMode suffix in model path: "${searchStrippedModel}" -> model="${streamStrippedModel}", streamingMode="${modelStreamingMode}"`
                 );
             }
 
@@ -3629,7 +3639,7 @@ class RequestHandler {
 
         // Force web search and URL context for native Google requests
         if (
-            (this.serverSystem.forceWebSearch || this.serverSystem.forceUrlContext) &&
+            (this.serverSystem.forceWebSearch || modelForceWebSearch || this.serverSystem.forceUrlContext) &&
             req.method === "POST" &&
             bodyObj &&
             bodyObj.contents
@@ -3641,8 +3651,8 @@ class RequestHandler {
             const toolsToAdd = [];
 
             // Handle Google Search
-            if (this.serverSystem.forceWebSearch) {
-                const hasSearch = bodyObj.tools.some(t => t.googleSearch);
+            if (this.serverSystem.forceWebSearch || modelForceWebSearch) {
+                const hasSearch = FormatConverter.hasGeminiGoogleSearchTool(bodyObj.tools);
                 if (!hasSearch) {
                     bodyObj.tools.push({ googleSearch: {} });
                     toolsToAdd.push("googleSearch");
@@ -3655,7 +3665,7 @@ class RequestHandler {
 
             // Handle URL Context
             if (this.serverSystem.forceUrlContext) {
-                const hasUrlContext = bodyObj.tools.some(t => t.urlContext);
+                const hasUrlContext = FormatConverter.hasGeminiUrlContextTool(bodyObj.tools);
                 if (!hasUrlContext) {
                     bodyObj.tools.push({ urlContext: {} });
                     toolsToAdd.push("urlContext");
