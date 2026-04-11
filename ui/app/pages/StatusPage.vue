@@ -3063,8 +3063,14 @@ const filteredAccounts = computed(() => {
 const translateLabel = value => {
     if (!value) return "-";
     if (value === EMPTY_FILTER_VALUE) return t("emptyValue");
-    // Map streamMode backend values to i18n keys
-    const keyMap = { fake: "fakeStream", non: "nonStream", real: "realStream" };
+    // Map backend identifiers to user-facing i18n keys
+    const keyMap = {
+        count_tokens: "countTokens",
+        fake: "fakeStream",
+        non: "nonStream",
+        real: "realStream",
+        response_api: "responseApi",
+    };
     const keyToTranslate = keyMap[value] || (value === "error" ? "failed" : value);
     const translated = t(keyToTranslate);
     return translated === keyToTranslate ? value : translated;
