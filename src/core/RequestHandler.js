@@ -160,6 +160,15 @@ class RequestHandler {
         res.__usageTrackingErrorMessage = message;
     }
 
+    _markTrackedEarlyExitIfNeeded(res, message = "Service temporarily unavailable.", statusCode = 503) {
+        if (!res || res.__usageTrackingClientAborted || res.__usageTrackingOutcome) return;
+        if (!this._isResponseWritable(res)) {
+            this._markTrackedClientAbort(res, message);
+            return;
+        }
+        this._markTrackedResponseError(res, message, statusCode);
+    }
+
     // Delegate methods to AuthSwitcher
     async _switchToNextAuth() {
         return this.authSwitcher.switchToNextAuth();
@@ -746,13 +755,22 @@ class RequestHandler {
             if (!this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex)) {
                 this.logger.warn(`[Request] No WebSocket connection for current account #${this.currentAuthIndex}`);
                 const recovered = await this._handleBrowserRecovery(res);
-                if (!recovered) return;
+                if (!recovered) {
+                    this._markTrackedEarlyExitIfNeeded(
+                        res,
+                        "Service temporarily unavailable: Browser recovery failed."
+                    );
+                    return;
+                }
             }
 
             // Wait for system to become ready if it's busy
             {
                 const ready = await this._waitForSystemAndConnectionIfBusy(res);
-                if (!ready) return;
+                if (!ready) {
+                    this._markTrackedEarlyExitIfNeeded(res, "Service temporarily unavailable: System not ready.");
+                    return;
+                }
             }
             if (this.browserManager) {
                 this.browserManager.notifyUserActivity();
@@ -855,13 +873,22 @@ class RequestHandler {
             if (!this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex)) {
                 this.logger.warn(`[Upload] No WebSocket connection for current account #${this.currentAuthIndex}`);
                 const recovered = await this._handleBrowserRecovery(res);
-                if (!recovered) return;
+                if (!recovered) {
+                    this._markTrackedEarlyExitIfNeeded(
+                        res,
+                        "Service temporarily unavailable: Browser recovery failed."
+                    );
+                    return;
+                }
             }
 
             // Wait for system to become ready if it's busy
             {
                 const ready = await this._waitForSystemAndConnectionIfBusy(res);
-                if (!ready) return;
+                if (!ready) {
+                    this._markTrackedEarlyExitIfNeeded(res, "Service temporarily unavailable: System not ready.");
+                    return;
+                }
             }
 
             if (this.browserManager) {
@@ -920,13 +947,22 @@ class RequestHandler {
             if (!this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex)) {
                 this.logger.warn(`[Request] No WebSocket connection for current account #${this.currentAuthIndex}`);
                 const recovered = await this._handleBrowserRecovery(res);
-                if (!recovered) return;
+                if (!recovered) {
+                    this._markTrackedEarlyExitIfNeeded(
+                        res,
+                        "Service temporarily unavailable: Browser recovery failed."
+                    );
+                    return;
+                }
             }
 
             // Wait for system to become ready if it's busy
             {
                 const ready = await this._waitForSystemAndConnectionIfBusy(res);
-                if (!ready) return;
+                if (!ready) {
+                    this._markTrackedEarlyExitIfNeeded(res, "Service temporarily unavailable: System not ready.");
+                    return;
+                }
             }
             if (this.browserManager) {
                 this.browserManager.notifyUserActivity();
@@ -1267,13 +1303,22 @@ class RequestHandler {
             if (!this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex)) {
                 this.logger.warn(`[Request] No WebSocket connection for current account #${this.currentAuthIndex}`);
                 const recovered = await this._handleBrowserRecovery(res);
-                if (!recovered) return;
+                if (!recovered) {
+                    this._markTrackedEarlyExitIfNeeded(
+                        res,
+                        "Service temporarily unavailable: Browser recovery failed."
+                    );
+                    return;
+                }
             }
 
             // Wait for system to become ready if it's busy
             {
                 const ready = await this._waitForSystemAndConnectionIfBusy(res);
-                if (!ready) return;
+                if (!ready) {
+                    this._markTrackedEarlyExitIfNeeded(res, "Service temporarily unavailable: System not ready.");
+                    return;
+                }
             }
             if (this.browserManager) {
                 this.browserManager.notifyUserActivity();
@@ -1681,7 +1726,13 @@ class RequestHandler {
             if (!this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex)) {
                 this.logger.warn(`[Request] No WebSocket connection for current account #${this.currentAuthIndex}`);
                 const recovered = await this._handleBrowserRecovery(res);
-                if (!recovered) return;
+                if (!recovered) {
+                    this._markTrackedEarlyExitIfNeeded(
+                        res,
+                        "Service temporarily unavailable: Browser recovery failed."
+                    );
+                    return;
+                }
             }
 
             // Wait for system to become ready if it's busy
@@ -1690,7 +1741,10 @@ class RequestHandler {
                     sendError: (status, message) =>
                         this._sendClaudeErrorResponse(res, status, "overloaded_error", message),
                 });
-                if (!ready) return;
+                if (!ready) {
+                    this._markTrackedEarlyExitIfNeeded(res, "Service temporarily unavailable: System not ready.");
+                    return;
+                }
             }
 
             if (this.browserManager) {
@@ -2031,7 +2085,13 @@ class RequestHandler {
             if (!this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex)) {
                 this.logger.warn(`[Request] No WebSocket connection for current account #${this.currentAuthIndex}`);
                 const recovered = await this._handleBrowserRecovery(res);
-                if (!recovered) return;
+                if (!recovered) {
+                    this._markTrackedEarlyExitIfNeeded(
+                        res,
+                        "Service temporarily unavailable: Browser recovery failed."
+                    );
+                    return;
+                }
             }
 
             // Wait for system to become ready if it's busy
@@ -2040,7 +2100,10 @@ class RequestHandler {
                     sendError: (status, message) =>
                         this._sendClaudeErrorResponse(res, status, "overloaded_error", message),
                 });
-                if (!ready) return;
+                if (!ready) {
+                    this._markTrackedEarlyExitIfNeeded(res, "Service temporarily unavailable: System not ready.");
+                    return;
+                }
             }
 
             if (this.browserManager) {
@@ -2182,13 +2245,22 @@ class RequestHandler {
             if (!this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex)) {
                 this.logger.warn(`[Request] No WebSocket connection for current account #${this.currentAuthIndex}`);
                 const recovered = await this._handleBrowserRecovery(res);
-                if (!recovered) return;
+                if (!recovered) {
+                    this._markTrackedEarlyExitIfNeeded(
+                        res,
+                        "Service temporarily unavailable: Browser recovery failed."
+                    );
+                    return;
+                }
             }
 
             // Wait for system to become ready if it's busy
             {
                 const ready = await this._waitForSystemAndConnectionIfBusy(res);
-                if (!ready) return;
+                if (!ready) {
+                    this._markTrackedEarlyExitIfNeeded(res, "Service temporarily unavailable: System not ready.");
+                    return;
+                }
             }
 
             if (this.browserManager) {
