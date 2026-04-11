@@ -10,6 +10,7 @@ const path = require("path");
 const archiver = require("archiver");
 const VersionChecker = require("../utils/VersionChecker");
 const LoggingService = require("../utils/LoggingService");
+const UsageStatsService = require("../core/UsageStatsService");
 
 /**
  * Status Routes Manager
@@ -170,25 +171,7 @@ class StatusRoutes {
 
         app.get("/api/usage-stats", isAuthenticated, (req, res) => {
             const snapshot = this.serverSystem.usageStatsService?.getSnapshot();
-            res.json(
-                snapshot || {
-                    accounts: [],
-                    records: [],
-                    summary: {
-                        abortedCount: 0,
-                        activeRequests: 0,
-                        avgDurationMs: 0,
-                        errorCount: 0,
-                        formatBreakdown: [],
-                        requestCategoryBreakdown: [],
-                        successCount: 0,
-                        successRate: 0,
-                        totalRequests: 0,
-                        uniqueAccountPairs: 0,
-                        uptimeSeconds: 0,
-                    },
-                }
-            );
+            res.json(snapshot || UsageStatsService.createEmptySnapshot());
         });
 
         app.put("/api/accounts/current", isAuthenticated, async (req, res) => {

@@ -9,20 +9,23 @@ const fs = require("fs");
 const path = require("path");
 
 class UsageStatsService {
-    constructor(authSource, logger, dataDir) {
+    constructor(authSource, logger, dataDir, enabled = true) {
         this.authSource = authSource;
         this.logger = logger;
         this.dataDir = dataDir || path.join(process.cwd(), "data");
         this.statsFilePath = path.join(this.dataDir, "usage-stats.jsonl");
+        this.enabled = enabled !== false;
         this.appendPromise = Promise.resolve();
 
-        // Ensure data directory exists
-        if (!fs.existsSync(this.dataDir)) {
-            fs.mkdirSync(this.dataDir, { recursive: true });
-        }
+        if (this.enabled) {
+            // Ensure data directory exists
+            if (!fs.existsSync(this.dataDir)) {
+                fs.mkdirSync(this.dataDir, { recursive: true });
+            }
 
-        // Load persisted state
-        this._loadFromFile();
+            // Load persisted state
+            this._loadFromFile();
+        }
 
         if (!this.startedAt) {
             this.startedAtMs = Date.now();
@@ -58,6 +61,7 @@ class UsageStatsService {
     }
 
     startRequest(requestId, meta = {}) {
+        if (!this.enabled) return null;
         if (!requestId) return null;
 
         const tracker = {
@@ -83,6 +87,7 @@ class UsageStatsService {
     }
 
     updateRequest(requestId, patch = {}) {
+        if (!this.enabled) return;
         const tracker = this.activeRequests.get(requestId);
         if (!tracker) return;
 
@@ -105,6 +110,7 @@ class UsageStatsService {
     }
 
     recordAttempt(requestId, authIndex, accountName = undefined) {
+        if (!this.enabled) return;
         const tracker = this.activeRequests.get(requestId);
         if (!tracker) return;
 
@@ -120,6 +126,7 @@ class UsageStatsService {
     }
 
     finishRequest(requestId, result = {}) {
+        if (!this.enabled) return null;
         const tracker = this.activeRequests.get(requestId);
         if (!tracker) return null;
 
@@ -179,6 +186,10 @@ class UsageStatsService {
     }
 
     getSnapshot() {
+        if (!this.enabled) {
+            return UsageStatsService.createEmptySnapshot();
+        }
+
         const totalRequests = this.summary.totalRequests;
         const avgDurationMs = totalRequests > 0 ? Math.round(this.summary.totalDurationMs / totalRequests) : 0;
         const successRate =
@@ -230,6 +241,7 @@ class UsageStatsService {
     }
 
     _loadFromFile() {
+        if (!this.enabled) return;
         try {
             if (!fs.existsSync(this.statsFilePath)) return;
 
@@ -263,6 +275,7 @@ class UsageStatsService {
     }
 
     _appendRecord(record) {
+        if (!this.enabled) return;
         const line = JSON.stringify(record) + "\n";
         this.appendPromise = this.appendPromise
             .catch(() => {})
@@ -405,6 +418,27 @@ class UsageStatsService {
         const authIndex = Number(accountKey.slice(0, colonIdx));
         const accountName = accountKey.slice(colonIdx + 1);
         return { accountName, authIndex: Number.isFinite(authIndex) ? authIndex : null };
+    }
+
+    static createEmptySnapshot() {
+        return {
+            accounts: [],
+            records: [],
+            startedAt: null,
+            summary: {
+                abortedCount: 0,
+                activeRequests: 0,
+                avgDurationMs: 0,
+                errorCount: 0,
+                formatBreakdown: [],
+                requestCategoryBreakdown: [],
+                successCount: 0,
+                successRate: 0,
+                totalRequests: 0,
+                uniqueAccountPairs: 0,
+                uptimeSeconds: 0,
+            },
+        };
     }
 }
 

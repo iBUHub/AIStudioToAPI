@@ -42,7 +42,12 @@ class ProxyServerSystem extends EventEmitter {
 
         this.authSource = new AuthSource(this.logger);
         this.browserManager = new BrowserManager(this.logger, this.config, this.authSource);
-        this.usageStatsService = new UsageStatsService(this.authSource, this.logger, path.join(process.cwd(), "data"));
+        this.usageStatsService = new UsageStatsService(
+            this.authSource,
+            this.logger,
+            path.join(process.cwd(), "data"),
+            this.config.enableUsageStats
+        );
 
         // Create ConnectionRegistry with lightweight reconnect callback
         // When WebSocket connection is lost but browser is still running,

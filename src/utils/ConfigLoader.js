@@ -24,6 +24,7 @@ class ConfigLoader {
             apiKeySource: "Not set",
             browserExecutablePath: null,
             enableAuthUpdate: true,
+            enableUsageStats: true,
             failureThreshold: 3,
             forceThinking: false,
             forceUrlContext: false,
@@ -84,6 +85,8 @@ class ConfigLoader {
             config.forceUrlContext = process.env.FORCE_URL_CONTEXT.toLowerCase() === "true";
         if (process.env.ENABLE_AUTH_UPDATE)
             config.enableAuthUpdate = process.env.ENABLE_AUTH_UPDATE.toLowerCase() !== "false";
+        if (process.env.ENABLE_USAGE_STATS)
+            config.enableUsageStats = process.env.ENABLE_USAGE_STATS.toLowerCase() !== "false";
 
         let rawCodes = process.env.IMMEDIATE_SWITCH_STATUS_CODES;
         let codesSource = "environment variable";
@@ -161,6 +164,7 @@ class ConfigLoader {
         this.logger.info(`  Force Web Search: ${config.forceWebSearch}`);
         this.logger.info(`  Force URL Context: ${config.forceUrlContext}`);
         this.logger.info(`  Auto Update Auth: ${config.enableAuthUpdate}`);
+        this.logger.info(`  Usage Stats: ${config.enableUsageStats}`);
         this.logger.info(`  Max Contexts: ${config.maxContexts === 0 ? "Unlimited" : config.maxContexts}`);
         this.logger.info(
             `  Usage-based Switch Threshold: ${
