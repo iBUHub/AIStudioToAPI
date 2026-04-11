@@ -2767,7 +2767,7 @@ class RequestHandler {
                             );
                             return;
                         }
-                        this.logger.info(`[Request] Sent ${thinkingParts.length} thinking part(s).`);
+                        this.logger.debug(`[Request] Sent ${thinkingParts.length} thinking part(s).`);
                     }
 
                     // Then send content part
@@ -2799,7 +2799,7 @@ class RequestHandler {
                             );
                             return;
                         }
-                        this.logger.info(`[Request] Sent ${contentParts.length} content part(s).`);
+                        this.logger.debug(`[Request] Sent ${contentParts.length} content part(s).`);
                     } else if (candidate.finishReason) {
                         // If there's no content but a finish reason, send an empty content message with it
                         const finalResponse = {
