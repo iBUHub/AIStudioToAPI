@@ -28,6 +28,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxrandr2 \
     libxss1 \
     libxtst6 \
+    fonts-noto-cjk \
+    xvfb \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 

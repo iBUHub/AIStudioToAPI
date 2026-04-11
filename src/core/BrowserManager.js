@@ -804,6 +804,16 @@ class BrowserManager {
                 name: "Continue to the app",
                 text: "Continue to the app",
             },
+            {
+                logFound: `${logPrefix} Found cookie consent button, clicking...`,
+                name: "Cookie consent",
+                text: "同意",
+            },
+            {
+                logFound: `${logPrefix} Found cookie consent (Accept) button, clicking...`,
+                name: "Cookie consent Accept",
+                text: "Accept",
+            },
         ];
 
         // Polling-based detection with smart exit conditions
@@ -920,7 +930,7 @@ class BrowserManager {
         try {
             this.logger.debug(`${logPrefix} 🔍 Checking for Launch button...`);
 
-            // Try to find Launch/Continue button with multiple selectors
+            // Try to find Launch/Continue/Open Canvas button with multiple selectors
             const launchSelectors = [
                 'button:text("Launch")',
                 'button:has-text("Launch")',
@@ -931,6 +941,10 @@ class BrowserManager {
                 'button:has-text("Continue")',
                 'button:text("继续")',
                 'button:has-text("继续")',
+                // Gemini Canvas entry buttons
+                'button:has-text("Open Gemini Canvas")',
+                'button:has-text("打开 Gemini Canvas")',
+                'button:has-text("Gemini Canvas")',
             ];
 
             let clicked = false;
@@ -1057,7 +1071,7 @@ class BrowserManager {
                             "div.cdk-global-overlay-wrapper",
                         ];
 
-                        const targetTexts = ["Reload", "Retry", "Got it", "Dismiss", "Not now", "Continue to the app"];
+                        const targetTexts = ["Reload", "Retry", "Got it", "Dismiss", "Not now", "Continue to the app", "Accept", "I agree", "同意"];
 
                         // Remove passive blockers
                         blockers.forEach(selector => {

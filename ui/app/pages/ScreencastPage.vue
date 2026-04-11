@@ -180,6 +180,13 @@ function onWheel(event) {
 
 // Keyboard handlers
 function onKeyDown(event) {
+    // Intercept Ctrl+V / Cmd+V for clipboard paste
+    if ((event.ctrlKey || event.metaKey) && event.key === "v") {
+        navigator.clipboard.readText().then(text => {
+            if (text) sendJSON({ type: "paste", text });
+        }).catch(() => {});
+        return;
+    }
     sendJSON({
         type: "key",
         event: "down",

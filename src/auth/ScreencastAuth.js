@@ -77,6 +77,11 @@ class ScreencastAuth {
             const cdpSession = await this.session.context.newCDPSession(this.session.page);
             this.session.cdpSession = cdpSession;
 
+            // Enable WebAuthn virtual environment with no authenticators registered.
+            // This causes all WebAuthn/Passkey requests to fail immediately instead of
+            // showing a native browser dialog that blocks all input in the screencast.
+            await cdpSession.send("WebAuthn.enable").catch(() => {});
+
             await this._startScreencast();
             this._sendStatus(ws, "ready");
 
@@ -101,13 +106,31 @@ class ScreencastAuth {
         const browserManager = this.serverSystem.browserManager;
         const proxyConfig = parseProxyFromEnv();
 
-        // Use headed mode on desktop (bypasses Google anti-automation detection).
-        // Fall back to headless in Docker/headless environments (no X server).
-        // Patchright's headless mode has built-in anti-detection, so login still works.
-        const hasDisplay = process.platform !== "linux" || !!process.env.DISPLAY;
+        // Always use headed mode (headless: false) to bypass Google's anti-automation detection.
+        // On Linux without a display (Docker), start a temporary Xvfb virtual framebuffer.
+        let xvfbProcess = null;
+        if (process.platform === "linux" && !process.env.DISPLAY) {
+            try {
+                const { spawn: spawnProcess } = require("child_process");
+                xvfbProcess = spawnProcess("Xvfb", [":99", "-screen", "0", "1280x800x24", "-nolisten", "tcp"], {
+                    stdio: "ignore",
+                });
+                process.env.DISPLAY = ":99";
+                await new Promise(r => setTimeout(r, 500)); // Wait for Xvfb to start
+                this.logger.info("[Screencast] Started Xvfb virtual display on :99");
+            } catch (e) {
+                this.logger.warn(`[Screencast] Xvfb not available (${e.message}), falling back to headless`);
+            }
+        }
+        this.session.xvfbProcess = xvfbProcess;
+
         const launchOptions = {
-            args: [...browserManager.launchArgs, "--disable-blink-features=AutomationControlled"],
-            headless: !hasDisplay,
+            args: [
+                ...browserManager.launchArgs,
+                "--disable-blink-features=AutomationControlled",
+                "--disable-features=WebAuthentication",
+            ],
+            headless: false,
             ...(browserManager.browserExecutablePath
                 ? { executablePath: browserManager.browserExecutablePath }
                 : {}),
@@ -185,7 +208,16 @@ class ScreencastAuth {
             case "navigate":
                 await this._navigate(msg.url);
                 break;
+            case "paste":
+                await this._handlePaste(msg.text);
+                break;
         }
+    }
+
+    async _handlePaste(text) {
+        const { cdpSession } = this.session;
+        if (!cdpSession || !text) return;
+        await cdpSession.send("Input.insertText", { text });
     }
 
     async _handleMouse(data) {
@@ -423,7 +455,7 @@ class ScreencastAuth {
 
     async cleanup() {
         if (!this.session) return;
-        const { cdpSession, context, browser, ws } = this.session;
+        const { cdpSession, context, browser, xvfbProcess, ws } = this.session;
         this.session = null;
 
         try {
@@ -431,6 +463,7 @@ class ScreencastAuth {
             if (cdpSession) await cdpSession.detach().catch(() => {});
             if (context) await context.close().catch(() => {});
             if (browser) await browser.close().catch(() => {});
+            if (xvfbProcess) xvfbProcess.kill();
             if (ws && ws.readyState <= 1) ws.close();
         } catch {
             // ignore cleanup errors
