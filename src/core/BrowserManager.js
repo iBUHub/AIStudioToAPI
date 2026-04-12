@@ -2041,12 +2041,12 @@ class BrowserManager {
             if (wsState && wsState.success) {
                 this.logger.info(`[Context#${authIndex}] ✅ WebSocket already initialized, skipping wait`);
             } else {
-                // Wait for WebSocket initialization (10 second timeout — short for local WS)
+                // Wait for WebSocket initialization (20 second timeout)
                 // This will throw an abort error if the context is aborted during wait
                 const initSuccess = await this._waitForWebSocketInit(
                     page,
                     `[Context#${authIndex}]`,
-                    10000,
+                    20000,
                     authIndex,
                     isBackgroundTask
                 );
