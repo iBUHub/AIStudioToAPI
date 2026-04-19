@@ -23,6 +23,7 @@ class ConfigLoader {
             apiKeys: [],
             apiKeySource: "Not set",
             browserExecutablePath: null,
+            checkUpdate: true,
             enableAuthUpdate: true,
             enableUsageStats: true,
             failureThreshold: 3,
@@ -80,6 +81,7 @@ class ConfigLoader {
         if (process.env.API_KEYS) {
             config.apiKeys = process.env.API_KEYS.split(",");
         }
+        if (process.env.CHECK_UPDATE) config.checkUpdate = process.env.CHECK_UPDATE.toLowerCase() !== "false";
         if (process.env.FORCE_THINKING) config.forceThinking = process.env.FORCE_THINKING.toLowerCase() === "true";
         if (process.env.FORCE_WEB_SEARCH) config.forceWebSearch = process.env.FORCE_WEB_SEARCH.toLowerCase() === "true";
         if (process.env.FORCE_URL_CONTEXT)
@@ -182,6 +184,7 @@ class ConfigLoader {
         this.logger.info(`  Force Thinking: ${config.forceThinking}`);
         this.logger.info(`  Force Web Search: ${config.forceWebSearch}`);
         this.logger.info(`  Force URL Context: ${config.forceUrlContext}`);
+        this.logger.info(`  Check Update: ${config.checkUpdate}`);
         this.logger.info(`  Default Safety Threshold: ${config.safetySettingsThreshold}`);
         this.logger.info(`  Auto Update Auth: ${config.enableAuthUpdate}`);
         this.logger.info(`  Usage Stats: ${config.enableUsageStats}`);

@@ -23,6 +23,14 @@ class StatusRoutes {
         this.config = serverSystem.config;
         this.distIndexPath = serverSystem.distIndexPath;
         this.versionChecker = new VersionChecker(this.logger);
+        this.allowedSafetyThresholds = new Set([
+            "HARM_BLOCK_THRESHOLD_UNSPECIFIED",
+            "BLOCK_LOW_AND_ABOVE",
+            "BLOCK_MEDIUM_AND_ABOVE",
+            "BLOCK_ONLY_HIGH",
+            "BLOCK_NONE",
+            "OFF",
+        ]);
     }
 
     _rejectIfSystemBusy(res) {
@@ -97,7 +105,7 @@ class StatusRoutes {
         // Version check endpoint - separate from status to avoid frequent calls
         app.get("/api/version/check", isAuthenticated, async (req, res) => {
             // Check if update checking is disabled via environment variable
-            const checkUpdate = process.env.CHECK_UPDATE?.toLowerCase() !== "false";
+            const checkUpdate = this.config.checkUpdate !== false;
             if (!checkUpdate) {
                 return res.status(200).json({
                     current: this.versionChecker.getCurrentVersion(),
@@ -660,6 +668,38 @@ class StatusRoutes {
             res.status(200).json({ message: "settingUpdateSuccess", setting: "forceUrlContext", value: statusText });
         });
 
+        app.put("/api/settings/check-update", isAuthenticated, (req, res) => {
+            this.config.checkUpdate = !this.config.checkUpdate;
+            const statusText = this.config.checkUpdate;
+            this.logger.info(`[WebUI] Check update toggle switched to: ${statusText}`);
+            res.status(200).json({ message: "settingUpdateSuccess", setting: "checkUpdate", value: statusText });
+        });
+
+        app.put("/api/settings/enable-auth-update", isAuthenticated, (req, res) => {
+            this.config.enableAuthUpdate = !this.config.enableAuthUpdate;
+            const statusText = this.config.enableAuthUpdate;
+            this.logger.info(`[WebUI] Enable auth update toggle switched to: ${statusText}`);
+            res.status(200).json({ message: "settingUpdateSuccess", setting: "enableAuthUpdate", value: statusText });
+        });
+
+        app.put("/api/settings/safety-settings-threshold", isAuthenticated, (req, res) => {
+            const newThreshold = String(req.body?.value || "")
+                .trim()
+                .toUpperCase();
+
+            if (!this.allowedSafetyThresholds.has(newThreshold)) {
+                return res.status(400).json({ error: "Invalid safety settings threshold", message: "settingFailed" });
+            }
+
+            this.config.safetySettingsThreshold = newThreshold;
+            this.logger.info(`[WebUI] Safety settings threshold updated to: ${newThreshold}`);
+            return res.status(200).json({
+                message: "settingUpdateSuccess",
+                setting: "safetySettingsThreshold",
+                value: newThreshold,
+            });
+        });
+
         app.put("/api/settings/debug-mode", isAuthenticated, (req, res) => {
             const currentLevel = LoggingService.getLevel();
             const newLevel = currentLevel === "DEBUG" ? "INFO" : "DEBUG";
@@ -891,10 +931,12 @@ class StatusRoutes {
                 activeContextsCount: browserManager.contexts.size,
                 apiKeySource: config.apiKeySource,
                 browserConnected: !!this.serverSystem.connectionRegistry.getConnectionByAuth(currentAuthIndex, false),
+                checkUpdate: config.checkUpdate,
                 currentAccountName,
                 currentAuthIndex,
                 debugMode: LoggingService.isDebugEnabled(),
                 duplicateIndicesRaw: duplicateIndices,
+                enableAuthUpdate: config.enableAuthUpdate,
                 expiredIndicesRaw: expiredIndices,
                 failureCount,
                 forceThinking: this.serverSystem.forceThinking,
@@ -911,6 +953,7 @@ class StatusRoutes {
                 maxContexts: config.maxContexts,
                 maxRetries: config.maxRetries,
                 rotationIndicesRaw: rotationIndices,
+                safetySettingsThreshold: config.safetySettingsThreshold,
                 streamingMode: this.serverSystem.streamingMode,
                 usageCount,
             },
