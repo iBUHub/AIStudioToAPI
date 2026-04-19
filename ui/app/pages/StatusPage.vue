@@ -1461,7 +1461,7 @@
                             </svg>
                             <span style="opacity: 0.8; margin-right: 4px">{{ t("uptime") }}:</span>
                             <span style="font-weight: 600; font-family: monospace">{{
-                                formatUptime(statsState.summary.uptimeSeconds)
+                                formatStatsUptime(statsState.startedAt, statsState.summary.uptimeSeconds)
                             }}</span>
                         </span>
                     </div>
@@ -3221,6 +3221,11 @@ const formatUptime = seconds => {
     if (hours > 0 || parts.length > 0) parts.push(`${hours}h`);
     parts.push(`${minutes}m`);
     return parts.join(" ");
+};
+
+const formatStatsUptime = (startedAt, seconds) => {
+    if (!startedAt) return "-";
+    return formatUptime(seconds);
 };
 
 const formatAccount = (authIndex, accountName) => {
