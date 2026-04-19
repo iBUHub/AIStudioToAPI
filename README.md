@@ -241,12 +241,10 @@ services:
 | :------------------------------ | :------------------------------------------------------------------------------------------------------------------------------------------------------------------ | :-------- |
 | `INITIAL_AUTH_INDEX`            | 启动时使用的初始身份验证索引。                                                                                                                                      | `0`       |
 | `ENABLE_AUTH_UPDATE`            | 是否启用自动保存凭证更新。默认为启用状态，将在每次登录/切换账号成功时以及每 24 小时自动更新 auth 文件。设为 `false` 禁用。                                          | `true`    |
-| `ENABLE_USAGE_STATS`            | 是否启用请求统计。默认为启用；设为 `false` 后，不读取本地统计、不写入统计，`/api/usage-stats` 返回空数据。                                                          | `true`    |
 | `MAX_RETRIES`                   | 请求失败后的最大重试次数（仅对假流式和非流式生效）。                                                                                                                | `3`       |
 | `RETRY_DELAY`                   | 两次重试之间的间隔（毫秒）。                                                                                                                                        | `2000`    |
 | `SWITCH_ON_USES`                | 自动切换帐户前允许的请求次数（设为 `0` 禁用）。                                                                                                                     | `40`      |
 | `FAILURE_THRESHOLD`             | 切换帐户前允许的连续失败次数（设为 `0` 禁用）。                                                                                                                     | `3`       |
-| `SAFETY_SETTINGS_THRESHOLD`     | 安全设置的等级。官方说明：[Safety settings](https://ai.google.dev/gemini-api/docs/safety-settings?hl=zh-cn)                                                         | `OFF`     |
 | `IMMEDIATE_SWITCH_STATUS_CODES` | 触发立即切换帐户的 HTTP 状态码（逗号分隔，设为空值以禁用）。                                                                                                        | `429,503` |
 | `MAX_CONTEXTS`                  | 最大同时登录的账号数量。同时登录的账号切换更快，无需重新登录。数值越大内存消耗越高（约：1 个账号 ~700MB，2 个账号 ~950MB，3 个账号 ~1100MB）。设为 `0` 表示无限制。 | `1`       |
 | `HTTP_PROXY`                    | 用于访问 Google 服务的 HTTP 代理地址。                                                                                                                              | 无        |
@@ -255,13 +253,15 @@ services:
 
 #### 🗒️ 其他配置
 
-| 变量名                     | 描述                                                                                | 默认值   |
-| :------------------------- | :---------------------------------------------------------------------------------- | :------- |
-| `STREAMING_MODE`           | 流式传输模式。`real` 为真流式，`fake` 为假流式。                                    | `real`   |
-| `FORCE_THINKING`           | 强制为所有请求启用思考模式。                                                        | `false`  |
-| `FORCE_WEB_SEARCH`         | 强制为所有请求启用网络搜索。                                                        | `false`  |
-| `FORCE_URL_CONTEXT`        | 强制为所有请求启用 URL 上下文。                                                     | `false`  |
-| `CAMOUFOX_EXECUTABLE_PATH` | Camoufox 浏览器的可执行文件路径（支持绝对或相对路径）。仅在手动下载浏览器时需配置。 | 自动检测 |
+| 变量名                      | 描述                                                                                                        | 默认值   |
+| :-------------------------- | :---------------------------------------------------------------------------------------------------------- | :------- |
+| `STREAMING_MODE`            | 流式传输模式。`real` 为真流式，`fake` 为假流式。                                                            | `real`   |
+| `ENABLE_USAGE_STATS`        | 是否启用请求统计。默认为启用；设为 `false` 后，不读取本地统计、不写入统计，`/api/usage-stats` 返回空数据。  | `true`   |
+| `SAFETY_SETTINGS_THRESHOLD` | 安全设置的等级。官方说明：[Safety settings](https://ai.google.dev/gemini-api/docs/safety-settings?hl=zh-cn) | `OFF`    |
+| `FORCE_THINKING`            | 强制为所有请求启用思考模式。                                                                                | `false`  |
+| `FORCE_WEB_SEARCH`          | 强制为所有请求启用网络搜索。                                                                                | `false`  |
+| `FORCE_URL_CONTEXT`         | 强制为所有请求启用 URL 上下文。                                                                             | `false`  |
+| `CAMOUFOX_EXECUTABLE_PATH`  | Camoufox 浏览器的可执行文件路径（支持绝对或相对路径）。仅在手动下载浏览器时需配置。                         | 自动检测 |
 
 ### ⚡ 账号自动填充
 
