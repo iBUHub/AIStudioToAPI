@@ -4068,12 +4068,7 @@ class RequestHandler {
 
         // Apply safety settings for native Google requests (only if not already provided)
         if (req.method === "POST" && bodyObj && bodyObj.contents && !bodyObj.safetySettings) {
-            bodyObj.safetySettings = [
-                { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-                { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-                { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-                { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
-            ];
+            bodyObj.safetySettings = this.formatConverter.getDefaultSafetySettings();
         }
 
         this.logger.debug(`[Proxy] Debug: Final Gemini Request (Google Native) = ${JSON.stringify(bodyObj, null, 2)}`);
