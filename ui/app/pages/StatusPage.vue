@@ -193,7 +193,7 @@
                                         stroke-width="2"
                                         stroke-linecap="round"
                                         stroke-linejoin="round"
-                                        style="margin-right: 6px"
+                                        style="margin-right: 6px; vertical-align: middle"
                                     >
                                         <path d="M20 8h-2"></path>
                                         <path d="M20 18h-2"></path>
@@ -220,7 +220,7 @@
                                         stroke-width="2"
                                         stroke-linecap="round"
                                         stroke-linejoin="round"
-                                        style="margin-right: 6px"
+                                        style="margin-right: 6px; vertical-align: middle"
                                     >
                                         <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path>
                                     </svg>
@@ -266,7 +266,7 @@
                                         stroke-width="2"
                                         stroke-linecap="round"
                                         stroke-linejoin="round"
-                                        style="margin-right: 6px"
+                                        style="margin-right: 6px; vertical-align: middle"
                                     >
                                         <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
                                         <circle cx="8.5" cy="7" r="4"></circle>
@@ -292,7 +292,7 @@
                                         stroke-width="2"
                                         stroke-linecap="round"
                                         stroke-linejoin="round"
-                                        style="margin-right: 6px"
+                                        style="margin-right: 6px; vertical-align: middle"
                                     >
                                         <line x1="18" y1="20" x2="18" y2="10"></line>
                                         <line x1="12" y1="20" x2="12" y2="4"></line>
@@ -317,7 +317,7 @@
                                         stroke-width="2"
                                         stroke-linecap="round"
                                         stroke-linejoin="round"
-                                        style="margin-right: 6px"
+                                        style="margin-right: 6px; vertical-align: middle"
                                     >
                                         <path
                                             d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"
@@ -344,7 +344,7 @@
                                         stroke-width="2"
                                         stroke-linecap="round"
                                         stroke-linejoin="round"
-                                        style="margin-right: 6px"
+                                        style="margin-right: 6px; vertical-align: middle"
                                     >
                                         <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
                                         <polyline points="2 17 12 22 22 17"></polyline>
@@ -366,7 +366,7 @@
                                         stroke-width="2"
                                         stroke-linecap="round"
                                         stroke-linejoin="round"
-                                        style="margin-right: 6px"
+                                        style="margin-right: 6px; vertical-align: middle"
                                     >
                                         <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
                                     </svg>
@@ -386,7 +386,7 @@
                                         stroke-width="2"
                                         stroke-linecap="round"
                                         stroke-linejoin="round"
-                                        style="margin-right: 6px"
+                                        style="margin-right: 6px; vertical-align: middle"
                                     >
                                         <rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect>
                                         <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path>
@@ -1098,6 +1098,89 @@
                         </div>
                     </div>
 
+                    <!-- System Settings Card -->
+                    <div class="status-card">
+                        <h3 class="card-title">
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="18"
+                                height="18"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                style="margin-right: 8px; vertical-align: text-bottom"
+                            >
+                                <rect x="3" y="4" width="18" height="16" rx="2"></rect>
+                                <path d="M7 8h10"></path>
+                                <path d="M7 12h10"></path>
+                                <path d="M7 16h6"></path>
+                            </svg>
+                            {{ t("systemSettings") }}
+                        </h3>
+                        <div class="settings-switches">
+                            <div class="switch-container">
+                                <span class="label">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="14"
+                                        height="14"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        style="margin-right: 6px; vertical-align: middle"
+                                    >
+                                        <path d="M21 12a9 9 0 1 1-9-9"></path>
+                                        <path d="M21 3v9h-9"></path>
+                                    </svg>
+                                    <span>
+                                        {{ t("checkUpdate") }}
+                                        <EnvVarTooltip env-var="CHECK_UPDATE" doc-section="app-config" />
+                                    </span>
+                                </span>
+                                <el-switch
+                                    v-model="state.checkUpdateEnabled"
+                                    :width="50"
+                                    :before-change="handleCheckUpdateBeforeChange"
+                                />
+                            </div>
+                            <div class="switch-container">
+                                <span class="label">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="14"
+                                        height="14"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        style="margin-right: 6px; vertical-align: middle"
+                                    >
+                                        <path d="M12 3v18"></path>
+                                        <path d="M17 8l-5-5-5 5"></path>
+                                        <path d="M17 16l-5 5-5-5"></path>
+                                    </svg>
+                                    <span>
+                                        {{ t("enableAuthUpdate") }}
+                                        <EnvVarTooltip env-var="ENABLE_AUTH_UPDATE" doc-section="proxy-config" />
+                                    </span>
+                                </span>
+                                <el-switch
+                                    v-model="state.enableAuthUpdateEnabled"
+                                    :width="50"
+                                    :before-change="handleEnableAuthUpdateBeforeChange"
+                                />
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Log Settings Card -->
                     <div class="status-card">
                         <h3 class="card-title">
@@ -1134,7 +1217,7 @@
                                         stroke-width="2"
                                         stroke-linecap="round"
                                         stroke-linejoin="round"
-                                        style="margin-right: 6px"
+                                        style="margin-right: 6px; vertical-align: middle"
                                     >
                                         <line x1="8" y1="6" x2="21" y2="6"></line>
                                         <line x1="8" y1="12" x2="21" y2="12"></line>
@@ -1169,7 +1252,7 @@
                                         stroke-width="2"
                                         stroke-linecap="round"
                                         stroke-linejoin="round"
-                                        style="margin-right: 6px"
+                                        style="margin-right: 6px; vertical-align: middle"
                                     >
                                         <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
                                         <line x1="8" y1="21" x2="16" y2="21"></line>
@@ -1228,7 +1311,7 @@
                                         stroke-width="2"
                                         stroke-linecap="round"
                                         stroke-linejoin="round"
-                                        style="margin-right: 6px"
+                                        style="margin-right: 6px; vertical-align: middle"
                                     >
                                         <circle cx="12" cy="12" r="5"></circle>
                                         <line x1="12" y1="1" x2="12" y2="3"></line>
@@ -1260,7 +1343,7 @@
                                         stroke-width="2"
                                         stroke-linecap="round"
                                         stroke-linejoin="round"
-                                        style="margin-right: 6px"
+                                        style="margin-right: 6px; vertical-align: middle"
                                     >
                                         <circle cx="12" cy="12" r="10"></circle>
                                         <line x1="2" y1="12" x2="22" y2="12"></line>
@@ -1411,6 +1494,41 @@
                                     :before-change="handleForceUrlContextBeforeChange"
                                 />
                             </div>
+                            <div class="switch-container">
+                                <span class="label">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="14"
+                                        height="14"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        style="margin-right: 6px; vertical-align: middle"
+                                    >
+                                        <path d="M12 3l7 4v5c0 5-3.5 8-7 9-3.5-1-7-4-7-9V7l7-4z"></path>
+                                        <path d="M9 12h6"></path>
+                                    </svg>
+                                    <span>
+                                        {{ t("safetySettingsThreshold") }}
+                                        <EnvVarTooltip env-var="SAFETY_SETTINGS_THRESHOLD" doc-section="other-config" />
+                                    </span>
+                                </span>
+                                <el-select
+                                    v-model="state.safetySettingsThreshold"
+                                    style="width: 150px"
+                                    @change="handleSafetySettingsThresholdChange"
+                                >
+                                    <el-option
+                                        v-for="option in safetySettingsThresholdOptions"
+                                        :key="option.value"
+                                        :label="t(option.label)"
+                                        :value="option.value"
+                                    />
+                                </el-select>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1461,7 +1579,7 @@
                             </svg>
                             <span style="opacity: 0.8; margin-right: 4px">{{ t("uptime") }}:</span>
                             <span style="font-weight: 600; font-family: monospace">{{
-                                formatUptime(statsState.summary.uptimeSeconds)
+                                formatStatsUptime(statsState.startedAt, statsState.summary.uptimeSeconds)
                             }}</span>
                         </span>
                     </div>
@@ -3223,6 +3341,11 @@ const formatUptime = seconds => {
     return parts.join(" ");
 };
 
+const formatStatsUptime = (startedAt, seconds) => {
+    if (!startedAt) return "-";
+    return formatUptime(seconds);
+};
+
 const formatAccount = (authIndex, accountName) => {
     if (authIndex === null || authIndex === undefined) {
         return accountName || "-";
@@ -3465,9 +3588,11 @@ const state = reactive({
     activeContextsCount: 0,
     apiKeySource: "",
     browserConnected: false,
+    checkUpdateEnabled: true,
     currentAuthIndex: -1,
     currentLang: I18n.getLang(),
     debugModeEnabled: false,
+    enableAuthUpdateEnabled: true,
     failureCount: 0,
     floatingActionsExpanded: false,
     forceThinkingEnabled: false,
@@ -3485,12 +3610,25 @@ const state = reactive({
     maxContexts: 1,
     maxRetries: 3,
     releaseUrl: null,
+    safetySettingsThreshold: "OFF",
     selectedAccounts: new Set(), // Selected account indices
     serviceConnected: false,
     streamingModeReal: false,
     // theme: handled by useTheme
     usageCount: 0,
 });
+
+const safetySettingsThresholdOptions = [
+    { label: "safetySettingsThreshold.OFF", value: "OFF" },
+    {
+        label: "safetySettingsThreshold.HARM_BLOCK_THRESHOLD_UNSPECIFIED",
+        value: "HARM_BLOCK_THRESHOLD_UNSPECIFIED",
+    },
+    { label: "safetySettingsThreshold.BLOCK_LOW_AND_ABOVE", value: "BLOCK_LOW_AND_ABOVE" },
+    { label: "safetySettingsThreshold.BLOCK_MEDIUM_AND_ABOVE", value: "BLOCK_MEDIUM_AND_ABOVE" },
+    { label: "safetySettingsThreshold.BLOCK_ONLY_HIGH", value: "BLOCK_ONLY_HIGH" },
+    { label: "safetySettingsThreshold.BLOCK_NONE", value: "BLOCK_NONE" },
+];
 
 const browserConnectedClass = computed(() => {
     if (state.isSystemBusy) {
@@ -3945,6 +4083,9 @@ const handleForceUrlContextBeforeChange = () =>
     handleSettingChange("/api/settings/force-url-context", "forceUrlContext");
 
 const handleForceWebSearchBeforeChange = () => handleSettingChange("/api/settings/force-web-search", "forceWebSearch");
+const handleCheckUpdateBeforeChange = () => handleSettingChange("/api/settings/check-update", "checkUpdate");
+const handleEnableAuthUpdateBeforeChange = () =>
+    handleSettingChange("/api/settings/enable-auth-update", "enableAuthUpdate");
 
 // Handle change specifically for Select component which might trigger logic differently
 const handleStatsDebugChange = val => {
@@ -3975,6 +4116,35 @@ const handleLogMaxCountChange = val => {
         .catch(err => {
             ElMessage.error(t("settingFailed", { message: err.message || err }));
         });
+};
+
+const handleSafetySettingsThresholdChange = async val => {
+    if (!val) return;
+
+    try {
+        const res = await fetch("/api/settings/safety-settings-threshold", {
+            body: JSON.stringify({ value: val }),
+            headers: { "Content-Type": "application/json" },
+            method: "PUT",
+        });
+        const data = await res.json();
+
+        if (res.ok) {
+            ElMessage.success(
+                t(data.message, {
+                    setting: t("safetySettingsThreshold"),
+                    value: t(`safetySettingsThreshold.${val}`),
+                })
+            );
+            updateContent();
+        } else {
+            ElMessage.error(t(data.message || "settingFailed", { message: data.error || "" }));
+            updateContent();
+        }
+    } catch (err) {
+        ElMessage.error(t("settingFailed", { message: err.message || err }));
+        updateContent();
+    }
 };
 
 const handleLanguageChange = lang => {
@@ -4149,7 +4319,9 @@ const updateStatus = data => {
     };
 
     state.isUpdating = true;
+    state.checkUpdateEnabled = isEnabled(data.status.checkUpdate);
     state.streamingModeReal = data.status.streamingMode === "real";
+    state.enableAuthUpdateEnabled = isEnabled(data.status.enableAuthUpdate);
     state.forceThinkingEnabled = isEnabled(data.status.forceThinking);
     state.forceWebSearchEnabled = isEnabled(data.status.forceWebSearch);
     state.forceUrlContextEnabled = isEnabled(data.status.forceUrlContext);
@@ -4159,6 +4331,7 @@ const updateStatus = data => {
     state.activeContextsCount = data.status.activeContextsCount || 0;
     state.maxContexts = data.status.maxContexts ?? 1;
     state.maxRetries = data.status.maxRetries ?? 3;
+    state.safetySettingsThreshold = data.status.safetySettingsThreshold || "OFF";
 
     const validIndices = new Set(state.accountDetails.map(acc => acc.index));
     for (const idx of state.selectedAccounts) {
