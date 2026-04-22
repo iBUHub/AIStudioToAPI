@@ -231,17 +231,7 @@ class BrowserManager {
                     this.logger.warn(`${logPrefix} Detected page error: ${JSON.stringify(errors)}`);
                     return false;
                 }
-                // Random mouse movement while waiting (80% chance per iteration)
-                if (Math.random() < 0.3) {
-                    try {
-                        const vp = page.viewportSize() || { height: 1080, width: 1920 };
-                        const randomX = Math.floor(Math.random() * (vp.width * 0.7));
-                        const randomY = Math.floor(Math.random() * (vp.height * 0.7));
-                        await this._simulateHumanMovement(page, randomX, randomY);
-                    } catch (e) {
-                        // Ignore movement errors
-                    }
-                }
+
                 // Wait before next check
                 await page.waitForTimeout(checkInterval);
             }
@@ -1928,24 +1918,6 @@ class BrowserManager {
             await context.addInitScript(privacyScript);
 
             page = await context.newPage();
-
-            // Pure JS Wakeup (Focus & Mouse Movement)
-            // Skip focus operations for background tasks to avoid window focus conflicts
-            if (!isBackgroundTask) {
-                try {
-                    await page.bringToFront();
-                    // eslint-disable-next-line no-undef
-                    await page.evaluate(() => window.focus());
-                    const vp = page.viewportSize() || { height: 1080, width: 1920 };
-                    const startX = Math.floor(Math.random() * (vp.width * 0.5));
-                    const startY = Math.floor(Math.random() * (vp.height * 0.5));
-                    await this._simulateHumanMovement(page, startX, startY);
-                } catch (e) {
-                    this.logger.warn(`[Context#${authIndex}] Wakeup minor error: ${e.message}`);
-                }
-            } else {
-                this.logger.debug(`[Context#${authIndex}] Skipping focus operations for background task`);
-            }
 
             page.on("console", msg => {
                 const msgText = msg.text();
