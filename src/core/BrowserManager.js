@@ -18,7 +18,7 @@ const {
     isContextAbortedError,
 } = require("../utils/CustomErrors");
 
-const WS_INIT_TIMEOUT_MS = 90000;
+const WS_INIT_TIMEOUT_MS = 120000;
 
 /**
  * Browser Manager Module
@@ -178,7 +178,7 @@ class BrowserManager {
      * Supports abort for background tasks and context deletion
      * @param {object} page - Playwright page object
      * @param {string} logPrefix - Log prefix for messages
-     * @param {number} timeout - Timeout in milliseconds (default 90000)
+     * @param {number} timeout - Timeout in milliseconds (default 120000)
      * @param {number} authIndex - Auth index for this context (default -1)
      * @param {boolean} isBackgroundTask - Whether this is a background preload task (default false)
      * @returns {Promise<boolean>} true if initialization succeeded, false if failed or aborted
@@ -2028,7 +2028,7 @@ class BrowserManager {
             if (wsState && wsState.success) {
                 this.logger.info(`[Context#${authIndex}] ✅ WebSocket already initialized, skipping wait`);
             } else {
-                // Wait for WebSocket initialization (90 second timeout)
+                // Wait for WebSocket initialization (120 second timeout)
                 // This will throw an abort error if the context is aborted during wait
                 const initSuccess = await this._waitForWebSocketInit(
                     page,
@@ -2380,7 +2380,7 @@ class BrowserManager {
             if (wsState && wsState.success) {
                 this.logger.info(`[Reconnect] ✅ WebSocket already initialized, skipping wait`);
             } else {
-                // Wait for WebSocket initialization (90 second timeout)
+                // Wait for WebSocket initialization (120 second timeout)
                 const initSuccess = await this._waitForWebSocketInit(
                     page,
                     "[Reconnect]",
