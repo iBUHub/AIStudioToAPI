@@ -16,6 +16,7 @@ class UsageStatsService {
         this.statsFilePath = path.join(this.dataDir, "usage-stats.jsonl");
         this.enabled = enabled !== false;
         this.appendPromise = Promise.resolve();
+        this.isImportingStats = false;
 
         if (this.enabled) {
             // Ensure data directory exists
@@ -131,6 +132,12 @@ class UsageStatsService {
         if (!tracker) return null;
 
         this.activeRequests.delete(requestId);
+        if (this.isImportingStats) {
+            if (this.logger) {
+                this.logger.info(`[UsageStats] Dropped request ${requestId} because stats import is in progress.`);
+            }
+            return null;
+        }
 
         const finishedAtMs = Date.now();
         const lastAttempt = tracker.attempts[tracker.attempts.length - 1] || null;
@@ -240,28 +247,42 @@ class UsageStatsService {
         };
     }
 
+    /**
+     * Public import entry point. Drops newly finished stats during import, waits
+     * for already queued appends, then rewrites the stats file from a stable baseline.
+     */
+    importJsonl(content) {
+        if (!this.enabled) {
+            throw new Error("Usage stats are disabled");
+        }
+        if (typeof content !== "string") {
+            throw new Error("Invalid JSONL content");
+        }
+
+        this.isImportingStats = true;
+
+        const importPromise = this.appendPromise
+            .catch(() => {})
+            .then(() => this._importJsonlContent(content))
+            .finally(() => {
+                this.isImportingStats = false;
+            });
+
+        this.appendPromise = importPromise.catch(() => {});
+        return importPromise;
+    }
+
+    /**
+     * Load persisted JSONL records during startup and rebuild derived in-memory
+     * aggregates from the records that can be parsed.
+     */
     _loadFromFile() {
-        if (!this.enabled) return;
         try {
-            if (!fs.existsSync(this.statsFilePath)) return;
-
-            const lines = fs.readFileSync(this.statsFilePath, "utf-8").split("\n").filter(Boolean);
-            this.records = [];
-            this.sequence = 0;
-
-            for (const line of lines) {
-                try {
-                    const record = this._normalizeLoadedRecord(JSON.parse(line));
-                    this.records.push(record);
-                    if (record.sequence > this.sequence) {
-                        this.sequence = record.sequence;
-                    }
-                } catch {
-                    // Skip malformed lines
-                }
-            }
+            const { records } = this._readRecordsFromFile();
+            if (records.length === 0 && !fs.existsSync(this.statsFilePath)) return;
 
             // Recalculate aggregates from all loaded records
+            this._replaceRecords(records);
             this._recalculateFromRecords();
 
             if (this.logger) {
@@ -285,6 +306,151 @@ class UsageStatsService {
                     this.logger.warn(`[UsageStats] Failed to append record: ${err.message}`);
                 }
             });
+    }
+
+    /**
+     * Import JSONL content, deduplicate by requestId, merge with current records,
+     * rewrite the file in finishedAt order, and rebuild memory state.
+     */
+    _importJsonlContent(content) {
+        if (!fs.existsSync(this.dataDir)) {
+            fs.mkdirSync(this.dataDir, { recursive: true });
+        }
+
+        const { records: existingRecords } = this._readRecordsFromFile();
+        const seenRequestIds = new Set();
+        for (const record of existingRecords) {
+            const requestId = this._normalizeRequestId(record.requestId);
+            if (requestId) {
+                seenRequestIds.add(requestId);
+            }
+        }
+
+        const importedRecords = [];
+        let duplicateCount = 0;
+        let invalidLineCount = 0;
+        let missingRequestIdCount = 0;
+        const lines = content.split(/\r?\n/);
+
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+
+            let record;
+            try {
+                record = this._normalizeLoadedRecord(JSON.parse(trimmed));
+            } catch {
+                invalidLineCount += 1;
+                continue;
+            }
+
+            const requestId = this._normalizeRequestId(record.requestId);
+            if (!requestId) {
+                missingRequestIdCount += 1;
+                continue;
+            }
+            record.requestId = requestId;
+
+            if (seenRequestIds.has(requestId)) {
+                duplicateCount += 1;
+                continue;
+            }
+
+            seenRequestIds.add(requestId);
+            importedRecords.push(record);
+        }
+
+        const mergedRecords = this._normalizeImportedRecords(existingRecords.concat(importedRecords));
+        const fileContent = mergedRecords.map(record => JSON.stringify(record)).join("\n");
+        fs.writeFileSync(this.statsFilePath, fileContent ? `${fileContent}\n` : "");
+        this._replaceRecords(mergedRecords);
+        this._recalculateFromRecords();
+
+        if (this.logger) {
+            this.logger.info(
+                `[UsageStats] Imported ${importedRecords.length} records from JSONL. ` +
+                    `Skipped ${duplicateCount} duplicates, ${invalidLineCount} invalid lines, ` +
+                    `${missingRequestIdCount} without requestId.`
+            );
+        }
+
+        return {
+            duplicateCount,
+            importedCount: importedRecords.length,
+            invalidLineCount,
+            missingRequestIdCount,
+            totalRecords: mergedRecords.length,
+        };
+    }
+
+    /**
+     * Read valid records from the persisted usage-stats JSONL file. Malformed
+     * lines are ignored so one bad line does not prevent loading the rest.
+     */
+    _readRecordsFromFile() {
+        const records = [];
+        if (!fs.existsSync(this.statsFilePath)) {
+            return { records };
+        }
+
+        const lines = fs.readFileSync(this.statsFilePath, "utf-8").split(/\r?\n/).filter(Boolean);
+        for (const line of lines) {
+            try {
+                records.push(this._normalizeLoadedRecord(JSON.parse(line)));
+            } catch {
+                // Skip malformed lines
+            }
+        }
+
+        return { records };
+    }
+
+    /**
+     * Normalize imported data by finished time and assign continuous sequence
+     * numbers from 1..N after records from multiple files have been merged.
+     */
+    _normalizeImportedRecords(records) {
+        return records
+            .map((record, originalIndex) => ({ originalIndex, record }))
+            .sort((a, b) => {
+                const aTime = this._getRecordSortTime(a.record);
+                const bTime = this._getRecordSortTime(b.record);
+                if (aTime !== bTime) return aTime - bTime;
+                return a.originalIndex - b.originalIndex;
+            })
+            .map((item, index) => ({
+                ...item.record,
+                sequence: index + 1,
+            }));
+    }
+
+    /**
+     * Return the timestamp used for import ordering: finishedAt first, then
+     * startedAt, then the previous sequence as a final fallback.
+     */
+    _getRecordSortTime(record) {
+        const finishedAtMs = Date.parse(record?.finishedAt);
+        if (Number.isFinite(finishedAtMs)) return finishedAtMs;
+
+        const startedAtMs = Date.parse(record?.startedAt);
+        if (Number.isFinite(startedAtMs)) return startedAtMs;
+
+        const sequence = Number(record?.sequence);
+        return Number.isFinite(sequence) ? sequence : Number.MAX_SAFE_INTEGER;
+    }
+
+    /**
+     * Replace the in-memory record list and reset sequence to the highest record
+     * sequence so new records continue after the current data set.
+     */
+    _replaceRecords(records) {
+        this.records = records;
+        this.sequence = 0;
+        for (const record of records) {
+            if (record.sequence > this.sequence) {
+                this.sequence = record.sequence;
+            }
+        }
     }
 
     _recalculateFromRecords() {
@@ -398,6 +564,15 @@ class UsageStatsService {
             outcome: this._normalizeOutcome(record?.outcome),
             statusCode: Number.isFinite(Number(record?.statusCode)) ? Number(record.statusCode) : null,
         };
+    }
+
+    /**
+     * Normalize requestId for import deduplication. Non-string IDs are treated
+     * as missing so they cannot be used as merge keys.
+     */
+    _normalizeRequestId(value) {
+        if (typeof value !== "string") return "";
+        return value.trim();
     }
 
     _normalizeAuthIndex(value) {

@@ -1541,12 +1541,43 @@
                         <h1>{{ t("usageStats") }}</h1>
                     </div>
                     <div class="page-meta">
+                        <input
+                            ref="usageStatsImportInput"
+                            type="file"
+                            style="display: none"
+                            accept=".jsonl"
+                            @change="handleUsageStatsImport"
+                        />
                         <button
                             class="meta-chip stats-download-button"
                             type="button"
-                            :title="t('downloadUsageStats')"
-                            :aria-label="t('downloadUsageStats')"
-                            :disabled="isDownloadingUsageStats"
+                            :title="t('importUsageStats')"
+                            :aria-label="t('importUsageStats')"
+                            :disabled="isUsageStatsTransferBusy"
+                            @click="triggerUsageStatsImport"
+                        >
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="14"
+                                height="14"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            >
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="17 8 12 3 7 8"></polyline>
+                                <line x1="12" y1="3" x2="12" y2="15"></line>
+                            </svg>
+                        </button>
+                        <button
+                            class="meta-chip stats-download-button"
+                            type="button"
+                            :title="t('exportUsageStats')"
+                            :aria-label="t('exportUsageStats')"
+                            :disabled="isUsageStatsTransferBusy"
                             @click="downloadUsageStats"
                         >
                             <svg
@@ -2739,8 +2770,11 @@ import EnvVarTooltip from "../components/EnvVarTooltip.vue";
 
 const router = useRouter();
 const fileInput = ref(null);
+const usageStatsImportInput = ref(null);
 const activeTab = ref("home");
 const isDownloadingUsageStats = ref(false);
+const isImportingUsageStats = ref(false);
+const isUsageStatsTransferBusy = computed(() => isDownloadingUsageStats.value || isImportingUsageStats.value);
 
 // Create reactive version counter
 const langVersion = ref(0);
@@ -4721,9 +4755,78 @@ const formatDownloadTimestamp = () => {
     return `${YYYY}-${MM}-${DD}_${HH}${mm}${ss}`;
 };
 
+const readFileAsText = file =>
+    new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = e => resolve(e.target.result);
+        reader.onerror = () => reject(new Error(t("fileReadFailed")));
+        reader.readAsText(file);
+    });
+
+const triggerUsageStatsImport = () => {
+    if (isUsageStatsTransferBusy.value) return;
+
+    ElMessageBox.confirm(t("usageStatsImportConfirm"), t("warningTitle"), {
+        cancelButtonText: t("cancel"),
+        confirmButtonText: t("ok"),
+        lockScroll: false,
+        type: "warning",
+    })
+        .then(() => usageStatsImportInput.value?.click())
+        .catch(e => {
+            if (e !== "cancel") {
+                console.error(e);
+            }
+        });
+};
+
+const handleUsageStatsImport = async event => {
+    const [file] = Array.from(event.target.files || []);
+    event.target.value = "";
+    if (!file) return;
+    if (isUsageStatsTransferBusy.value) return;
+
+    if (!file.name.toLowerCase().endsWith(".jsonl")) {
+        ElMessage.error(t("usageStatsImportJsonlOnly"));
+        return;
+    }
+
+    isImportingUsageStats.value = true;
+    try {
+        const content = await readFileAsText(file);
+        const res = await fetch("/api/usage-stats/import", {
+            body: JSON.stringify({ content, filename: file.name }),
+            headers: { "Content-Type": "application/json" },
+            method: "POST",
+        });
+
+        if (res.redirected) {
+            window.location.href = res.url;
+            return;
+        }
+        if (res.status === 401) {
+            window.location.href = "/login";
+            return;
+        }
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            ElMessage.error(t(data.message || "usageStatsImportFailed", { error: data.error || `HTTP ${res.status}` }));
+            return;
+        }
+
+        ElMessage.success(t("usageStatsImportSuccess", data));
+        await fetchUsageStats();
+    } catch (error) {
+        ElMessage.error(t("usageStatsImportFailed", { error: error.message }));
+    } finally {
+        isImportingUsageStats.value = false;
+    }
+};
+
 // Download persisted usage stats JSONL
 const downloadUsageStats = async () => {
-    if (isDownloadingUsageStats.value) return;
+    if (isUsageStatsTransferBusy.value) return;
     isDownloadingUsageStats.value = true;
 
     try {
