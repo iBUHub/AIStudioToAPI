@@ -182,6 +182,28 @@ class StatusRoutes {
             res.json(snapshot || UsageStatsService.createEmptySnapshot());
         });
 
+        app.get("/api/usage-stats/download", isAuthenticated, async (req, res) => {
+            try {
+                const usageStatsService = this.serverSystem.usageStatsService;
+                const statsFilePath =
+                    usageStatsService?.statsFilePath || path.join(process.cwd(), "data", "usage-stats.jsonl");
+
+                if (usageStatsService?.appendPromise) {
+                    await usageStatsService.appendPromise.catch(() => {});
+                }
+
+                if (!fs.existsSync(statsFilePath)) {
+                    return res.status(404).json({ message: "usageStatsDownloadNoData" });
+                }
+
+                res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+                res.download(statsFilePath, "usage-stats.jsonl");
+            } catch (error) {
+                this.logger.error(`[WebUI] Failed to download usage stats: ${error.message}`);
+                res.status(500).json({ error: error.message, message: "usageStatsDownloadFailed" });
+            }
+        });
+
         app.put("/api/accounts/current", isAuthenticated, async (req, res) => {
             try {
                 if (this._rejectIfSystemBusy(res)) return;

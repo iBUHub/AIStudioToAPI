@@ -1541,6 +1541,30 @@
                         <h1>{{ t("usageStats") }}</h1>
                     </div>
                     <div class="page-meta">
+                        <button
+                            class="meta-chip stats-download-button"
+                            type="button"
+                            :title="t('downloadUsageStats')"
+                            :aria-label="t('downloadUsageStats')"
+                            :disabled="isDownloadingUsageStats"
+                            @click="downloadUsageStats"
+                        >
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="14"
+                                height="14"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            >
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="7 10 12 15 17 10"></polyline>
+                                <line x1="12" y1="15" x2="12" y2="3"></line>
+                            </svg>
+                        </button>
                         <span class="meta-chip">
                             <svg
                                 xmlns="http://www.w3.org/2000/svg"
@@ -2716,6 +2740,7 @@ import EnvVarTooltip from "../components/EnvVarTooltip.vue";
 const router = useRouter();
 const fileInput = ref(null);
 const activeTab = ref("home");
+const isDownloadingUsageStats = ref(false);
 
 // Create reactive version counter
 const langVersion = ref(0);
@@ -4684,11 +4709,7 @@ const downloadAccountByIndex = accountIndex => {
     window.location.href = `/api/files/auth-${accountIndex}.json`;
 };
 
-// Download current logs
-const downloadCurrentLogs = () => {
-    if (!state.logs) return;
-
-    const blob = new Blob([state.logs], { type: "text/plain" });
+const formatDownloadTimestamp = () => {
     const now = new Date();
     const YYYY = now.getFullYear();
     const MM = String(now.getMonth() + 1).padStart(2, "0");
@@ -4697,7 +4718,61 @@ const downloadCurrentLogs = () => {
     const mm = String(now.getMinutes()).padStart(2, "0");
     const ss = String(now.getSeconds()).padStart(2, "0");
 
-    const filename = `AIStudioProxy_${YYYY}-${MM}-${DD}_${HH}${mm}${ss}_${state.logCount}.log`;
+    return `${YYYY}-${MM}-${DD}_${HH}${mm}${ss}`;
+};
+
+// Download persisted usage stats JSONL
+const downloadUsageStats = async () => {
+    if (isDownloadingUsageStats.value) return;
+    isDownloadingUsageStats.value = true;
+
+    try {
+        const res = await fetch("/api/usage-stats/download");
+        if (res.redirected) {
+            window.location.href = res.url;
+            return;
+        }
+        if (res.status === 401) {
+            window.location.href = "/login";
+            return;
+        }
+        if (!res.ok) {
+            let message = "usageStatsDownloadFailed";
+            try {
+                const data = await res.json();
+                message = data.message || message;
+                ElMessage.error(t(message, { error: data.error || `HTTP ${res.status}` }));
+                return;
+            } catch {
+                // Ignore non-JSON error responses.
+            }
+            ElMessage.error(t(message, { error: `HTTP ${res.status}` }));
+            return;
+        }
+
+        const blob = await res.blob();
+        const filename = `AIStudioToAPI_usage-stats_${formatDownloadTimestamp()}.jsonl`;
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    } catch (error) {
+        ElMessage.error(t("usageStatsDownloadFailed", { error: error.message }));
+    } finally {
+        isDownloadingUsageStats.value = false;
+    }
+};
+
+// Download current logs
+const downloadCurrentLogs = () => {
+    if (!state.logs) return;
+
+    const blob = new Blob([state.logs], { type: "text/plain" });
+    const filename = `AIStudioToAPI_${formatDownloadTimestamp()}_${state.logCount}.log`;
 
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -5682,6 +5757,20 @@ watchEffect(() => {
     &:hover {
         border-color: @primary-color;
         color: @primary-color;
+    }
+}
+
+.stats-download-button {
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    cursor: pointer;
+    font-family: inherit;
+
+    &:disabled {
+        cursor: wait;
+        opacity: 0.65;
     }
 }
 
