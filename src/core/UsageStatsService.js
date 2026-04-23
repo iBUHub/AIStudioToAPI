@@ -320,7 +320,7 @@ class UsageStatsService {
             fs.mkdirSync(this.dataDir, { recursive: true });
         }
 
-        const { records: existingRecords } = this._readRecordsFromFile();
+        const { records: existingRecords } = await this._readRecordsFromFileAsync();
         const uniqueExistingRecords = [];
         const seenRequestIds = new Set();
         let duplicateCount = 0;
@@ -402,13 +402,35 @@ class UsageStatsService {
      * Read valid records from the persisted usage-stats JSONL file. Malformed
      * lines are ignored so one bad line does not prevent loading the rest.
      */
-    _readRecordsFromFile() {
-        const records = [];
-        if (!fs.existsSync(this.statsFilePath)) {
-            return { records };
-        }
+    async _readRecordsFromFileAsync() {
+        try {
+            const content = await fs.promises.readFile(this.statsFilePath, "utf-8");
+            return { records: this._parseRecordsContent(content) };
+        } catch (error) {
+            if (error?.code === "ENOENT") {
+                return { records: [] };
+            }
 
-        const lines = fs.readFileSync(this.statsFilePath, "utf-8").split(/\r?\n/).filter(Boolean);
+            throw error;
+        }
+    }
+
+    _readRecordsFromFile() {
+        try {
+            const content = fs.readFileSync(this.statsFilePath, "utf-8");
+            return { records: this._parseRecordsContent(content) };
+        } catch (error) {
+            if (error?.code === "ENOENT") {
+                return { records: [] };
+            }
+
+            throw error;
+        }
+    }
+
+    _parseRecordsContent(content) {
+        const records = [];
+        const lines = content.split(/\r?\n/).filter(Boolean);
         for (const line of lines) {
             try {
                 records.push(this._normalizeLoadedRecord(JSON.parse(line)));
