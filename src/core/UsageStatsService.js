@@ -439,7 +439,7 @@ class UsageStatsService {
             }
         }
 
-        return { records };
+        return records;
     }
 
     /**
