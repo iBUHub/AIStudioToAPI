@@ -315,7 +315,7 @@ class UsageStatsService {
      * Import JSONL content, deduplicate by requestId, merge with current records,
      * rewrite the file in finishedAt order, and rebuild memory state.
      */
-    _importJsonlContent(content) {
+    async _importJsonlContent(content) {
         if (!fs.existsSync(this.dataDir)) {
             fs.mkdirSync(this.dataDir, { recursive: true });
         }
@@ -377,7 +377,7 @@ class UsageStatsService {
 
         const mergedRecords = this._normalizeImportedRecords(uniqueExistingRecords.concat(importedRecords));
         const fileContent = mergedRecords.map(record => JSON.stringify(record)).join("\n");
-        fs.writeFileSync(this.statsFilePath, fileContent ? `${fileContent}\n` : "");
+        await fs.promises.writeFile(this.statsFilePath, fileContent ? `${fileContent}\n` : "", "utf-8");
         this._replaceRecords(mergedRecords);
         this._recalculateFromRecords({ resetStartedAt: false });
 
