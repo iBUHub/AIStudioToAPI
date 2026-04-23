@@ -379,7 +379,7 @@ class UsageStatsService {
         const fileContent = mergedRecords.map(record => JSON.stringify(record)).join("\n");
         fs.writeFileSync(this.statsFilePath, fileContent ? `${fileContent}\n` : "");
         this._replaceRecords(mergedRecords);
-        this._recalculateFromRecords();
+        this._recalculateFromRecords({ resetStartedAt: false });
 
         if (this.logger) {
             this.logger.info(
@@ -468,9 +468,12 @@ class UsageStatsService {
         }
     }
 
-    _recalculateFromRecords() {
-        this.startedAtMs = Date.now();
-        this.startedAt = new Date(this.startedAtMs).toISOString();
+    _recalculateFromRecords(options = {}) {
+        const { resetStartedAt = true } = options;
+        if (resetStartedAt) {
+            this.startedAtMs = Date.now();
+            this.startedAt = new Date(this.startedAtMs).toISOString();
+        }
         this.summary = {
             abortedCount: 0,
             errorCount: 0,
