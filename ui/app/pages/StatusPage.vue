@@ -4811,17 +4811,40 @@ const handleUsageStatsImport = async event => {
 
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
-            ElMessage.error(t(data.message || "usageStatsImportFailed", { error: data.error || `HTTP ${res.status}` }));
+            showUsageStatsImportNotification({
+                message: t(data.message || "usageStatsImportFailed", { error: data.error || `HTTP ${res.status}` }),
+                title: t("usageStatsImportResult"),
+                type: "error",
+            });
             return;
         }
 
-        ElMessage.success(t("usageStatsImportSuccess", data));
+        showUsageStatsImportNotification({
+            message: t("usageStatsImportSuccess", data),
+            title: t("usageStatsImportResult"),
+            type: "success",
+        });
         await fetchUsageStats();
     } catch (error) {
-        ElMessage.error(t("usageStatsImportFailed", { error: error.message }));
+        showUsageStatsImportNotification({
+            message: t("usageStatsImportFailed", { error: error.message }),
+            title: t("usageStatsImportResult"),
+            type: "error",
+        });
     } finally {
         isImportingUsageStats.value = false;
     }
+};
+
+const showUsageStatsImportNotification = ({ message, title, type }) => {
+    ElNotification({
+        dangerouslyUseHTMLString: true,
+        duration: 0,
+        message: `<div style="max-height: 50vh; overflow-y: auto; word-break: break-word;">${escapeHtml(message)}</div>`,
+        position: "top-right",
+        title,
+        type,
+    });
 };
 
 // Download persisted usage stats JSONL
@@ -4830,7 +4853,7 @@ const downloadUsageStats = async () => {
     isDownloadingUsageStats.value = true;
 
     try {
-        const res = await fetch("/api/usage-stats/download");
+        const res = await fetch("/api/usage-stats/download?check=1");
         if (res.redirected) {
             window.location.href = res.url;
             return;
@@ -4853,16 +4876,13 @@ const downloadUsageStats = async () => {
             return;
         }
 
-        const blob = await res.blob();
         const filename = `AIStudioToAPI_usage-stats_${formatDownloadTimestamp()}.jsonl`;
-        const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
-        a.href = url;
+        a.href = "/api/usage-stats/download";
         a.download = filename;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
-        URL.revokeObjectURL(url);
     } catch (error) {
         ElMessage.error(t("usageStatsDownloadFailed", { error: error.message }));
     } finally {

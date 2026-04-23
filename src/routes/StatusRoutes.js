@@ -188,6 +188,9 @@ class StatusRoutes {
                 if (!usageStatsService?.enabled) {
                     return res.status(403).json({ message: "usageStatsDisabled" });
                 }
+                if (usageStatsService.isImportingStats) {
+                    return res.status(409).json({ message: "usageStatsImportInProgress" });
+                }
                 const statsFilePath =
                     usageStatsService?.statsFilePath || path.join(process.cwd(), "data", "usage-stats.jsonl");
 
@@ -199,8 +202,12 @@ class StatusRoutes {
                     return res.status(404).json({ message: "usageStatsDownloadNoData" });
                 }
 
+                if (req.query.check === "1") {
+                    return res.json({ ok: true });
+                }
+
                 res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
-                res.download(statsFilePath, "usage-stats.jsonl");
+                res.sendFile(statsFilePath);
             } catch (error) {
                 this.logger.error(`[WebUI] Failed to download usage stats: ${error.message}`);
                 res.status(500).json({ error: error.message, message: "usageStatsDownloadFailed" });
@@ -212,6 +219,9 @@ class StatusRoutes {
                 const usageStatsService = this.serverSystem.usageStatsService;
                 if (!usageStatsService?.enabled) {
                     return res.status(403).json({ message: "usageStatsDisabled" });
+                }
+                if (usageStatsService.isImportingStats) {
+                    return res.status(409).json({ message: "usageStatsImportInProgress" });
                 }
 
                 const { content, filename } = req.body || {};

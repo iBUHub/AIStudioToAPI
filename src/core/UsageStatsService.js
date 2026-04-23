@@ -255,6 +255,9 @@ class UsageStatsService {
         if (!this.enabled) {
             throw new Error("Usage stats are disabled");
         }
+        if (this.isImportingStats) {
+            throw new Error("Usage stats import is already in progress");
+        }
         if (typeof content !== "string") {
             throw new Error("Invalid JSONL content");
         }
@@ -318,18 +321,30 @@ class UsageStatsService {
         }
 
         const { records: existingRecords } = this._readRecordsFromFile();
+        const uniqueExistingRecords = [];
         const seenRequestIds = new Set();
+        let duplicateCount = 0;
+        let missingRequestIdCount = 0;
+
         for (const record of existingRecords) {
             const requestId = this._normalizeRequestId(record.requestId);
-            if (requestId) {
-                seenRequestIds.add(requestId);
+            if (!requestId) {
+                missingRequestIdCount += 1;
+                continue;
             }
+
+            record.requestId = requestId;
+            if (seenRequestIds.has(requestId)) {
+                duplicateCount += 1;
+                continue;
+            }
+
+            seenRequestIds.add(requestId);
+            uniqueExistingRecords.push(record);
         }
 
         const importedRecords = [];
-        let duplicateCount = 0;
         let invalidLineCount = 0;
-        let missingRequestIdCount = 0;
         const lines = content.split(/\r?\n/);
 
         for (const line of lines) {
@@ -360,7 +375,7 @@ class UsageStatsService {
             importedRecords.push(record);
         }
 
-        const mergedRecords = this._normalizeImportedRecords(existingRecords.concat(importedRecords));
+        const mergedRecords = this._normalizeImportedRecords(uniqueExistingRecords.concat(importedRecords));
         const fileContent = mergedRecords.map(record => JSON.stringify(record)).join("\n");
         fs.writeFileSync(this.statsFilePath, fileContent ? `${fileContent}\n` : "");
         this._replaceRecords(mergedRecords);
