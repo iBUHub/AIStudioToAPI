@@ -215,6 +215,18 @@ This endpoint forwards requests to the official Gemini API format endpoint.
 
 > 📖 For detailed API usage examples, see: [API Usage Examples](docs/en/api-examples.md)
 
+## 🖥️ Recommended Frontend: AMC WebUI
+
+[AMC WebUI](https://github.com/yeahhe365/AMC-WebUI) is a Local-First Gemini workflow WebUI with multimodal chat, Canvas, file processing, realtime search, code execution, and advanced reasoning. It already supports AIStudioToAPI as a third-party Gemini-compatible backend and can be used as a graphical frontend for this project.
+
+Online demo: [https://all-model-chat.pages.dev](https://all-model-chat.pages.dev)
+
+Usage:
+
+- Deploy and start AIStudioToAPI first, and make sure the Gemini native API endpoint is reachable, for example `http://localhost:7860/v1beta`.
+- In AMC WebUI, go to **Settings -> API Configuration**, enable "Custom API Configuration", and set the Gemini-compatible Base URL to AIStudioToAPI's `/v1beta` endpoint.
+- The API Key configured in AMC WebUI should match one of the `API_KEYS` configured for AIStudioToAPI.
+
 ## 🧰 Configuration
 
 ### 🔧 Environment Variables
