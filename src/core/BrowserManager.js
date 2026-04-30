@@ -221,9 +221,7 @@ class BrowserManager {
                 // Check if background preload was aborted (only for background tasks)
                 if (isBackgroundTask && this._backgroundPreloadAbort) {
                     this.logger.info(`${logPrefix} WebSocket wait aborted (background preload aborted)`);
-                    throw new Error(
-                        `Context initialization aborted for index ${authIndex} (background preload aborted)`
-                    );
+                    throw new ContextAbortedError(authIndex, "background preload aborted");
                 }
 
                 // Read state fresh each iteration
@@ -1506,21 +1504,34 @@ class BrowserManager {
      * @returns {Promise<void>} Resolves when the background task has been aborted and cleaned up
      */
     async abortBackgroundPreload() {
-        if (!this._backgroundPreloadTask) {
+        const currentTask = this._backgroundPreloadTask;
+        if (!currentTask) {
             return; // No task to abort
         }
 
         this.logger.info(`[ContextPool] Aborting background preload task...`);
         this._backgroundPreloadAbort = true;
+        const timeoutMessage = "Background preload abort timed out after 10s";
 
         try {
-            await this._withTimeout(
-                this._backgroundPreloadTask,
-                10_000,
-                "Background preload abort timed out after 10s"
-            );
+            await this._withTimeout(currentTask, 10_000, timeoutMessage);
         } catch (error) {
-            // Ignore errors from aborted task (including timeout)
+            if (error.message === timeoutMessage) {
+                this.logger.warn(
+                    `[ContextPool] Background preload did not stop within 10s, forcing browser/context pool reset.`
+                );
+                if (this.browser) {
+                    await this.closeBrowser();
+                } else {
+                    this._cleanupAllContexts();
+                }
+                if (this._backgroundPreloadTask === currentTask) {
+                    this._backgroundPreloadTask = null;
+                }
+                return;
+            }
+
+            // Ignore non-timeout errors from aborted task
             this.logger.debug(`[ContextPool] Background preload aborted: ${error.message}`);
         }
 
