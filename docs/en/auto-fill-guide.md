@@ -24,7 +24,29 @@ npm run setup-auth
 
 When prompted in the terminal, select the account you want to use. The script will automatically open the browser and fill in the selected account's credentials.
 
+For promptless execution, you can select an account directly:
+
+```bash
+npm run setup-auth -- --non-interactive --account 1
+```
+
+Or pass the credentials explicitly:
+
+```bash
+npm run setup-auth -- --non-interactive --email your-email@gmail.com --password your-password --headless
+```
+
+If the account uses TOTP-based 2FA, you can append `--totp-secret`:
+
+```bash
+npm run setup-auth -- --non-interactive --email your-email@gmail.com --password your-password --totp-secret your-base32-secret --headless
+```
+
+In non-interactive mode, the script exits with a non-zero status if AI Studio login is not detected before timeout. Use `--login-timeout-ms` to adjust the timeout.
+
 ### 3. Considerations
 
 - **Security**: The `users.csv` file contains plain-text passwords; ensure your computer is secure and do not share this file.
-- **2FA**: If your account has Two-Factor Authentication (2FA) enabled, you will still need to complete the verification manually in the browser.
+- **First-run agreement**: When a new account enters AI Studio for the first time and a terms dialog appears, the script tries to tick visible checkboxes and click buttons such as `I agree`, `Agree`, `Continue`, or their Chinese equivalents.
+- **2FA**: For accounts with Two-Factor Authentication (2FA), standard TOTP can be auto-filled with `--totp-secret`; other challenge types still need to be completed manually in the browser.
+- **TOTP limitation**: `--totp-secret` only applies to standard TOTP apps such as Google Authenticator or Aegis. It does not cover SMS codes, Google Prompt, passkeys, or CAPTCHAs.

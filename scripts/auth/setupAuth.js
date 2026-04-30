@@ -11,6 +11,8 @@ const https = require("https");
 const os = require("os");
 const path = require("path");
 const readline = require("readline");
+const { HttpsProxyAgent, SocksProxyAgent } = require("playwright-core/lib/utilsBundle");
+const { getProxySummaryFromEnv, parseProxyFromEnv } = require("../../src/utils/ProxyUtils");
 
 const DEFAULT_CAMOUFOX_VERSION = "135.0.1-beta.24";
 const GITHUB_RELEASE_TAG_PREFIX = "v";
@@ -22,6 +24,188 @@ let lang = "zh";
 
 // Bilingual text helper
 const getText = (zh, en) => (lang === "zh" ? zh : en);
+
+const normalizeLanguage = value => {
+    const normalized = String(value || "")
+        .trim()
+        .toLowerCase();
+    if (normalized === "2" || normalized === "en" || normalized === "english") {
+        return "en";
+    }
+    return "zh";
+};
+
+const parseBooleanLike = value => {
+    if (value === undefined || value === null || value === "") return undefined;
+    const normalized = String(value).trim().toLowerCase();
+    if (["1", "true", "yes", "y", "on"].includes(normalized)) return true;
+    if (["0", "false", "no", "n", "off"].includes(normalized)) return false;
+    return undefined;
+};
+
+const parsePositiveInteger = (value, optionName) => {
+    if (value === undefined || value === null || value === "") return undefined;
+    const parsed = Number.parseInt(String(value), 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+        throw new Error(getText(`${optionName} 必须是正整数。`, `${optionName} must be a positive integer.`));
+    }
+    return parsed;
+};
+
+const readRequiredOptionValue = (args, index, optionName) => {
+    const value = args[index + 1];
+    if (value === undefined || value.startsWith("-")) {
+        throw new Error(getText(`缺少 ${optionName} 的值。`, `Missing value for ${optionName}.`));
+    }
+    return value;
+};
+
+const parseCliArgs = args => {
+    const options = {
+        headless: undefined,
+        nonInteractive: false,
+    };
+
+    for (let i = 0; i < args.length; i++) {
+        const arg = args[i];
+        if (arg === "-h" || arg === "--help") {
+            options.help = true;
+            continue;
+        }
+        if (arg === "--non-interactive") {
+            options.nonInteractive = true;
+            continue;
+        }
+        if (arg === "--headless") {
+            options.headless = true;
+            continue;
+        }
+        if (arg === "--headed") {
+            options.headless = false;
+            continue;
+        }
+        if (arg === "--debug-ui") {
+            options.debugUi = true;
+            continue;
+        }
+        if (arg.startsWith("--lang=")) {
+            options.lang = arg.slice("--lang=".length);
+            continue;
+        }
+        if (arg === "--lang") {
+            options.lang = readRequiredOptionValue(args, i, "--lang");
+            i++;
+            continue;
+        }
+        if (arg.startsWith("--email=")) {
+            options.email = arg.slice("--email=".length);
+            continue;
+        }
+        if (arg === "--email") {
+            options.email = readRequiredOptionValue(args, i, "--email");
+            i++;
+            continue;
+        }
+        if (arg.startsWith("--password=")) {
+            options.password = arg.slice("--password=".length);
+            continue;
+        }
+        if (arg === "--password") {
+            options.password = readRequiredOptionValue(args, i, "--password");
+            i++;
+            continue;
+        }
+        if (arg.startsWith("--totp-secret=")) {
+            options.totpSecret = arg.slice("--totp-secret=".length);
+            continue;
+        }
+        if (arg === "--totp-secret") {
+            options.totpSecret = readRequiredOptionValue(args, i, "--totp-secret");
+            i++;
+            continue;
+        }
+        if (arg.startsWith("--account=")) {
+            options.account = arg.slice("--account=".length);
+            continue;
+        }
+        if (arg === "--account") {
+            options.account = readRequiredOptionValue(args, i, "--account");
+            i++;
+            continue;
+        }
+        if (arg.startsWith("--login-timeout-ms=")) {
+            options.loginTimeoutMs = arg.slice("--login-timeout-ms=".length);
+            continue;
+        }
+        if (arg === "--login-timeout-ms") {
+            options.loginTimeoutMs = readRequiredOptionValue(args, i, "--login-timeout-ms");
+            i++;
+            continue;
+        }
+
+        throw new Error(getText(`未知参数: ${arg}`, `Unknown argument: ${arg}`));
+    }
+
+    return options;
+};
+
+const printHelp = () => {
+    console.log("Usage: npm run setup-auth -- [options]");
+    console.log("");
+    console.log("Options:");
+    console.log("  -h, --help                 Show this help message");
+    console.log("  --non-interactive          Run without prompts and exit on timeout/failure");
+    console.log("  --lang <zh|en>             Skip language prompt");
+    console.log("  --email <email>            Auto-fill the Google account email");
+    console.log("  --password <password>      Auto-fill the Google account password");
+    console.log("  --totp-secret <secret>     Auto-fill Google TOTP 2FA code using a Base32 secret");
+    console.log("  --account <index|email>    Select an account from users.csv without prompting");
+    console.log("  --headless                 Launch Camoufox in headless mode");
+    console.log("  --headed                   Force headed mode");
+    console.log("  --login-timeout-ms <ms>    Override login detection timeout");
+    console.log("  --debug-ui                 Dump UI diagnostics before auth export");
+    console.log("");
+    console.log("Environment variables:");
+    console.log("  CAMOUFOX_VERSION=135.0.1-beta.24");
+    console.log("  CAMOUFOX_URL=<direct zip url>");
+    console.log("  CAMOUFOX_EXECUTABLE_PATH=<path to camoufox executable>");
+    console.log("  SETUP_AUTH_NON_INTERACTIVE=true");
+    console.log("  SETUP_AUTH_LANG=zh|en");
+    console.log("  SETUP_AUTH_EMAIL=<email>");
+    console.log("  SETUP_AUTH_PASSWORD=<password>");
+    console.log("  SETUP_AUTH_TOTP_SECRET=<base32 secret>");
+    console.log("  SETUP_AUTH_ACCOUNT=<index or email>");
+    console.log("  SETUP_AUTH_HEADLESS=true");
+    console.log("  SETUP_AUTH_LOGIN_TIMEOUT_MS=300000");
+    console.log("  SETUP_AUTH_DEBUG_UI=true");
+    console.log("");
+    console.log("Examples:");
+    console.log("  npm run setup-auth -- --non-interactive --email your@gmail.com --password your-password --headless");
+    console.log("  npm run setup-auth -- --non-interactive --account 1");
+};
+
+const buildRuntimeOptions = cliOptions => {
+    const langValue = cliOptions.lang ?? process.env.SETUP_AUTH_LANG;
+    const nonInteractive =
+        cliOptions.nonInteractive || parseBooleanLike(process.env.SETUP_AUTH_NON_INTERACTIVE) === true;
+    const headless = cliOptions.headless ?? parseBooleanLike(process.env.SETUP_AUTH_HEADLESS) ?? false;
+
+    return {
+        account: cliOptions.account ?? process.env.SETUP_AUTH_ACCOUNT,
+        debugUi: cliOptions.debugUi ?? parseBooleanLike(process.env.SETUP_AUTH_DEBUG_UI) ?? false,
+        email: cliOptions.email ?? process.env.SETUP_AUTH_EMAIL ?? process.env.AUTO_FILL_EMAIL,
+        hasExplicitLang: langValue !== undefined,
+        headless,
+        lang: normalizeLanguage(langValue),
+        loginTimeoutMs: parsePositiveInteger(
+            cliOptions.loginTimeoutMs ?? process.env.SETUP_AUTH_LOGIN_TIMEOUT_MS,
+            "login-timeout-ms"
+        ),
+        nonInteractive,
+        password: cliOptions.password ?? process.env.SETUP_AUTH_PASSWORD ?? process.env.AUTO_FILL_PWD,
+        totpSecret: cliOptions.totpSecret ?? process.env.SETUP_AUTH_TOTP_SECRET,
+    };
+};
 
 // Prompt user to select language
 const selectLanguage = () =>
@@ -40,67 +224,83 @@ const selectLanguage = () =>
 
         rl.question("> ", answer => {
             rl.close();
-            const trimmed = answer.trim();
-            if (trimmed === "2" || trimmed.toLowerCase() === "en" || trimmed.toLowerCase() === "english") {
-                lang = "en";
-            } else {
-                lang = "zh";
-            }
+            lang = normalizeLanguage(answer);
             resolve(lang);
         });
     });
 
-// Select account from users.csv
-const selectAccountFromCSV = () =>
-    new Promise(resolve => {
-        const csvPath = path.join(PROJECT_ROOT, "users.csv");
-        if (!fs.existsSync(csvPath)) {
-            resolve(null);
-            return;
-        }
-
-        const content = fs.readFileSync(csvPath, "utf-8");
-        const lines = content.split(/\r?\n/).filter(line => line.trim() !== "");
-
-        // CSV parser that handles double quotes
-        const parseCSVLine = line => {
-            const parts = [];
-            let current = "";
-            let inQuotes = false;
-            for (let i = 0; i < line.length; i++) {
-                const char = line[i];
-                if (char === '"') {
-                    if (inQuotes && line[i + 1] === '"') {
-                        current += '"';
-                        i++;
-                    } else {
-                        inQuotes = !inQuotes;
-                    }
-                } else if (char === "," && !inQuotes) {
-                    parts.push(current.trim());
-                    current = "";
-                } else {
-                    current += char;
-                }
+const parseCSVLine = line => {
+    const parts = [];
+    let current = "";
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+        if (char === '"') {
+            if (inQuotes && line[i + 1] === '"') {
+                current += '"';
+                i++;
+            } else {
+                inQuotes = !inQuotes;
             }
+        } else if (char === "," && !inQuotes) {
             parts.push(current.trim());
-            return parts;
-        };
+            current = "";
+        } else {
+            current += char;
+        }
+    }
+    parts.push(current.trim());
+    return parts;
+};
 
-        // Filter out headers (lines without @)
-        const accounts = lines
-            .map(line => parseCSVLine(line))
-            .filter(parts => parts.some(p => p.includes("@")))
-            .map(parts => {
-                // Find the first part that looks like an email
-                const emailIdx = parts.findIndex(p => p.includes("@"));
-                const email = parts[emailIdx];
-                // The password is most likely the next column, or the first other non-empty column
-                const password = parts[emailIdx + 1] || parts.find((p, idx) => idx !== emailIdx && p.length > 0);
-                return { email, password };
-            })
-            .filter(acc => acc.email);
+const getAccountsFromCSV = () => {
+    const csvPath = path.join(PROJECT_ROOT, "users.csv");
+    if (!fs.existsSync(csvPath)) return [];
 
+    const content = fs.readFileSync(csvPath, "utf-8");
+    const lines = content.split(/\r?\n/).filter(line => line.trim() !== "");
+
+    return lines
+        .map(line => parseCSVLine(line))
+        .filter(parts => parts.some(p => p.includes("@")))
+        .map((parts, index) => {
+            const emailIdx = parts.findIndex(p => p.includes("@"));
+            const email = parts[emailIdx];
+            const password = parts[emailIdx + 1] || parts.find((p, idx) => idx !== emailIdx && p.length > 0) || "";
+            return { email, index: index + 1, password };
+        })
+        .filter(acc => acc.email);
+};
+
+const findAccountFromCSV = selector => {
+    const accounts = getAccountsFromCSV();
+    if (accounts.length === 0) {
+        throw new Error(getText("未找到可用的 users.csv 账号。", "No accounts found in users.csv."));
+    }
+
+    const trimmedSelector = String(selector || "").trim();
+    if (/^\d+$/.test(trimmedSelector)) {
+        const index = Number.parseInt(trimmedSelector, 10);
+        const account = accounts.find(item => item.index === index);
+        if (!account) {
+            throw new Error(
+                getText(`users.csv 中不存在序号为 ${index} 的账号。`, `No users.csv account found at index ${index}.`)
+            );
+        }
+        return account;
+    }
+
+    const account = accounts.find(item => item.email.toLowerCase() === trimmedSelector.toLowerCase());
+    if (!account) {
+        throw new Error(
+            getText(`users.csv 中不存在账号 ${trimmedSelector}。`, `No users.csv account found for ${trimmedSelector}.`)
+        );
+    }
+    return account;
+};
+
+const selectAccountFromCSV = accounts =>
+    new Promise(resolve => {
         if (accounts.length === 0) {
             resolve(null);
             return;
@@ -117,21 +317,50 @@ const selectAccountFromCSV = () =>
             getText("检测到 users.csv，请选择要预填的账号:", "Detected users.csv, select account to auto-fill:")
         );
         console.log(getText("  0. 不预填 (手动输入)", "  0. Do not auto-fill (manual)"));
-        accounts.forEach((acc, i) => {
-            console.log(`  ${i + 1}. ${acc.email}`);
+        accounts.forEach(acc => {
+            console.log(`  ${acc.index}. ${acc.email}`);
         });
         console.log("==========================================");
 
         rl.question("> ", answer => {
             rl.close();
-            const idx = parseInt(answer.trim());
-            if (!isNaN(idx) && idx > 0 && idx <= accounts.length) {
-                resolve({ ...accounts[idx - 1], index: idx });
+            const idx = parseInt(answer.trim(), 10);
+            if (!Number.isNaN(idx) && idx > 0 && idx <= accounts.length) {
+                resolve(accounts[idx - 1]);
             } else {
                 resolve(null);
             }
         });
     });
+
+const resolveSelectedAccount = async options => {
+    if (options.email) {
+        return {
+            email: options.email,
+            password: options.password || "",
+        };
+    }
+
+    if (options.account) {
+        return findAccountFromCSV(options.account);
+    }
+
+    const accounts = getAccountsFromCSV();
+    if (options.nonInteractive) {
+        if (accounts.length === 1) return accounts[0];
+        if (accounts.length > 1) {
+            throw new Error(
+                getText(
+                    "无交互模式下，当 users.csv 包含多个账号时必须显式指定 --account。",
+                    "In non-interactive mode, --account is required when users.csv contains multiple accounts."
+                )
+            );
+        }
+        return null;
+    }
+
+    return selectAccountFromCSV(accounts);
+};
 
 const execOrThrow = (command, args, options) => {
     const result = spawnSync(command, args, {
@@ -201,12 +430,64 @@ const getCamoufoxInstallConfig = () => {
 
 const downloadFile = async (url, outFilePath) => {
     const maxRedirects = 10;
+    const normalizeProxyURL = proxy => {
+        let normalized = String(proxy || "").trim();
+        if (!/^\w+:\/\//.test(normalized)) {
+            normalized = `http://${normalized}`;
+        }
+        return new URL(normalized);
+    };
+    const shouldBypassProxy = (targetUrl, bypass) => {
+        if (!bypass) return false;
+        const domains = bypass.split(",").map(domain => {
+            let normalized = domain.trim();
+            if (!normalized.startsWith(".")) normalized = `.${normalized}`;
+            return normalized;
+        });
+        const targetDomain = `.${targetUrl.hostname}`;
+        return domains.some(domain => targetDomain.endsWith(domain));
+    };
+    const createProxyAgent = (proxy, targetUrl) => {
+        if (!proxy) return undefined;
+        if (targetUrl && proxy.bypass && shouldBypassProxy(targetUrl, proxy.bypass)) return undefined;
+
+        const proxyUrl = normalizeProxyURL(proxy.server);
+        if (proxyUrl.protocol.startsWith("socks")) {
+            if (proxyUrl.protocol === "socks5:") proxyUrl.protocol = "socks5h:";
+            else if (proxyUrl.protocol === "socks4:") proxyUrl.protocol = "socks4a:";
+            return new SocksProxyAgent(proxyUrl);
+        }
+
+        if (proxy.username) {
+            proxyUrl.username = proxy.username;
+            proxyUrl.password = proxy.password || "";
+        }
+
+        return new HttpsProxyAgent(proxyUrl);
+    };
+    const formatBytes = bytes => {
+        if (!Number.isFinite(bytes) || bytes < 0) return "0 B";
+        if (bytes < 1024) return `${bytes} B`;
+
+        const units = ["KB", "MB", "GB", "TB"];
+        let value = bytes / 1024;
+        let unitIndex = 0;
+        while (value >= 1024 && unitIndex < units.length - 1) {
+            value /= 1024;
+            unitIndex++;
+        }
+        return `${value.toFixed(value >= 100 ? 0 : value >= 10 ? 1 : 2)} ${units[unitIndex]}`;
+    };
 
     const fetchOnce = (currentUrl, redirectsLeft) =>
         new Promise((resolve, reject) => {
+            const targetUrl = new URL(currentUrl);
+            const proxyConfig = parseProxyFromEnv();
+            const agent = createProxyAgent(proxyConfig, targetUrl);
             const request = https.get(
-                currentUrl,
+                targetUrl,
                 {
+                    agent,
                     headers: {
                         Accept: "*/*",
                         "User-Agent": "aistudio-to-api setup-auth",
@@ -247,10 +528,59 @@ const downloadFile = async (url, outFilePath) => {
                         return;
                     }
 
+                    const totalBytes = Number.parseInt(String(res.headers["content-length"] || "0"), 10) || 0;
+                    const downloadStartTime = Date.now();
+                    let downloadedBytes = 0;
+                    let lastLineLength = 0;
+                    let lastRenderAt = 0;
+                    let progressVisible = false;
+
+                    const renderProgress = force => {
+                        if (!process.stdout.isTTY) return;
+
+                        const now = Date.now();
+                        if (!force && now - lastRenderAt < 120) return;
+
+                        const elapsedSeconds = Math.max((now - downloadStartTime) / 1000, 0.001);
+                        const speedBytesPerSecond = downloadedBytes / elapsedSeconds;
+                        const progressText =
+                            totalBytes > 0
+                                ? getText(
+                                      `下载进度: ${((downloadedBytes / totalBytes) * 100).toFixed(1)}% (${formatBytes(downloadedBytes)} / ${formatBytes(totalBytes)}) ${formatBytes(speedBytesPerSecond)}/s`,
+                                      `Download progress: ${((downloadedBytes / totalBytes) * 100).toFixed(1)}% (${formatBytes(downloadedBytes)} / ${formatBytes(totalBytes)}) ${formatBytes(speedBytesPerSecond)}/s`
+                                  )
+                                : getText(
+                                      `下载中: ${formatBytes(downloadedBytes)} ${formatBytes(speedBytesPerSecond)}/s`,
+                                      `Downloading: ${formatBytes(downloadedBytes)} ${formatBytes(speedBytesPerSecond)}/s`
+                                  );
+
+                        const paddedText =
+                            progressText.length < lastLineLength
+                                ? progressText + " ".repeat(lastLineLength - progressText.length)
+                                : progressText;
+                        process.stdout.write(`\r${paddedText}`);
+                        lastLineLength = paddedText.length;
+                        lastRenderAt = now;
+                        progressVisible = true;
+                    };
+
                     const fileStream = fs.createWriteStream(outFilePath);
+                    res.on("data", chunk => {
+                        downloadedBytes += chunk.length;
+                        renderProgress(false);
+                    });
                     res.pipe(fileStream);
-                    fileStream.on("finish", () => fileStream.close(() => resolve()));
+                    fileStream.on("finish", () => {
+                        renderProgress(true);
+                        if (progressVisible) {
+                            process.stdout.write("\n");
+                        }
+                        fileStream.close(() => resolve());
+                    });
                     fileStream.on("error", err => {
+                        if (progressVisible) {
+                            process.stdout.write("\n");
+                        }
                         try {
                             fs.unlinkSync(outFilePath);
                         } catch {
@@ -443,10 +773,26 @@ const ensureCamoufoxExecutable = async () => {
     ensureDir(installDir);
 
     const zipFilePath = path.join(PROJECT_ROOT, "camoufox.zip");
+    const proxySummary = getProxySummaryFromEnv();
 
     console.log(getText("[2/4] 检查 Camoufox...", "[2/4] Checking Camoufox..."));
     console.log(getText(`正在下载 Camoufox (${version})...`, `Downloading Camoufox (${version})...`));
     console.log(getText(`下载地址: ${downloadUrl}`, `Download URL: ${downloadUrl}`));
+    if (proxySummary.enabled) {
+        console.log(
+            getText(
+                `下载代理: ${proxySummary.server}${proxySummary.envKey ? ` (${proxySummary.envKey})` : ""}`,
+                `Download proxy: ${proxySummary.server}${proxySummary.envKey ? ` (${proxySummary.envKey})` : ""}`
+            )
+        );
+    } else {
+        console.log(
+            getText(
+                "下载代理: 未检测到代理环境变量，当前为直连下载。",
+                "Download proxy: no proxy environment variable detected, downloading directly."
+            )
+        );
+    }
 
     await downloadFile(downloadUrl, zipFilePath);
     console.log(getText("下载完成。", "Download complete."));
@@ -530,23 +876,34 @@ const loadEnvConfig = () => {
     require("dotenv").config({ path: path.resolve(__dirname, "..", "..", ".env") });
 };
 
-const runSaveAuth = (camoufoxExecutablePath, selectedAccount) => {
+const runSaveAuth = (camoufoxExecutablePath, selectedAccount, options) => {
     console.log(getText("[4/4] 启动认证保存工具...", "[4/4] Starting auth save tool..."));
     console.log("");
     console.log("==========================================");
-    console.log(getText("  请按提示在新打开的 Camoufox 窗口中操作", "  Please follow the prompts to login"));
+    console.log(
+        options.nonInteractive
+            ? getText("  正在以无交互模式运行认证流程", "  Running authentication flow in non-interactive mode")
+            : getText("  请按提示在新打开的 Camoufox 窗口中操作", "  Please follow the prompts to login")
+    );
     console.log("==========================================");
     console.log("");
 
     const env = {
         ...process.env,
         CAMOUFOX_EXECUTABLE_PATH: camoufoxExecutablePath,
+        SETUP_AUTH_DEBUG_UI: String(options.debugUi),
+        SETUP_AUTH_HEADLESS: String(options.headless),
         SETUP_AUTH_LANG: lang, // Pass selected language to saveAuth.js
+        SETUP_AUTH_LOGIN_TIMEOUT_MS: String(options.loginTimeoutMs || 300000),
+        SETUP_AUTH_NON_INTERACTIVE: String(options.nonInteractive),
     };
 
     if (selectedAccount) {
         env.AUTO_FILL_EMAIL = selectedAccount.email;
         env.AUTO_FILL_PWD = selectedAccount.password;
+    }
+    if (options.totpSecret) {
+        env.SETUP_AUTH_TOTP_SECRET = options.totpSecret;
     }
 
     const result = spawnSync(process.execPath, [path.join("scripts", "auth", "saveAuth.js")], {
@@ -564,22 +921,25 @@ const runSaveAuth = (camoufoxExecutablePath, selectedAccount) => {
 };
 
 const main = async () => {
-    const args = process.argv.slice(2);
-    if (args.includes("-h") || args.includes("--help")) {
-        console.log("Usage: npm run setup-auth");
-        console.log("");
-        console.log("Optional env vars:");
-        console.log("  CAMOUFOX_VERSION=135.0.1-beta.24");
-        console.log("  CAMOUFOX_URL=<direct zip url>");
-        console.log("  CAMOUFOX_EXECUTABLE_PATH=<path to camoufox executable>");
+    const cliOptions = parseCliArgs(process.argv.slice(2));
+    if (cliOptions.help) {
+        printHelp();
         process.exit(0);
     }
 
-    // Ask user to select language first
-    await selectLanguage();
+    if (cliOptions.lang !== undefined) {
+        lang = normalizeLanguage(cliOptions.lang);
+    }
 
-    // Check for users.csv and ask for account selection
-    const selectedAccount = await selectAccountFromCSV();
+    ensureNodeModules();
+    loadEnvConfig();
+
+    const options = buildRuntimeOptions(cliOptions);
+    if (options.hasExplicitLang || options.nonInteractive) {
+        lang = options.lang;
+    } else {
+        await selectLanguage();
+    }
 
     console.log("");
     console.log("==========================================");
@@ -588,8 +948,25 @@ const main = async () => {
     console.log(getText(`操作系统: ${os.platform()}  架构: ${os.arch()}`, `OS: ${os.platform()}  Arch: ${os.arch()}`));
     console.log("");
 
-    ensureNodeModules();
-    loadEnvConfig();
+    const selectedAccount = await resolveSelectedAccount(options);
+    if (options.nonInteractive) {
+        if (!selectedAccount?.email) {
+            throw new Error(
+                getText(
+                    "无交互模式需要可用的账号凭据。请使用 --email/--password，或通过 --account 从 users.csv 选择账号。",
+                    "Non-interactive mode requires account credentials. Use --email/--password or select one from users.csv via --account."
+                )
+            );
+        }
+        if (!selectedAccount.password) {
+            throw new Error(
+                getText(
+                    "无交互模式需要账号密码。请补充 --password，或确保 users.csv 中包含该账号的密码。",
+                    "Non-interactive mode requires a password. Provide --password or ensure the selected users.csv entry includes one."
+                )
+            );
+        }
+    }
 
     let camoufoxExecutablePath = process.env.CAMOUFOX_EXECUTABLE_PATH;
     if (!camoufoxExecutablePath) {
@@ -610,7 +987,7 @@ const main = async () => {
         );
     }
 
-    runSaveAuth(camoufoxExecutablePath, selectedAccount);
+    runSaveAuth(camoufoxExecutablePath, selectedAccount, options);
 
     console.log("");
     console.log("==========================================");

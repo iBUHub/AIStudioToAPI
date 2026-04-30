@@ -30,9 +30,28 @@
    npm run setup-auth
    ```
 
+   无交互模式示例：
+
+   ```bash
+   npm run setup-auth -- --non-interactive --email your-email@gmail.com --password your-password --headless
+   ```
+
+   如果账号启用了基于 TOTP 的 2FA，也可以在开始时直接带上密钥：
+
+   ```bash
+   npm run setup-auth -- --non-interactive --email your-email@gmail.com --password your-password --totp-secret your-base32-secret --headless
+   ```
+
+   如果您已经配置了 `users.csv`，也可以直接选择其中一个账号而不进入交互：
+
+   ```bash
+   npm run setup-auth -- --non-interactive --account 1
+   ```
+
    该脚本将：
    - 自动下载 Camoufox 浏览器（一个注重隐私的 Firefox 分支）
    - 启动浏览器并自动导航到 AI Studio
+   - 首次进入 AI Studio 时，尽量自动点击协议确认弹窗
    - 在本地保存您的身份验证凭据（auth 文件位于 `/configs/auth`）
 
    > 💡 **提示：** 如果下载 Camoufox 浏览器失败或等待太久，可以自行点击 [此处](https://github.com/daijro/camoufox/releases/tag/v135.0.1-beta.24) 下载，然后设置环境变量 `CAMOUFOX_EXECUTABLE_PATH` 为可执行文件的路径（支持绝对和相对路径）。
@@ -287,6 +306,8 @@ services:
 3. 运行 `npm run setup-auth` 后按提示选择账号。
 
 > 📖 详细配置说明请参阅：[账号自动填充指南](docs/zh/auto-fill-guide.md)
+>
+> 💡 **提示**：如果需要无交互执行，可使用 `npm run setup-auth -- --non-interactive --account 1`，或直接传入 `--email` / `--password`。
 
 ### 🧠 模型列表配置
 
