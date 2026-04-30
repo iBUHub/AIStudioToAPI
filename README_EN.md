@@ -30,28 +30,11 @@ A tool that wraps Google AI Studio web interface to provide OpenAI API, Gemini A
    npm run setup-auth
    ```
 
-   Non-interactive example:
-
-   ```bash
-   npm run setup-auth -- --non-interactive --email your-email@gmail.com --password your-password --headless
-   ```
-
-   If the account uses TOTP-based 2FA, you can also provide the secret up front:
-
-   ```bash
-   npm run setup-auth -- --non-interactive --email your-email@gmail.com --password your-password --totp-secret your-base32-secret --headless
-   ```
-
-   If you already configured `users.csv`, you can also select an account without prompts:
-
-   ```bash
-   npm run setup-auth -- --non-interactive --account 1
-   ```
+   For auto-fill and non-interactive examples, see the [Account Auto-fill](#-account-auto-fill) section.
 
    This script will:
    - Automatically download the Camoufox browser (a privacy-focused Firefox fork)
-   - Launch the browser and navigate to AI Studio automatically
-   - Try to auto-accept the first-run AI Studio agreement dialog when it appears
+   - Launch the browser, open AI Studio, and guide you through manual login
    - Save your authentication credentials locally (auth files are stored in `/configs/auth`)
 
    > 💡 **Tip:** If downloading the Camoufox browser fails or takes too long, you can manually download it from [here](https://github.com/daijro/camoufox/releases/tag/v135.0.1-beta.24), and set the environment variable `CAMOUFOX_EXECUTABLE_PATH` to the path of the browser executable (both absolute and relative paths are supported).
