@@ -1514,13 +1514,25 @@ class BrowserManager {
         this._backgroundPreloadAbort = true;
 
         try {
-            await this._backgroundPreloadTask;
+            await this._withTimeout(
+                this._backgroundPreloadTask,
+                10_000,
+                "Background preload abort timed out after 10s"
+            );
         } catch (error) {
-            // Ignore errors from aborted task
+            // Ignore errors from aborted task (including timeout)
             this.logger.debug(`[ContextPool] Background preload aborted: ${error.message}`);
         }
 
         this.logger.info(`[ContextPool] Background preload aborted successfully`);
+    }
+
+    _withTimeout(promise, ms, message) {
+        let timer;
+        const timeout = new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error(message)), ms);
+        });
+        return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
     }
 
     /**
