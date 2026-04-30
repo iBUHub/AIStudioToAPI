@@ -300,7 +300,7 @@ Usage:
 To simplify the login process for multiple accounts, you can configure the `users.csv` file for auto-fill:
 
 1. Create `users.csv` in the project root.
-2. Format: `email,password,totp_secret` (one per line, `totp_secret` is optional).
+2. Format: `email,password,recovery_email,totp_secret` (one per line, `recovery_email` and `totp_secret` are optional).
 3. Run `npm run setup-auth` and select the account when prompted.
 
 > 📖 For detailed configuration instructions, see: [Account Auto-fill Guide](docs/en/auto-fill-guide.md)

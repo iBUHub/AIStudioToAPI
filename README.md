@@ -302,7 +302,7 @@ services:
 为了简化多个账号的登录流程，您可以通过配置 `users.csv` 文件来实现自动填充：
 
 1. 在项目根目录创建 `users.csv`。
-2. 格式为：`email,password,totp_secret`（每行一个，`totp_secret` 可选）。
+2. 格式为：`email,password,recovery_email,totp_secret`（每行一个，`recovery_email` 和 `totp_secret` 可选）。
 3. 运行 `npm run setup-auth` 后按提示选择账号。
 
 > 📖 详细配置说明请参阅：[账号自动填充指南](docs/zh/auto-fill-guide.md)

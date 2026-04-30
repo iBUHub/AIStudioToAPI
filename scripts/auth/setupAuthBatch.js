@@ -160,7 +160,7 @@ const printHelp = () => {
     console.log("  --login-timeout-ms <ms>    Override per-account login detection timeout");
     console.log("");
     console.log("CSV columns:");
-    console.log("  email,password,totp_secret");
+    console.log("  email,password,recovery_email,totp_secret");
     console.log("");
     console.log("Environment variables:");
     console.log("  SETUP_AUTH_BATCH_ACCOUNTS=all");
@@ -224,10 +224,18 @@ const getHeaderIndex = (header, patterns) =>
 const parseAccountRowWithHeader = (parts, header, index) => {
     const emailIndex = getHeaderIndex(header, [/^email$/i, /^account$/i, /^账号$/, /^邮箱$/]);
     const passwordIndex = getHeaderIndex(header, [/^password$/i, /^pwd$/i, /^pass$/i, /^密码$/]);
+    const recoveryIndex = getHeaderIndex(header, [
+        /^recovery/i,
+        /recovery.*email/i,
+        /^辅助邮箱$/,
+        /^恢复邮箱$/,
+        /^备用邮箱$/,
+    ]);
     const totpIndex = getHeaderIndex(header, [/^totp/i, /^otp/i, /^2fa/i, /secret/i, /密钥/]);
 
     const email = emailIndex >= 0 ? parts[emailIndex] : "";
     const password = passwordIndex >= 0 ? parts[passwordIndex] || "" : "";
+    const recoveryEmail = recoveryIndex >= 0 ? parts[recoveryIndex] || "" : "";
     const totpSecret = totpIndex >= 0 ? parts[totpIndex] || "" : "";
 
     return email
@@ -235,6 +243,7 @@ const parseAccountRowWithHeader = (parts, header, index) => {
               email,
               index,
               password,
+              recoveryEmail,
               totpSecret,
           }
         : null;
@@ -244,12 +253,15 @@ const parseAccountRowWithoutHeader = (parts, index) => {
     const emailIndex = parts.findIndex(part => part.includes("@"));
     if (emailIndex === -1) return null;
 
+    const thirdValue = parts[emailIndex + 2] || "";
+
     return {
         email: parts[emailIndex],
         index,
         password:
             parts[emailIndex + 1] || parts.find((part, partIndex) => partIndex !== emailIndex && part.length > 0) || "",
-        totpSecret: parts[emailIndex + 2] || "",
+        recoveryEmail: thirdValue.includes("@") ? thirdValue : "",
+        totpSecret: parts[emailIndex + 3] || (thirdValue && !thirdValue.includes("@") ? thirdValue : ""),
     };
 };
 
@@ -270,7 +282,8 @@ const getAccountsFromCSV = csvPath => {
 
     const firstRow = rows[0].map(part => part.trim());
     const hasHeader =
-        !firstRow.some(part => part.includes("@")) && getHeaderIndex(firstRow, [/^email$/i, /^账号$/, /^邮箱$/]) !== -1;
+        !firstRow.some(part => part.includes("@")) &&
+        getHeaderIndex(firstRow, [/^email$/i, /^account$/i, /^账号$/, /^邮箱$/]) !== -1;
     const accountRows = hasHeader ? rows.slice(1) : rows;
     const header = hasHeader ? firstRow : [];
 
@@ -356,6 +369,7 @@ const runSetupAuthForAccount = (account, options) => {
     args.push(options.headless ? "--headless" : "--headed");
     if (options.debugUi) args.push("--debug-ui");
     if (options.loginTimeoutMs) args.push("--login-timeout-ms", String(options.loginTimeoutMs));
+    if (account.recoveryEmail) args.push("--recovery-email", account.recoveryEmail);
     if (account.totpSecret) args.push("--totp-secret", account.totpSecret);
 
     return spawnSync(process.execPath, args, {

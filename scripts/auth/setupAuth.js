@@ -115,6 +115,15 @@ const parseCliArgs = args => {
             i++;
             continue;
         }
+        if (arg.startsWith("--recovery-email=")) {
+            options.recoveryEmail = arg.slice("--recovery-email=".length);
+            continue;
+        }
+        if (arg === "--recovery-email") {
+            options.recoveryEmail = readRequiredOptionValue(args, i, "--recovery-email");
+            i++;
+            continue;
+        }
         if (arg.startsWith("--totp-secret=")) {
             options.totpSecret = arg.slice("--totp-secret=".length);
             continue;
@@ -158,6 +167,7 @@ const printHelp = () => {
     console.log("  --lang <zh|en>             Skip language prompt");
     console.log("  --email <email>            Auto-fill the Google account email");
     console.log("  --password <password>      Auto-fill the Google account password");
+    console.log("  --recovery-email <email>   Auto-fill Google recovery email challenge");
     console.log("  --totp-secret <secret>     Auto-fill Google TOTP 2FA code using a Base32 secret");
     console.log("  --account <index|email>    Select an account from users.csv without prompting");
     console.log("  --headless                 Launch Camoufox in headless mode");
@@ -173,6 +183,7 @@ const printHelp = () => {
     console.log("  SETUP_AUTH_LANG=zh|en");
     console.log("  SETUP_AUTH_EMAIL=<email>");
     console.log("  SETUP_AUTH_PASSWORD=<password>");
+    console.log("  SETUP_AUTH_RECOVERY_EMAIL=<recovery email>");
     console.log("  SETUP_AUTH_TOTP_SECRET=<base32 secret>");
     console.log("  SETUP_AUTH_ACCOUNT=<index or email>");
     console.log("  SETUP_AUTH_HEADLESS=true");
@@ -203,6 +214,7 @@ const buildRuntimeOptions = cliOptions => {
         ),
         nonInteractive,
         password: cliOptions.password ?? process.env.SETUP_AUTH_PASSWORD ?? process.env.AUTO_FILL_PWD,
+        recoveryEmail: cliOptions.recoveryEmail ?? process.env.SETUP_AUTH_RECOVERY_EMAIL,
         totpSecret: cliOptions.totpSecret ?? process.env.SETUP_AUTH_TOTP_SECRET,
     };
 };
@@ -277,6 +289,9 @@ const getAccountsFromCSV = () => {
     const passwordHeaderIndex = hasHeader
         ? getHeaderIndex(firstRow, [/^password$/i, /^pwd$/i, /^pass$/i, /^密码$/])
         : -1;
+    const recoveryHeaderIndex = hasHeader
+        ? getHeaderIndex(firstRow, [/^recovery/i, /recovery.*email/i, /^辅助邮箱$/, /^恢复邮箱$/, /^备用邮箱$/])
+        : -1;
     const totpHeaderIndex = hasHeader ? getHeaderIndex(firstRow, [/^totp/i, /^otp/i, /^2fa/i, /secret/i, /密钥/]) : -1;
 
     return accountRows
@@ -288,12 +303,21 @@ const getAccountsFromCSV = () => {
             const password = hasHeader
                 ? parts[passwordHeaderIndex] || ""
                 : parts[emailIdx + 1] || parts.find((p, idx) => idx !== emailIdx && p.length > 0) || "";
-            const totpSecret = hasHeader ? parts[totpHeaderIndex] || "" : parts[emailIdx + 2] || "";
+            const thirdValue = parts[emailIdx + 2] || "";
+            const recoveryEmail = hasHeader
+                ? parts[recoveryHeaderIndex] || ""
+                : thirdValue.includes("@")
+                  ? thirdValue
+                  : "";
+            const totpSecret = hasHeader
+                ? parts[totpHeaderIndex] || ""
+                : parts[emailIdx + 3] || (thirdValue && !thirdValue.includes("@") ? thirdValue : "");
 
             return {
                 email,
                 index: index + 1,
                 password,
+                recoveryEmail,
                 totpSecret,
             };
         })
@@ -929,6 +953,10 @@ const runSaveAuth = (camoufoxExecutablePath, selectedAccount, options) => {
     if (selectedAccount) {
         env.AUTO_FILL_EMAIL = selectedAccount.email;
         env.AUTO_FILL_PWD = selectedAccount.password;
+    }
+    const recoveryEmail = options.recoveryEmail || selectedAccount?.recoveryEmail;
+    if (recoveryEmail) {
+        env.SETUP_AUTH_RECOVERY_EMAIL = recoveryEmail;
     }
     const totpSecret = options.totpSecret || selectedAccount?.totpSecret;
     if (totpSecret) {

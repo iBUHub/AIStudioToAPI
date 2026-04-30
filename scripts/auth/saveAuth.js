@@ -110,6 +110,15 @@ const parseCliArgs = args => {
             i++;
             continue;
         }
+        if (arg.startsWith("--recovery-email=")) {
+            options.recoveryEmail = arg.slice("--recovery-email=".length);
+            continue;
+        }
+        if (arg === "--recovery-email") {
+            options.recoveryEmail = readRequiredOptionValue(args, i, "--recovery-email");
+            i++;
+            continue;
+        }
         if (arg.startsWith("--totp-secret=")) {
             options.totpSecret = arg.slice("--totp-secret=".length);
             continue;
@@ -144,6 +153,7 @@ const printHelp = () => {
     console.log("  --lang <zh|en>             Override output language");
     console.log("  --email <email>            Auto-fill the Google account email");
     console.log("  --password <password>      Auto-fill the Google account password");
+    console.log("  --recovery-email <email>   Auto-fill Google recovery email challenge");
     console.log("  --totp-secret <secret>     Auto-fill Google TOTP 2FA code using a Base32 secret");
     console.log("  --headless                 Launch Camoufox in headless mode");
     console.log("  --headed                   Force headed mode");
@@ -158,6 +168,7 @@ const printHelp = () => {
     console.log("  SETUP_AUTH_DEBUG_UI=true");
     console.log("  AUTO_FILL_EMAIL=<email>");
     console.log("  AUTO_FILL_PWD=<password>");
+    console.log("  SETUP_AUTH_RECOVERY_EMAIL=<recovery email>");
     console.log("  SETUP_AUTH_TOTP_SECRET=<base32 secret>");
     console.log("  CAMOUFOX_EXECUTABLE_PATH=<path to camoufox executable>");
 };
@@ -180,6 +191,7 @@ const runtimeOptions = {
     lang: normalizeLanguage(cliOptions.lang ?? process.env.SETUP_AUTH_LANG),
     loginTimeoutMs,
     nonInteractive: cliOptions.nonInteractive ?? parseBooleanLike(process.env.SETUP_AUTH_NON_INTERACTIVE) ?? false,
+    recoveryEmail: cliOptions.recoveryEmail ?? process.env.SETUP_AUTH_RECOVERY_EMAIL,
     totpSecret: cliOptions.totpSecret ?? process.env.SETUP_AUTH_TOTP_SECRET,
 };
 lang = runtimeOptions.lang;
@@ -674,10 +686,11 @@ const fillTotpInputs = async (page, code) => {
     return false;
 };
 
-const autoFillTotpIfRequired = async (page, totpSecret, randomWait) => {
+const autoFillTotpIfRequired = async (page, totpSecret, randomWait, options = {}) => {
     if (!totpSecret) return false;
 
-    for (let attempt = 0; attempt < 20; attempt++) {
+    const maxAttempts = options.maxAttempts ?? 20;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
         try {
             const title = await page.title();
             if (title.includes("AI Studio")) return false;
@@ -703,6 +716,123 @@ const autoFillTotpIfRequired = async (page, totpSecret, randomWait) => {
             return true;
         }
 
+        await page.waitForTimeout(1000);
+    }
+
+    return false;
+};
+
+const clickRecoveryEmailOption = async (page, randomWait) => {
+    const optionPatterns = [
+        /confirm your recovery email/i,
+        /confirm.*recovery email/i,
+        /verify.*recovery email/i,
+        /确认.*辅助邮箱/,
+        /确认.*恢复邮箱/,
+        /验证.*辅助邮箱/,
+        /验证.*恢复邮箱/,
+    ];
+    const controlSelector = 'button, [role="button"], [role="link"], div[role="link"], div[role="button"]';
+
+    for (const frame of page.frames()) {
+        const controls = frame.locator(controlSelector);
+        const controlCount = await controls.count().catch(() => 0);
+        for (let i = 0; i < Math.min(controlCount, 40); i++) {
+            const control = controls.nth(i);
+            try {
+                if (!(await control.isVisible({ timeout: 150 }))) continue;
+                const text = ((await control.textContent({ timeout: 300 }).catch(() => "")) || "")
+                    .replace(/\s+/g, " ")
+                    .trim();
+                const ariaLabel = ((await control.getAttribute("aria-label").catch(() => "")) || "").trim();
+                const label = text || ariaLabel;
+                if (!optionPatterns.some(pattern => pattern.test(label))) continue;
+
+                console.log(
+                    getText(
+                        "🕵️ 检测到恢复邮箱确认选项，正在选择该验证方式...",
+                        "🕵️ Detected the recovery email verification option. Selecting it..."
+                    )
+                );
+                await control.scrollIntoViewIfNeeded().catch(() => {});
+                await control.click({ timeout: 5000 });
+                await randomWait();
+                return true;
+            } catch {
+                // Continue scanning other candidates.
+            }
+        }
+    }
+
+    return false;
+};
+
+const fillRecoveryEmailInput = async (page, recoveryEmail) => {
+    const challengePattern =
+        /confirm your recovery email|enter your recovery email|recovery email|辅助邮箱|恢复邮箱|备用邮箱|找回邮箱/i;
+    const inputSelector = [
+        'input[name="knowledgePreregisteredEmailResponse"]',
+        'input[type="email"]',
+        'input[aria-label*="recovery" i]',
+        'input[aria-label*="email" i]',
+        'input[aria-label*="邮箱"]',
+        'input[placeholder*="recovery" i]',
+        'input[placeholder*="email" i]',
+        'input[placeholder*="邮箱"]',
+        'input[type="text"]',
+    ].join(", ");
+
+    for (const frame of page.frames()) {
+        let bodyText = "";
+        try {
+            bodyText = (await frame.locator("body").textContent({ timeout: 500 })) || "";
+        } catch {
+            // Frame may still be navigating.
+        }
+        if (!challengePattern.test(bodyText)) continue;
+
+        const inputs = frame.locator(inputSelector);
+        const inputCount = await inputs.count().catch(() => 0);
+        for (let i = 0; i < Math.min(inputCount, 8); i++) {
+            const input = inputs.nth(i);
+            try {
+                if ((await input.isVisible({ timeout: 250 })) && (await input.isEditable())) {
+                    await input.fill(recoveryEmail);
+                    return true;
+                }
+            } catch {
+                // Ignore non-editable or detached candidates.
+            }
+        }
+    }
+
+    return false;
+};
+
+const autoFillRecoveryEmailIfRequired = async (page, recoveryEmail, randomWait) => {
+    if (!recoveryEmail) return false;
+
+    for (let attempt = 0; attempt < 20; attempt++) {
+        try {
+            const title = await page.title();
+            if (title.includes("AI Studio")) return false;
+        } catch {
+            // Page may still be navigating.
+        }
+
+        const filled = await fillRecoveryEmailInput(page, recoveryEmail);
+        if (filled) {
+            console.log(
+                getText("🕵️ 已自动填入恢复邮箱验证。", "🕵️ Auto-filled the recovery email verification challenge.")
+            );
+            await randomWait();
+            await page.keyboard.press("Enter");
+            await randomWait();
+            await clickGoogleTransitionButtons(page, randomWait);
+            return true;
+        }
+
+        await clickRecoveryEmailOption(page, randomWait);
         await page.waitForTimeout(1000);
     }
 
@@ -860,7 +990,10 @@ const autoFillTotpIfRequired = async (page, totpSecret, randomWait) => {
 
                 try {
                     await acceptAiStudioTermsIfPresent(page, randomWait, { rounds: 4 });
-                    await autoFillTotpIfRequired(page, runtimeOptions.totpSecret, randomWait);
+                    await autoFillTotpIfRequired(page, runtimeOptions.totpSecret, randomWait, {
+                        maxAttempts: runtimeOptions.recoveryEmail ? 8 : 20,
+                    });
+                    await autoFillRecoveryEmailIfRequired(page, runtimeOptions.recoveryEmail, randomWait);
                     await acceptAiStudioTermsIfPresent(page, randomWait, { rounds: 4 });
                     await clickGoogleTransitionButtons(page, randomWait);
                 } catch (e) {
