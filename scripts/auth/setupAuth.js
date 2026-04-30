@@ -377,8 +377,9 @@ const selectAccountFromCSV = accounts =>
         rl.question("> ", answer => {
             rl.close();
             const idx = parseInt(answer.trim(), 10);
-            if (!Number.isNaN(idx) && idx > 0 && idx <= accounts.length) {
-                resolve(accounts[idx - 1]);
+            const selectedAccount = Number.isNaN(idx) ? null : accounts.find(acc => acc.index === idx);
+            if (selectedAccount) {
+                resolve(selectedAccount);
             } else {
                 resolve(null);
             }
@@ -480,43 +481,46 @@ const getCamoufoxInstallConfig = () => {
     throw new Error(getText(`不支持的操作系统: ${platform}`, `Unsupported operating system: ${platform}`));
 };
 
+const normalizeProxyURL = proxy => {
+    let normalized = String(proxy || "").trim();
+    if (!/^\w+:\/\//.test(normalized)) {
+        normalized = `http://${normalized}`;
+    }
+    return new URL(normalized);
+};
+
+const shouldBypassProxy = (targetUrl, bypass) => {
+    if (!bypass) return false;
+    const domains = bypass.split(",").map(domain => {
+        let normalized = domain.trim();
+        if (!normalized.startsWith(".")) normalized = `.${normalized}`;
+        return normalized;
+    });
+    const targetDomain = `.${targetUrl.hostname}`;
+    return domains.some(domain => targetDomain.endsWith(domain));
+};
+
+const createProxyAgent = (proxy, targetUrl) => {
+    if (!proxy) return undefined;
+    if (targetUrl && proxy.bypass && shouldBypassProxy(targetUrl, proxy.bypass)) return undefined;
+
+    const proxyUrl = normalizeProxyURL(proxy.server);
+    if (proxyUrl.protocol.startsWith("socks")) {
+        if (proxyUrl.protocol === "socks5:") proxyUrl.protocol = "socks5h:";
+        else if (proxyUrl.protocol === "socks4:") proxyUrl.protocol = "socks4a:";
+        return new SocksProxyAgent(proxyUrl);
+    }
+
+    if (proxy.username) {
+        proxyUrl.username = proxy.username;
+        proxyUrl.password = proxy.password || "";
+    }
+
+    return new HttpsProxyAgent(proxyUrl);
+};
+
 const downloadFile = async (url, outFilePath) => {
     const maxRedirects = 10;
-    const normalizeProxyURL = proxy => {
-        let normalized = String(proxy || "").trim();
-        if (!/^\w+:\/\//.test(normalized)) {
-            normalized = `http://${normalized}`;
-        }
-        return new URL(normalized);
-    };
-    const shouldBypassProxy = (targetUrl, bypass) => {
-        if (!bypass) return false;
-        const domains = bypass.split(",").map(domain => {
-            let normalized = domain.trim();
-            if (!normalized.startsWith(".")) normalized = `.${normalized}`;
-            return normalized;
-        });
-        const targetDomain = `.${targetUrl.hostname}`;
-        return domains.some(domain => targetDomain.endsWith(domain));
-    };
-    const createProxyAgent = (proxy, targetUrl) => {
-        if (!proxy) return undefined;
-        if (targetUrl && proxy.bypass && shouldBypassProxy(targetUrl, proxy.bypass)) return undefined;
-
-        const proxyUrl = normalizeProxyURL(proxy.server);
-        if (proxyUrl.protocol.startsWith("socks")) {
-            if (proxyUrl.protocol === "socks5:") proxyUrl.protocol = "socks5h:";
-            else if (proxyUrl.protocol === "socks4:") proxyUrl.protocol = "socks4a:";
-            return new SocksProxyAgent(proxyUrl);
-        }
-
-        if (proxy.username) {
-            proxyUrl.username = proxy.username;
-            proxyUrl.password = proxy.password || "";
-        }
-
-        return new HttpsProxyAgent(proxyUrl);
-    };
     const formatBytes = bytes => {
         if (!Number.isFinite(bytes) || bytes < 0) return "0 B";
         if (bytes < 1024) return `${bytes} B`;
@@ -650,10 +654,14 @@ const downloadFile = async (url, outFilePath) => {
 
 const fetchJson = async url =>
     new Promise((resolve, reject) => {
+        const targetUrl = new URL(url);
+        const proxyConfig = parseProxyFromEnv();
+        const agent = createProxyAgent(proxyConfig, targetUrl);
         https
             .get(
-                url,
+                targetUrl,
                 {
+                    agent,
                     headers: {
                         Accept: "application/vnd.github+json",
                         "User-Agent": "aistudio-to-api setup-auth",
