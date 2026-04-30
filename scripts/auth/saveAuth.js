@@ -920,6 +920,7 @@ const autoFillTotpIfRequired = async (page, totpSecret, randomWait) => {
 
     if (!loginDetected) {
         if (runtimeOptions.nonInteractive) {
+            await logAuthUiDiagnostics(page, "登录超时前未检测到 AI Studio 标题");
             console.error(
                 getText(
                     `❌ 在 ${maxWaitTime}ms 内未检测到 AI Studio 登录成功，已退出无交互模式。`,
