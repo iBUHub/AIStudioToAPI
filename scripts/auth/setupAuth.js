@@ -253,23 +253,51 @@ const parseCSVLine = line => {
     return parts;
 };
 
+const getHeaderIndex = (header, patterns) =>
+    header.findIndex(column => patterns.some(pattern => pattern.test(String(column || "").trim())));
+
 const getAccountsFromCSV = () => {
     const csvPath = path.join(PROJECT_ROOT, "users.csv");
     if (!fs.existsSync(csvPath)) return [];
 
     const content = fs.readFileSync(csvPath, "utf-8");
-    const lines = content.split(/\r?\n/).filter(line => line.trim() !== "");
+    const rows = content
+        .split(/\r?\n/)
+        .filter(line => line.trim() !== "")
+        .map(line => parseCSVLine(line));
 
-    return lines
-        .map(line => parseCSVLine(line))
-        .filter(parts => parts.some(p => p.includes("@")))
+    if (rows.length === 0) return [];
+
+    const firstRow = rows[0].map(part => part.trim());
+    const hasHeader =
+        !firstRow.some(part => part.includes("@")) &&
+        getHeaderIndex(firstRow, [/^email$/i, /^account$/i, /^账号$/, /^邮箱$/]) !== -1;
+    const accountRows = hasHeader ? rows.slice(1) : rows;
+    const emailHeaderIndex = hasHeader ? getHeaderIndex(firstRow, [/^email$/i, /^account$/i, /^账号$/, /^邮箱$/]) : -1;
+    const passwordHeaderIndex = hasHeader
+        ? getHeaderIndex(firstRow, [/^password$/i, /^pwd$/i, /^pass$/i, /^密码$/])
+        : -1;
+    const totpHeaderIndex = hasHeader ? getHeaderIndex(firstRow, [/^totp/i, /^otp/i, /^2fa/i, /secret/i, /密钥/]) : -1;
+
+    return accountRows
         .map((parts, index) => {
-            const emailIdx = parts.findIndex(p => p.includes("@"));
+            const emailIdx = hasHeader ? emailHeaderIndex : parts.findIndex(p => p.includes("@"));
+            if (emailIdx === -1) return null;
+
             const email = parts[emailIdx];
-            const password = parts[emailIdx + 1] || parts.find((p, idx) => idx !== emailIdx && p.length > 0) || "";
-            return { email, index: index + 1, password };
+            const password = hasHeader
+                ? parts[passwordHeaderIndex] || ""
+                : parts[emailIdx + 1] || parts.find((p, idx) => idx !== emailIdx && p.length > 0) || "";
+            const totpSecret = hasHeader ? parts[totpHeaderIndex] || "" : parts[emailIdx + 2] || "";
+
+            return {
+                email,
+                index: index + 1,
+                password,
+                totpSecret,
+            };
         })
-        .filter(acc => acc.email);
+        .filter(acc => acc?.email);
 };
 
 const findAccountFromCSV = selector => {
@@ -902,8 +930,9 @@ const runSaveAuth = (camoufoxExecutablePath, selectedAccount, options) => {
         env.AUTO_FILL_EMAIL = selectedAccount.email;
         env.AUTO_FILL_PWD = selectedAccount.password;
     }
-    if (options.totpSecret) {
-        env.SETUP_AUTH_TOTP_SECRET = options.totpSecret;
+    const totpSecret = options.totpSecret || selectedAccount?.totpSecret;
+    if (totpSecret) {
+        env.SETUP_AUTH_TOTP_SECRET = totpSecret;
     }
 
     const result = spawnSync(process.execPath, [path.join("scripts", "auth", "saveAuth.js")], {

@@ -7,12 +7,12 @@
 在项目根目录创建 `users.csv`，按以下格式添加账号密码：
 
 ```csv
-email,password
-your-email-1@gmail.com,your-password-1
-your-email-2@gmail.com,your-password-2
+email,password,totp_secret
+your-email-1@gmail.com,your-password-1,BASE32TOTPSECRET1
+your-email-2@gmail.com,your-password-2,
 ```
 
-> 💡 **提示**：第一行的表头（`email,password`）是可选的，脚本会自动识别包含 `@` 符号的列作为账号。
+> 💡 **提示**：第一行的表头是可选的，脚本会自动识别包含 `@` 符号的列作为账号。`totp_secret` 也是可选列，只用于标准 TOTP 2FA。
 
 ### 2. 开始登录
 
@@ -40,6 +40,18 @@ npm run setup-auth -- --non-interactive --email your-email@gmail.com --password 
 
 ```bash
 npm run setup-auth -- --non-interactive --email your-email@gmail.com --password your-password --totp-secret your-base32-secret --headless
+```
+
+如果要批量添加 `users.csv` 中的全部账号：
+
+```bash
+npm run setup-auth-batch -- --headless
+```
+
+也可以只处理部分账号，并在某个账号失败后继续处理剩余账号：
+
+```bash
+npm run setup-auth-batch -- --accounts 1,3-5 --headless --continue-on-error
 ```
 
 无交互模式下，如果在超时时间内未检测到 AI Studio 登录成功，脚本会直接退出并返回非 0 状态码。可通过 `--login-timeout-ms` 调整超时时间。

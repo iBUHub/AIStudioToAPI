@@ -7,12 +7,12 @@ Using a `users.csv` file significantly simplifies the Google login process.
 Create a `users.csv` file in the project root and add your account credentials in the following format:
 
 ```csv
-email,password
-your-email-1@gmail.com,your-password-1
-your-email-2@gmail.com,your-password-2
+email,password,totp_secret
+your-email-1@gmail.com,your-password-1,BASE32TOTPSECRET1
+your-email-2@gmail.com,your-password-2,
 ```
 
-> 💡 **Tip**: The header in the first line (`email,password`) is optional. The script automatically identifies the column containing the `@` symbol as the account.
+> 💡 **Tip**: The header in the first line is optional. The script automatically identifies the column containing the `@` symbol as the account. `totp_secret` is optional and only applies to standard TOTP 2FA.
 
 ### 2. Start Login
 
@@ -40,6 +40,18 @@ If the account uses TOTP-based 2FA, you can append `--totp-secret`:
 
 ```bash
 npm run setup-auth -- --non-interactive --email your-email@gmail.com --password your-password --totp-secret your-base32-secret --headless
+```
+
+To add every account in `users.csv` in batch:
+
+```bash
+npm run setup-auth-batch -- --headless
+```
+
+You can also process only part of the list and continue with remaining accounts after one account fails:
+
+```bash
+npm run setup-auth-batch -- --accounts 1,3-5 --headless --continue-on-error
 ```
 
 In non-interactive mode, the script exits with a non-zero status if AI Studio login is not detected before timeout. Use `--login-timeout-ms` to adjust the timeout.

@@ -15,6 +15,7 @@
         "prestart": "npm run build:ui",
         "save-auth": "node scripts/auth/saveAuth.js",
         "setup-auth": "node scripts/auth/setupAuth.js",
+        "setup-auth-batch": "node scripts/auth/setupAuthBatch.js",
         "prepare": "husky install",
         "lint": "eslint . && stylelint \"ui/**/*.{css,less}\"",
         "lint:fix": "eslint . --fix && stylelint \"ui/**/*.{css,less}\" --fix",
