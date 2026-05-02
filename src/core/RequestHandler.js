@@ -1124,6 +1124,8 @@ class RequestHandler {
                                 break;
                             }
 
+                            this._cancelCurrentAttemptBeforeRetry(proxyRequest, currentQueueAuthIndex);
+
                             try {
                                 currentQueue.close(this._getImmediateStatusRetryCloseReason(initialStatus));
                             } catch {
@@ -1539,6 +1541,8 @@ class RequestHandler {
                                 break;
                             }
 
+                            this._cancelCurrentAttemptBeforeRetry(proxyRequest, currentQueueAuthIndex);
+
                             try {
                                 currentQueue.close(this._getImmediateStatusRetryCloseReason(initialStatus));
                             } catch {
@@ -1936,6 +1940,8 @@ class RequestHandler {
                                 skipFinalFailureSwitch = true;
                                 break;
                             }
+
+                            this._cancelCurrentAttemptBeforeRetry(proxyRequest, currentQueueAuthIndex);
 
                             try {
                                 currentQueue.close(this._getImmediateStatusRetryCloseReason(initialStatus));
@@ -3040,6 +3046,8 @@ class RequestHandler {
                     break;
                 }
 
+                this._cancelCurrentAttemptBeforeRetry(proxyRequest, currentQueueAuthIndex);
+
                 try {
                     currentQueue.close(this._getImmediateStatusRetryCloseReason(headerStatus));
                 } catch {
@@ -3438,14 +3446,7 @@ class RequestHandler {
                     break;
                 }
 
-                // Cancel browser request on the ORIGINAL account that owns this queue.
-                // request_attempt_id isolates retries so a delayed cancel cannot abort a newer attempt.
-                // If account has switched, currentAuthIndex may differ from currentQueueAuthIndex.
-                this._cancelBrowserRequest(
-                    proxyRequest.request_id,
-                    currentQueueAuthIndex,
-                    proxyRequest.request_attempt_id
-                );
+                this._cancelCurrentAttemptBeforeRetry(proxyRequest, currentQueueAuthIndex);
 
                 // Explicitly close the old queue before creating a new one
                 // This ensures waitingResolvers are properly rejected even if authIndex changed
@@ -3993,6 +3994,10 @@ class RequestHandler {
                 `[Request] Unable to send cancel instruction: No available WebSocket connection for account #${targetAuthIndex}.`
             );
         }
+    }
+
+    _cancelCurrentAttemptBeforeRetry(proxyRequest, currentQueueAuthIndex) {
+        this._cancelBrowserRequest(proxyRequest.request_id, currentQueueAuthIndex, proxyRequest.request_attempt_id);
     }
 
     /**
