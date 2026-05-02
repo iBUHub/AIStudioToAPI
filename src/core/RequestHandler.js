@@ -4233,17 +4233,11 @@ class RequestHandler {
     }
 
     _advanceProxyRequestAttempt(proxyRequest) {
-        const previousAttemptId = proxyRequest.request_attempt_id;
         proxyRequest.request_attempt_number = (proxyRequest.request_attempt_number || 1) + 1;
         proxyRequest.request_attempt_id = this._generateRequestAttemptId(
             proxyRequest.request_id,
             proxyRequest.request_attempt_number
         );
-        if (previousAttemptId && previousAttemptId !== proxyRequest.request_attempt_id) {
-            this.logger.info(
-                `[Request] Retry attempt ID changed for request ID: ${proxyRequest.request_id}, attempt ID: ${proxyRequest.request_attempt_id}`
-            );
-        }
     }
 
     _forwardRequest(proxyRequest) {
