@@ -1138,6 +1138,8 @@ class RequestHandler {
                             this.logger.warn(
                                 `[Request] OpenAI real stream received ${initialStatus}, preparing retry...`
                             );
+                            this._cancelCurrentAttemptBeforeRetry(proxyRequest, currentQueueAuthIndex);
+
                             const retryPrepared = await this._prepareImmediateStatusRetry(
                                 initialMessage,
                                 requestId,
@@ -1148,8 +1150,6 @@ class RequestHandler {
                                 skipFinalFailureSwitch = true;
                                 break;
                             }
-
-                            this._cancelCurrentAttemptBeforeRetry(proxyRequest, currentQueueAuthIndex);
 
                             try {
                                 currentQueue.close(this._getImmediateStatusRetryCloseReason(initialStatus));
@@ -1170,6 +1170,7 @@ class RequestHandler {
                     }
 
                     if (initialMessage.event_type === "error") {
+                        this._cancelCurrentAttemptBeforeRetry(proxyRequest, currentQueueAuthIndex);
                         this._logFinalRequestFailure(initialMessage, "OpenAI real stream", requestId, {
                             afterRetries: false,
                         });
@@ -1564,6 +1565,8 @@ class RequestHandler {
                             this.logger.warn(
                                 `[Request] OpenAI Response API real stream received ${initialStatus}, preparing retry...`
                             );
+                            this._cancelCurrentAttemptBeforeRetry(proxyRequest, currentQueueAuthIndex);
+
                             const retryPrepared = await this._prepareImmediateStatusRetry(
                                 initialMessage,
                                 requestId,
@@ -1574,8 +1577,6 @@ class RequestHandler {
                                 skipFinalFailureSwitch = true;
                                 break;
                             }
-
-                            this._cancelCurrentAttemptBeforeRetry(proxyRequest, currentQueueAuthIndex);
 
                             try {
                                 currentQueue.close(this._getImmediateStatusRetryCloseReason(initialStatus));
@@ -1596,6 +1597,7 @@ class RequestHandler {
                     }
 
                     if (initialMessage.event_type === "error") {
+                        this._cancelCurrentAttemptBeforeRetry(proxyRequest, currentQueueAuthIndex);
                         this._logFinalRequestFailure(initialMessage, "OpenAI Response API real stream", requestId, {
                             afterRetries: false,
                         });
@@ -1959,6 +1961,8 @@ class RequestHandler {
                             this.logger.warn(
                                 `[Request] Claude real stream received ${initialStatus}, preparing retry...`
                             );
+                            this._cancelCurrentAttemptBeforeRetry(proxyRequest, currentQueueAuthIndex);
+
                             const retryPrepared = await this._prepareImmediateStatusRetry(
                                 initialMessage,
                                 requestId,
@@ -1969,8 +1973,6 @@ class RequestHandler {
                                 skipFinalFailureSwitch = true;
                                 break;
                             }
-
-                            this._cancelCurrentAttemptBeforeRetry(proxyRequest, currentQueueAuthIndex);
 
                             try {
                                 currentQueue.close(this._getImmediateStatusRetryCloseReason(initialStatus));
@@ -1991,6 +1993,7 @@ class RequestHandler {
                     }
 
                     if (initialMessage.event_type === "error") {
+                        this._cancelCurrentAttemptBeforeRetry(proxyRequest, currentQueueAuthIndex);
                         this._logFinalRequestFailure(initialMessage, "Claude real stream", requestId, {
                             afterRetries: false,
                         });
@@ -2958,6 +2961,8 @@ class RequestHandler {
                 this.config?.immediateSwitchStatusCodes?.includes(headerStatus)
             ) {
                 this.logger.warn(`[Request] Gemini real stream received ${headerStatus}, preparing retry...`);
+                this._cancelCurrentAttemptBeforeRetry(proxyRequest, currentQueueAuthIndex);
+
                 const retryPrepared = await this._prepareImmediateStatusRetry(
                     headerMessage,
                     proxyRequest.request_id,
@@ -2968,8 +2973,6 @@ class RequestHandler {
                     skipFinalFailureSwitch = true;
                     break;
                 }
-
-                this._cancelCurrentAttemptBeforeRetry(proxyRequest, currentQueueAuthIndex);
 
                 try {
                     currentQueue.close(this._getImmediateStatusRetryCloseReason(headerStatus));
@@ -2991,6 +2994,7 @@ class RequestHandler {
         }
 
         if (headerMessage.event_type === "error") {
+            this._cancelCurrentAttemptBeforeRetry(proxyRequest, currentQueueAuthIndex);
             if (isUserAbortedError(headerMessage)) {
                 this.logger.debug(
                     `[Request] Request #${proxyRequest.request_id} was properly cancelled by user, not counted in failure statistics.`
@@ -3310,6 +3314,7 @@ class RequestHandler {
                 }
 
                 lastError = errorPayload;
+                this._cancelCurrentAttemptBeforeRetry(proxyRequest, currentQueueAuthIndex);
 
                 // Check if we should stop retrying immediately based on status code
                 const errorStatus = Number(errorPayload?.status);
@@ -3319,8 +3324,6 @@ class RequestHandler {
                     !isUserAbortedError(errorPayload)
                 ) {
                     this.logger.warn(`[Request] Received ${errorStatus}, preparing retry...`);
-                    this._cancelCurrentAttemptBeforeRetry(proxyRequest, currentQueueAuthIndex);
-
                     try {
                         const retryPrepared = await this._prepareImmediateStatusRetry(
                             errorPayload,
@@ -3371,8 +3374,6 @@ class RequestHandler {
                     );
                     break;
                 }
-
-                this._cancelCurrentAttemptBeforeRetry(proxyRequest, currentQueueAuthIndex);
 
                 // Explicitly close the old queue before creating a new one
                 // This ensures waitingResolvers are properly rejected even if authIndex changed
