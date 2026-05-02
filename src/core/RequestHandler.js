@@ -2484,7 +2484,7 @@ class RequestHandler {
         let fullBody = "";
         let receiving = true;
         while (receiving) {
-            const message = await messageQueue.dequeue();
+            const message = await messageQueue.dequeue(this.timeouts.FAKE_STREAM);
             if (message.type === "STREAM_END") {
                 this.logger.info("[Request] Claude received end signal.");
                 receiving = false;
@@ -3113,7 +3113,7 @@ class RequestHandler {
             const chunks = [];
             let receiving = true;
             while (receiving) {
-                const message = await activeQueue.dequeue();
+                const message = await activeQueue.dequeue(this.timeouts.FAKE_STREAM);
                 if (message.type === "STREAM_END") {
                     this.logger.info("[Request] Received end signal, data reception complete.");
                     receiving = false;
@@ -3215,7 +3215,7 @@ class RequestHandler {
             try {
                 this._forwardRequest(proxyRequest);
 
-                const initialMessage = await currentQueue.dequeue();
+                const initialMessage = await currentQueue.dequeue(this.timeouts.FAKE_STREAM);
 
                 if (initialMessage.event_type === "timeout") {
                     throw new Error(
@@ -3533,7 +3533,7 @@ class RequestHandler {
         let fullBody = "";
         let receiving = true;
         while (receiving) {
-            const message = await messageQueue.dequeue();
+            const message = await messageQueue.dequeue(this.timeouts.FAKE_STREAM);
             if (message.type === "STREAM_END") {
                 this.logger.info("[Request] OpenAI Response API received end signal.");
                 receiving = false;
@@ -3572,7 +3572,7 @@ class RequestHandler {
         let fullBody = "";
         let receiving = true;
         while (receiving) {
-            const message = await messageQueue.dequeue();
+            const message = await messageQueue.dequeue(this.timeouts.FAKE_STREAM);
             if (message.type === "STREAM_END") {
                 this.logger.info("[Request] OpenAI received end signal.");
                 receiving = false;
