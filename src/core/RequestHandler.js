@@ -1763,8 +1763,8 @@ class RequestHandler {
                                 activeQueue,
                                 res,
                                 model,
-                                responseDefaults,
-                                requestId
+                                requestId,
+                                responseDefaults
                             );
                         }
                     } finally {
@@ -3646,7 +3646,7 @@ class RequestHandler {
         }
     }
 
-    async _sendOpenAIResponseAPINonStreamResponse(messageQueue, res, model, responseDefaults = {}, requestId) {
+    async _sendOpenAIResponseAPINonStreamResponse(messageQueue, res, model, requestId, responseDefaults = {}) {
         let fullBody = "";
         let receiving = true;
         while (receiving) {
