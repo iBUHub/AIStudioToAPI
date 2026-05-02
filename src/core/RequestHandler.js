@@ -3319,6 +3319,8 @@ class RequestHandler {
                     !isUserAbortedError(errorPayload)
                 ) {
                     this.logger.warn(`[Request] Received ${errorStatus}, preparing retry...`);
+                    this._cancelCurrentAttemptBeforeRetry(proxyRequest, currentQueueAuthIndex);
+
                     try {
                         const retryPrepared = await this._prepareImmediateStatusRetry(
                             errorPayload,
@@ -3337,8 +3339,6 @@ class RequestHandler {
                         );
                         break;
                     }
-
-                    this._cancelCurrentAttemptBeforeRetry(proxyRequest, currentQueueAuthIndex);
 
                     try {
                         currentQueue.close("retry_creating_new_queue");
