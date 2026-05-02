@@ -3411,6 +3411,9 @@ class RequestHandler {
                 );
                 // Update tracked authIndex for the new queue
                 currentQueueAuthIndex = this.currentAuthIndex;
+                if (Number.isInteger(currentQueueAuthIndex) && currentQueueAuthIndex >= 0) {
+                    immediateSwitchTracker.attemptedAuthIndices.add(currentQueueAuthIndex);
+                }
 
                 // Wait before the next retry
                 await new Promise(resolve => setTimeout(resolve, this.retryDelay));
