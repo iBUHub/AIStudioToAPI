@@ -3337,6 +3337,9 @@ class RequestHandler {
                         );
                         break;
                     }
+
+                    this._cancelCurrentAttemptBeforeRetry(proxyRequest, currentQueueAuthIndex);
+
                     try {
                         currentQueue.close("retry_creating_new_queue");
                     } catch (e) {
@@ -3997,6 +4000,12 @@ class RequestHandler {
     }
 
     _cancelCurrentAttemptBeforeRetry(proxyRequest, currentQueueAuthIndex) {
+        if (!Number.isInteger(currentQueueAuthIndex) || currentQueueAuthIndex < 0) {
+            this.logger.debug(
+                `[Request] Skipping retry cancellation for request #${proxyRequest.request_id}: invalid auth index ${currentQueueAuthIndex}.`
+            );
+            return;
+        }
         this._cancelBrowserRequest(proxyRequest.request_id, currentQueueAuthIndex, proxyRequest.request_attempt_id);
     }
 
