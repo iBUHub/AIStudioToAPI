@@ -601,7 +601,10 @@ class RequestHandler {
                 sendError: () => {},
             });
             if (!ready) {
-                throw new Error("System not ready after non-current account retry preparation.");
+                throw new Error(
+                    `System not ready after non-current account retry preparation for request #${requestId}: ` +
+                        `status=${errorDetails.status}, sourceAuthIndex=${sourceAuthIndex}, currentAuthIndex=${currentAuthIndex}.`
+                );
             }
 
             const retryAuthIndex = this.currentAuthIndex;
@@ -610,13 +613,15 @@ class RequestHandler {
             }
             if (!Number.isInteger(retryAuthIndex) || retryAuthIndex < 0) {
                 this.logger.warn(
-                    `[Request] Non-current account retry for request #${requestId} did not find a valid current account.`
+                    `[Request] Non-current account retry for request #${requestId} did not find a valid current account ` +
+                        `(status=${errorDetails.status}, sourceAuthIndex=${sourceAuthIndex}, retryAuthIndex=${retryAuthIndex}).`
                 );
                 return false;
             }
             if (tracker.attemptedAuthIndices.has(retryAuthIndex)) {
                 this.logger.warn(
-                    `[Request] Non-current account retry for request #${requestId} would reuse already-attempted account #${retryAuthIndex}, stopping account-switch retries.`
+                    `[Request] Non-current account retry for request #${requestId} would reuse already-attempted account #${retryAuthIndex} ` +
+                        `(status=${errorDetails.status}, sourceAuthIndex=${sourceAuthIndex}), stopping account-switch retries.`
                 );
                 return false;
             }
@@ -1098,15 +1103,15 @@ class RequestHandler {
                             this.config?.immediateSwitchStatusCodes?.includes(initialStatus)
                         ) {
                             this.logger.warn(
-                                `[Request] OpenAI real stream received ${initialStatus}, switching account and retrying...`
+                                `[Request] OpenAI real stream received ${initialStatus}, preparing retry...`
                             );
-                            const switched = await this._prepareImmediateStatusRetry(
+                            const retryPrepared = await this._prepareImmediateStatusRetry(
                                 initialMessage,
                                 requestId,
                                 immediateSwitchTracker,
                                 currentQueueAuthIndex
                             );
-                            if (!switched) {
+                            if (!retryPrepared) {
                                 skipFinalFailureSwitch = true;
                                 break;
                             }
@@ -1507,15 +1512,15 @@ class RequestHandler {
                             this.config?.immediateSwitchStatusCodes?.includes(initialStatus)
                         ) {
                             this.logger.warn(
-                                `[Request] OpenAI Response API real stream received ${initialStatus}, switching account and retrying...`
+                                `[Request] OpenAI Response API real stream received ${initialStatus}, preparing retry...`
                             );
-                            const switched = await this._prepareImmediateStatusRetry(
+                            const retryPrepared = await this._prepareImmediateStatusRetry(
                                 initialMessage,
                                 requestId,
                                 immediateSwitchTracker,
                                 currentQueueAuthIndex
                             );
-                            if (!switched) {
+                            if (!retryPrepared) {
                                 skipFinalFailureSwitch = true;
                                 break;
                             }
@@ -1893,15 +1898,15 @@ class RequestHandler {
                             this.config?.immediateSwitchStatusCodes?.includes(initialStatus)
                         ) {
                             this.logger.warn(
-                                `[Request] Claude real stream received ${initialStatus}, switching account and retrying...`
+                                `[Request] Claude real stream received ${initialStatus}, preparing retry...`
                             );
-                            const switched = await this._prepareImmediateStatusRetry(
+                            const retryPrepared = await this._prepareImmediateStatusRetry(
                                 initialMessage,
                                 requestId,
                                 immediateSwitchTracker,
                                 currentQueueAuthIndex
                             );
-                            if (!switched) {
+                            if (!retryPrepared) {
                                 skipFinalFailureSwitch = true;
                                 break;
                             }
@@ -2970,16 +2975,14 @@ class RequestHandler {
                 Number.isFinite(headerStatus) &&
                 this.config?.immediateSwitchStatusCodes?.includes(headerStatus)
             ) {
-                this.logger.warn(
-                    `[Request] Gemini real stream received ${headerStatus}, switching account and retrying...`
-                );
-                const switched = await this._prepareImmediateStatusRetry(
+                this.logger.warn(`[Request] Gemini real stream received ${headerStatus}, preparing retry...`);
+                const retryPrepared = await this._prepareImmediateStatusRetry(
                     headerMessage,
                     proxyRequest.request_id,
                     immediateSwitchTracker,
                     currentQueueAuthIndex
                 );
-                if (!switched) {
+                if (!retryPrepared) {
                     skipFinalFailureSwitch = true;
                     break;
                 }
@@ -3329,15 +3332,15 @@ class RequestHandler {
                     this.config?.immediateSwitchStatusCodes?.includes(errorStatus) &&
                     !isUserAbortedError(errorPayload)
                 ) {
-                    this.logger.warn(`[Request] Received ${errorStatus}, switching account and retrying...`);
+                    this.logger.warn(`[Request] Received ${errorStatus}, preparing retry...`);
                     try {
-                        const switched = await this._prepareImmediateStatusRetry(
+                        const retryPrepared = await this._prepareImmediateStatusRetry(
                             errorPayload,
                             proxyRequest.request_id,
                             immediateSwitchTracker,
                             currentQueueAuthIndex
                         );
-                        if (!switched) {
+                        if (!retryPrepared) {
                             lastError = { ...errorPayload, skipAccountSwitch: true };
                             break;
                         }
