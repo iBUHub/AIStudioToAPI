@@ -642,9 +642,11 @@ class RequestHandler {
         return this._performImmediateSwitchRetry(errorDetails, requestId, tracker);
     }
 
-    _logFinalRequestFailure(errorDetails, contextLabel = "Request") {
+    _logFinalRequestFailure(errorDetails, contextLabel = "Request", requestId = null, options = {}) {
+        const requestIdSuffix = requestId ? `, request ID: ${requestId}` : "";
+        const failurePhase = options.afterRetries === false ? "failed" : "failed after retries";
         this.logger.error(
-            `[Request] ${contextLabel} failed after retries. Status code: ${errorDetails?.status || 500}, message: ${errorDetails?.message || "Unknown error"}`
+            `❌ [Request] ${contextLabel} ${failurePhase}. Status code: ${errorDetails?.status || 500}, message: ${errorDetails?.message || "Unknown error"}${requestIdSuffix}`
         );
     }
 
@@ -840,7 +842,7 @@ class RequestHandler {
                     const rotationCountText =
                         this.config.switchOnUses > 0 ? `${usageCount}/${this.config.switchOnUses}` : `${usageCount}`;
                     this.logger.info(
-                        `[Request] Generation request - account rotation count: ${rotationCountText} (Current account: ${this.currentAuthIndex})`
+                        `[Request] Google generation request - account rotation count: ${rotationCountText} (Current account: ${this.currentAuthIndex}), request ID: ${requestId}`
                     );
                     if (this.authSwitcher.shouldSwitchByUsage()) {
                         this.needsSwitchingAfterRequest = true;
@@ -892,7 +894,7 @@ class RequestHandler {
                 // Handle queue timeout by notifying browser
                 this._handleQueueTimeout(error, requestId);
 
-                this._handleRequestError(error, res, "gemini");
+                this._handleRequestError(error, res, "gemini", requestId);
             } finally {
                 this.connectionRegistry.removeMessageQueue(requestId, "request_complete");
                 if (this.needsSwitchingAfterRequest) {
@@ -914,7 +916,7 @@ class RequestHandler {
     // Process File Upload requests
     async processUploadRequest(req, res) {
         const requestId = this._generateRequestId();
-        this.logger.info(`[Upload] Processing upload request ${req.method} ${req.path} (ID: ${requestId})`);
+        this.logger.info(`[Upload] Processing upload request ${req.method} ${req.path}, request ID: ${requestId}`);
         this._startTrackedRequest(requestId, req, {
             apiFormat: "upload",
             isStreaming: false,
@@ -975,7 +977,7 @@ class RequestHandler {
 
                 await this._handleNonStreamResponse(proxyRequest, messageQueue, req, res);
             } catch (error) {
-                this._handleRequestError(error, res);
+                this._handleRequestError(error, res, "openai", requestId);
             } finally {
                 this.connectionRegistry.removeMessageQueue(requestId, "request_complete");
                 if (!res.writableEnded) res.end();
@@ -1031,7 +1033,7 @@ class RequestHandler {
                 const rotationCountText =
                     this.config.switchOnUses > 0 ? `${usageCount}/${this.config.switchOnUses}` : `${usageCount}`;
                 this.logger.info(
-                    `[Request] OpenAI generation request - account rotation count: ${rotationCountText} (Current account: ${this.currentAuthIndex})`
+                    `[Request] OpenAI generation request - account rotation count: ${rotationCountText} (Current account: ${this.currentAuthIndex}), request ID: ${requestId}`
                 );
                 if (this.authSwitcher.shouldSwitchByUsage()) {
                     this.needsSwitchingAfterRequest = true;
@@ -1046,7 +1048,9 @@ class RequestHandler {
                 model = result.cleanModelName;
                 modelStreamingMode = result.modelStreamingMode || null;
             } catch (error) {
-                this.logger.error(`[Adapter] OpenAI request translation failed: ${error.message}`);
+                this.logger.error(
+                    `❌ [Adapter] OpenAI request translation failed: ${error.message}, request ID: ${requestId}`
+                );
                 return this._sendErrorResponse(res, 400, "Invalid OpenAI request format.");
             }
 
@@ -1139,7 +1143,9 @@ class RequestHandler {
                     }
 
                     if (initialMessage.event_type === "error") {
-                        this._logFinalRequestFailure(initialMessage, "OpenAI real stream");
+                        this._logFinalRequestFailure(initialMessage, "OpenAI real stream", requestId, {
+                            afterRetries: false,
+                        });
 
                         // Send standard HTTP error response
                         this._sendErrorResponse(res, initialMessage.status || 500, initialMessage.message);
@@ -1172,7 +1178,7 @@ class RequestHandler {
                         "Content-Type": "text/event-stream",
                     });
                     this.logger.info(`[Request] OpenAI streaming response (Real Mode) started...`);
-                    await this._streamOpenAIResponse(currentQueue, res, model);
+                    await this._streamOpenAIResponse(currentQueue, res, model, requestId);
                 } else {
                     // OpenAI Fake Stream / Non-Stream mode
                     // Set up keep-alive timer for fake stream mode to prevent client timeout
@@ -1201,12 +1207,12 @@ class RequestHandler {
                         const result = await this._executeRequestWithRetries(proxyRequest, messageQueue);
 
                         if (!result.success) {
-                            this._logFinalRequestFailure(result.error, "OpenAI fake/non-stream");
+                            this._logFinalRequestFailure(result.error, "OpenAI fake/non-stream", requestId);
                             // Send standard HTTP error response for both streaming and non-streaming
                             if (connectionMaintainer) clearTimeout(connectionMaintainer);
                             if (isOpenAIStream && res.headersSent) {
                                 // If keep-alives already started the SSE response, send an SSE error event instead of JSON.
-                                this._handleRequestError(result.error, res, "openai");
+                                this._handleRequestError(result.error, res, "openai", requestId);
                             } else {
                                 this._sendErrorResponse(res, result.error.status || 500, result.error.message);
                             }
@@ -1261,7 +1267,7 @@ class RequestHandler {
 
                                     if (message.event_type === "error") {
                                         this.logger.error(
-                                            `[Request] Error received during OpenAI fake stream: ${message.message}`
+                                            `❌ [Request] Error received during OpenAI fake stream: ${message.message}`
                                         );
                                         this._markTrackedResponseError(res, message.message, 500);
                                         hadStreamError = true;
@@ -1273,7 +1279,7 @@ class RequestHandler {
                                                 );
                                             } catch (writeError) {
                                                 this.logger.debug(
-                                                    `[Request] Failed to write error to OpenAI fake stream: ${writeError.message}`
+                                                    `❌ [Request] Failed to write error to OpenAI fake stream: ${writeError.message}`
                                                 );
                                             }
                                         }
@@ -1308,14 +1314,16 @@ class RequestHandler {
                                         "[Request] Response no longer writable before final fake OpenAI stream chunks."
                                     );
                                 }
-                                this.logger.info("[Request] Fake mode: Complete content sent at once.");
+                                this.logger.info(
+                                    `✅ [Request] Response completed (OpenAI fake stream), request ID: ${requestId}`
+                                );
                             } catch (error) {
                                 // Classify error type and send appropriate response
                                 this._handleFakeStreamError(error, res, "openai");
                             }
                         } else {
                             // Non-stream
-                            await this._sendOpenAINonStreamResponse(activeQueue, res, model);
+                            await this._sendOpenAINonStreamResponse(activeQueue, res, model, requestId);
                         }
                     } finally {
                         if (connectionMaintainer) clearTimeout(connectionMaintainer);
@@ -1325,7 +1333,7 @@ class RequestHandler {
                 // Handle queue timeout by notifying browser
                 this._handleQueueTimeout(error, requestId);
 
-                this._handleRequestError(error, res);
+                this._handleRequestError(error, res, "openai", requestId);
             } finally {
                 this.connectionRegistry.removeMessageQueue(requestId, "request_complete");
                 if (this.needsSwitchingAfterRequest) {
@@ -1439,7 +1447,7 @@ class RequestHandler {
                 const rotationCountText =
                     this.config.switchOnUses > 0 ? `${usageCount}/${this.config.switchOnUses}` : `${usageCount}`;
                 this.logger.info(
-                    `[Request] OpenAI Response generation request - account rotation count: ${rotationCountText} (Current account: ${this.currentAuthIndex})`
+                    `[Request] OpenAI Response generation request - account rotation count: ${rotationCountText} (Current account: ${this.currentAuthIndex}), request ID: ${requestId}`
                 );
                 if (this.authSwitcher.shouldSwitchByUsage()) {
                     this.needsSwitchingAfterRequest = true;
@@ -1454,7 +1462,9 @@ class RequestHandler {
                 model = result.cleanModelName;
                 modelStreamingMode = result.modelStreamingMode || null;
             } catch (error) {
-                this.logger.error(`[Adapter] OpenAI Response request translation failed: ${error.message}`);
+                this.logger.error(
+                    `❌ [Adapter] OpenAI Response request translation failed: ${error.message}, request ID: ${requestId}`
+                );
                 return this._sendErrorResponse(res, 400, "Invalid OpenAI Response request format.");
             }
 
@@ -1548,7 +1558,9 @@ class RequestHandler {
                     }
 
                     if (initialMessage.event_type === "error") {
-                        this._logFinalRequestFailure(initialMessage, "OpenAI Response API real stream");
+                        this._logFinalRequestFailure(initialMessage, "OpenAI Response API real stream", requestId, {
+                            afterRetries: false,
+                        });
 
                         // Send standard HTTP error response
                         this._sendErrorResponse(res, initialMessage.status || 500, initialMessage.message);
@@ -1582,6 +1594,7 @@ class RequestHandler {
                     });
                     this.logger.info(`[Request] OpenAI Response API streaming response (Real Mode) started...`);
                     await this._streamOpenAIResponseAPIResponse(currentQueue, res, model, {
+                        requestId,
                         responseDefaults,
                     });
                 } else {
@@ -1612,12 +1625,16 @@ class RequestHandler {
                         const result = await this._executeRequestWithRetries(proxyRequest, messageQueue);
 
                         if (!result.success) {
-                            this._logFinalRequestFailure(result.error, "OpenAI Response API fake/non-stream");
+                            this._logFinalRequestFailure(
+                                result.error,
+                                "OpenAI Response API fake/non-stream",
+                                requestId
+                            );
                             // Send standard HTTP error response for both streaming and non-streaming
                             if (connectionMaintainer) clearTimeout(connectionMaintainer);
                             if (isOpenAIStream && res.headersSent) {
                                 // If keep-alives already started the SSE response, send an SSE error event instead of JSON.
-                                this._handleRequestError(result.error, res, "response_api");
+                                this._handleRequestError(result.error, res, "response_api", requestId);
                             } else {
                                 this._sendErrorResponse(res, result.error.status || 500, result.error.message);
                             }
@@ -1673,7 +1690,7 @@ class RequestHandler {
 
                                     if (message.event_type === "error") {
                                         this.logger.error(
-                                            `[Request] Error received during OpenAI Response API fake stream: ${message.message}`
+                                            `❌ [Request] Error received during OpenAI Response API fake stream: ${message.message}`
                                         );
                                         this._markTrackedResponseError(res, message.message, 500);
                                         hadStreamError = true;
@@ -1692,7 +1709,7 @@ class RequestHandler {
                                                 );
                                             } catch (writeError) {
                                                 this.logger.debug(
-                                                    `[Request] Failed to write error to OpenAI Response API fake stream: ${writeError.message}`
+                                                    `❌ [Request] Failed to write error to OpenAI Response API fake stream: ${writeError.message}`
                                                 );
                                             }
                                         }
@@ -1729,7 +1746,9 @@ class RequestHandler {
                                         "[Request] Response no longer writable before final fake OpenAI Response API stream chunks."
                                     );
                                 }
-                                this.logger.info("[Request] Fake mode: Complete content sent at once.");
+                                this.logger.info(
+                                    `✅ [Request] Response completed (OpenAI Response API fake stream), request ID: ${requestId}`
+                                );
                             } catch (error) {
                                 // Classify error type and send appropriate response
                                 this._handleFakeStreamError(error, res, "response_api");
@@ -1740,7 +1759,8 @@ class RequestHandler {
                                 activeQueue,
                                 res,
                                 model,
-                                responseDefaults
+                                responseDefaults,
+                                requestId
                             );
                         }
                     } finally {
@@ -1751,7 +1771,7 @@ class RequestHandler {
                 // Handle queue timeout by notifying browser
                 this._handleQueueTimeout(error, requestId);
 
-                this._handleRequestError(error, res, "response_api");
+                this._handleRequestError(error, res, "response_api", requestId);
             } finally {
                 this.connectionRegistry.removeMessageQueue(requestId, "request_complete");
                 if (this.needsSwitchingAfterRequest) {
@@ -1820,7 +1840,7 @@ class RequestHandler {
                 const rotationCountText =
                     this.config.switchOnUses > 0 ? `${usageCount}/${this.config.switchOnUses}` : `${usageCount}`;
                 this.logger.info(
-                    `[Request] Claude generation request - account rotation count: ${rotationCountText} (Current account: ${this.currentAuthIndex})`
+                    `[Request] Claude generation request - account rotation count: ${rotationCountText} (Current account: ${this.currentAuthIndex}), request ID: ${requestId}`
                 );
                 if (this.authSwitcher.shouldSwitchByUsage()) {
                     this.needsSwitchingAfterRequest = true;
@@ -1835,7 +1855,9 @@ class RequestHandler {
                 model = result.cleanModelName;
                 modelStreamingMode = result.modelStreamingMode || null;
             } catch (error) {
-                this.logger.error(`[Adapter] Claude request translation failed: ${error.message}`);
+                this.logger.error(
+                    `❌ [Adapter] Claude request translation failed: ${error.message}, request ID: ${requestId}`
+                );
                 return this._sendClaudeErrorResponse(
                     res,
                     400,
@@ -1934,7 +1956,9 @@ class RequestHandler {
                     }
 
                     if (initialMessage.event_type === "error") {
-                        this._logFinalRequestFailure(initialMessage, "Claude real stream");
+                        this._logFinalRequestFailure(initialMessage, "Claude real stream", requestId, {
+                            afterRetries: false,
+                        });
                         this._sendClaudeErrorResponse(
                             res,
                             initialMessage.status || 500,
@@ -1962,7 +1986,7 @@ class RequestHandler {
                         "Content-Type": "text/event-stream",
                     });
                     this.logger.info(`[Request] Claude streaming response (Real Mode) started...`);
-                    await this._streamClaudeResponse(currentQueue, res, model);
+                    await this._streamClaudeResponse(currentQueue, res, model, requestId);
                 } else {
                     // Claude Fake Stream / Non-Stream mode
                     let connectionMaintainer;
@@ -1990,11 +2014,11 @@ class RequestHandler {
                         const result = await this._executeRequestWithRetries(proxyRequest, messageQueue);
 
                         if (!result.success) {
-                            this._logFinalRequestFailure(result.error, "Claude fake/non-stream");
+                            this._logFinalRequestFailure(result.error, "Claude fake/non-stream", requestId);
                             if (connectionMaintainer) clearTimeout(connectionMaintainer);
                             if (isClaudeStream && res.headersSent) {
                                 // If keep-alives already started the SSE response, send an SSE error event instead of JSON.
-                                this._handleClaudeRequestError(result.error, res);
+                                this._handleClaudeRequestError(result.error, res, requestId);
                             } else {
                                 this._sendClaudeErrorResponse(
                                     res,
@@ -2045,7 +2069,7 @@ class RequestHandler {
 
                                     if (message.event_type === "error") {
                                         this.logger.error(
-                                            `[Request] Error received during Claude fake stream: ${message.message}`
+                                            `❌ [Request] Error received during Claude fake stream: ${message.message}`
                                         );
                                         this._markTrackedResponseError(res, message.message, 500);
                                         hadStreamError = true;
@@ -2063,7 +2087,7 @@ class RequestHandler {
                                                 );
                                             } catch (writeError) {
                                                 this.logger.debug(
-                                                    `[Request] Failed to write error to Claude fake stream: ${writeError.message}`
+                                                    `❌ [Request] Failed to write error to Claude fake stream: ${writeError.message}`
                                                 );
                                             }
                                         }
@@ -2097,14 +2121,16 @@ class RequestHandler {
                                         "[Request] Response no longer writable before final fake Claude stream chunk."
                                     );
                                 }
-                                this.logger.info("[Request] Claude fake mode: Complete content sent at once.");
+                                this.logger.info(
+                                    `✅ [Request] Response completed (Claude fake stream), request ID: ${requestId}`
+                                );
                             } catch (error) {
                                 // Classify error type and send appropriate response
                                 this._handleFakeStreamError(error, res, "claude");
                             }
                         } else {
                             // Non-stream
-                            await this._sendClaudeNonStreamResponse(activeQueue, res, model);
+                            await this._sendClaudeNonStreamResponse(activeQueue, res, model, requestId);
                         }
                     } finally {
                         if (connectionMaintainer) clearTimeout(connectionMaintainer);
@@ -2114,7 +2140,7 @@ class RequestHandler {
                 // Handle queue timeout by notifying browser
                 this._handleQueueTimeout(error, requestId);
 
-                this._handleClaudeRequestError(error, res);
+                this._handleClaudeRequestError(error, res, requestId);
             } finally {
                 this.connectionRegistry.removeMessageQueue(requestId, "request_complete");
                 if (this.needsSwitchingAfterRequest) {
@@ -2136,6 +2162,7 @@ class RequestHandler {
     // Process Claude count tokens request
     async processClaudeCountTokens(req, res) {
         const requestId = this._generateRequestId();
+        this.logger.info(`[Request] Claude count tokens request started, request ID: ${requestId}`);
         this._startTrackedRequest(requestId, req, {
             apiFormat: "claude",
             isStreaming: false,
@@ -2180,7 +2207,9 @@ class RequestHandler {
                 googleBody = result.googleRequest;
                 model = result.cleanModelName;
             } catch (error) {
-                this.logger.error(`[Adapter] Claude request translation failed: ${error.message}`);
+                this.logger.error(
+                    `❌ [Adapter] Claude request translation failed: ${error.message}, request ID: ${requestId}`
+                );
                 return this._sendClaudeErrorResponse(
                     res,
                     400,
@@ -2235,7 +2264,7 @@ class RequestHandler {
 
                 if (response.event_type === "error") {
                     this.logger.error(
-                        `[Request] Received error from browser, will trigger switching logic. Status code: ${response.status}, message: ${response.message}`
+                        `❌ [Request] Received error from browser, will trigger switching logic. Status code: ${response.status}, message: ${response.message}`
                     );
                     this._sendClaudeErrorResponse(res, response.status || 500, "api_error", response.message);
                     if (!this._isConnectionResetError(response)) {
@@ -2255,7 +2284,7 @@ class RequestHandler {
                             break;
                         }
                         if (message.event_type === "error") {
-                            this.logger.error(`[Request] Error received during count tokens: ${message.message}`);
+                            this.logger.error(`❌ [Request] Error received during count tokens: ${message.message}`);
                             this._markTrackedResponseError(res, message.message, 500);
                             return this._sendClaudeErrorResponse(res, 500, "api_error", message.message);
                         }
@@ -2280,9 +2309,11 @@ class RequestHandler {
                     input_tokens: totalTokens,
                 });
 
-                this.logger.info(`[Request] Claude count tokens completed: ${totalTokens} input tokens`);
+                this.logger.info(
+                    `✅ [Request] Response completed (Claude count_tokens, input tokens: ${totalTokens}), request ID: ${requestId}`
+                );
             } catch (error) {
-                this._handleClaudeRequestError(error, res);
+                this._handleClaudeRequestError(error, res, requestId);
             } finally {
                 this.connectionRegistry.removeMessageQueue(requestId, "request_complete");
                 if (!res.writableEnded) res.end();
@@ -2296,6 +2327,7 @@ class RequestHandler {
     // Mirrors OpenAI's /v1/responses/input_tokens by returning only the request-side token count.
     async processOpenAIResponseInputTokens(req, res) {
         const requestId = this._generateRequestId();
+        this.logger.info(`[Request] OpenAI Response input_tokens request started, request ID: ${requestId}`);
         this._startTrackedRequest(requestId, req, {
             apiFormat: "response_api",
             isStreaming: false,
@@ -2337,7 +2369,9 @@ class RequestHandler {
                 googleBody = result.googleRequest;
                 model = result.cleanModelName;
             } catch (error) {
-                this.logger.error(`[Adapter] OpenAI Response input_tokens translation failed: ${error.message}`);
+                this.logger.error(
+                    `❌ [Adapter] OpenAI Response input_tokens translation failed: ${error.message}, request ID: ${requestId}`
+                );
                 return this._sendErrorResponse(res, 400, "Invalid OpenAI Response request format.");
             }
 
@@ -2385,7 +2419,7 @@ class RequestHandler {
 
                 if (response.event_type === "error") {
                     this.logger.error(
-                        `[Request] Received error from browser for input_tokens, will trigger switching logic. Status code: ${response.status}, message: ${response.message}`
+                        `❌ [Request] Received error from browser for input_tokens, will trigger switching logic. Status code: ${response.status}, message: ${response.message}`
                     );
 
                     this._sendErrorResponse(res, response.status || 500, response.message);
@@ -2412,7 +2446,9 @@ class RequestHandler {
                             break;
                         }
                         if (message.event_type === "error") {
-                            this.logger.error(`[Request] Error received during input_tokens count: ${message.message}`);
+                            this.logger.error(
+                                `❌ [Request] Error received during input_tokens count: ${message.message}`
+                            );
                             this._markTrackedResponseError(res, message.message, 500);
                             this._sendErrorResponse(res, 500, message.message);
                             return;
@@ -2426,7 +2462,7 @@ class RequestHandler {
                 try {
                     geminiResponse = JSON.parse(fullBody || response.body);
                 } catch (parseError) {
-                    this.logger.error(`[Request] Failed to parse countTokens response: ${parseError.message}`);
+                    this.logger.error(`❌ [Request] Failed to parse countTokens response: ${parseError.message}`);
                     this._sendErrorResponse(res, 500, "Failed to parse backend response");
                     return;
                 }
@@ -2445,9 +2481,11 @@ class RequestHandler {
                     input_tokens: totalTokens,
                 });
 
-                this.logger.info(`[Request] OpenAI Response input_tokens completed: ${totalTokens} input tokens`);
+                this.logger.info(
+                    `✅ [Request] Response completed (OpenAI Response input_tokens, input tokens: ${totalTokens}), request ID: ${requestId}`
+                );
             } catch (error) {
-                this._handleRequestError(error, res);
+                this._handleRequestError(error, res, "openai", requestId);
             } finally {
                 this.connectionRegistry.removeMessageQueue(requestId, "request_complete");
                 if (!res.writableEnded) res.end();
@@ -2459,7 +2497,7 @@ class RequestHandler {
 
     // === Response Handlers ===
 
-    async _streamClaudeResponse(messageQueue, res, model) {
+    async _streamClaudeResponse(messageQueue, res, model, requestId) {
         const streamState = {};
 
         try {
@@ -2468,12 +2506,12 @@ class RequestHandler {
                 const message = await messageQueue.dequeue(this.timeouts.STREAM_CHUNK);
 
                 if (message.type === "STREAM_END") {
-                    this.logger.info("[Request] Claude stream end signal received.");
+                    this.logger.info(`✅ [Request] Response completed (Claude stream), request ID: ${requestId}`);
                     break;
                 }
 
                 if (message.event_type === "error") {
-                    this.logger.error(`[Request] Error received during Claude stream: ${message.message}`);
+                    this.logger.error(`❌ [Request] Error received during Claude stream: ${message.message}`);
                     this._markTrackedResponseError(res, message.message, 500);
                     // Attempt to send error event to client if headers allowed, then close
                     // Check if response is still writable before attempting to write
@@ -2490,7 +2528,7 @@ class RequestHandler {
                             );
                         } catch (writeError) {
                             this.logger.debug(
-                                `[Request] Failed to write error to Claude stream: ${writeError.message}`
+                                `❌ [Request] Failed to write error to Claude stream: ${writeError.message}`
                             );
                         }
                     }
@@ -2537,19 +2575,19 @@ class RequestHandler {
         }
     }
 
-    async _sendClaudeNonStreamResponse(messageQueue, res, model) {
+    async _sendClaudeNonStreamResponse(messageQueue, res, model, requestId) {
         let fullBody = "";
         let receiving = true;
         while (receiving) {
             const message = await messageQueue.dequeue();
             if (message.type === "STREAM_END") {
-                this.logger.info("[Request] Claude received end signal.");
+                this.logger.debug("[Request] Claude received end signal.");
                 receiving = false;
                 break;
             }
 
             if (message.event_type === "error") {
-                this.logger.error(`[Adapter] Error during Claude non-stream conversion: ${message.message}`);
+                this.logger.error(`❌ [Adapter] Error during Claude non-stream conversion: ${message.message}`);
                 this._sendClaudeErrorResponse(res, 500, "api_error", message.message);
                 return;
             }
@@ -2563,8 +2601,9 @@ class RequestHandler {
             const googleResponse = JSON.parse(fullBody);
             const claudeResponse = this.formatConverter.convertGoogleToClaudeNonStream(googleResponse, model);
             res.type("application/json").send(JSON.stringify(claudeResponse));
+            this.logger.info(`✅ [Request] Response completed (Claude non-stream), request ID: ${requestId}`);
         } catch (e) {
-            this.logger.error(`[Adapter] Failed to parse response for Claude: ${e.message}`);
+            this.logger.error(`❌ [Adapter] Failed to parse response for Claude: ${e.message}`);
             this._sendClaudeErrorResponse(res, 500, "api_error", "Failed to parse backend response");
         }
     }
@@ -2586,16 +2625,19 @@ class RequestHandler {
         }
     }
 
-    _handleClaudeRequestError(error, res) {
+    _handleClaudeRequestError(error, res, requestId = null) {
         // Normalize error message to handle non-Error objects and missing/non-string messages
         const errorMsg = String(error?.message ?? error);
+        const requestIdSuffix = requestId ? `, request ID: ${requestId}` : "";
 
         // Check if this is a client disconnect - if so, just log and return
         if (this._isConnectionResetError(error)) {
             const isClientDisconnect = error.reason === "client_disconnect" || !this._isResponseWritable(res);
             if (isClientDisconnect) {
                 this._markTrackedClientAbort(res, errorMsg);
-                this.logger.info(`[Request] Request terminated: Queue closed (${error.reason || "connection_lost"})`);
+                this.logger.info(
+                    `[Request] Request terminated: Queue closed (${error.reason || "connection_lost"})${requestIdSuffix}`
+                );
                 if (!res.writableEnded) {
                     try {
                         res.end();
@@ -2608,7 +2650,9 @@ class RequestHandler {
         }
 
         if (res.headersSent) {
-            this.logger.error(`[Request] Claude request error (headers already sent): ${errorMsg}`);
+            this.logger.error(
+                `❌ [Request] Claude request error (headers already sent): ${errorMsg}${requestIdSuffix}`
+            );
 
             // Try to send error in SSE format if response is still writable
             if (this._isResponseWritable(res)) {
@@ -2644,14 +2688,16 @@ class RequestHandler {
                         );
                         this.logger.info("[Request] Claude error event sent to SSE stream");
                     } catch (writeError) {
-                        this.logger.error(`[Request] Failed to write error to Claude stream: ${writeError.message}`);
+                        this.logger.error(
+                            `❌ [Request] Failed to write error to Claude stream: ${writeError.message}${requestIdSuffix}`
+                        );
                     }
                 }
             }
 
             if (!res.writableEnded) res.end();
         } else {
-            this.logger.error(`[Request] Claude request error: ${errorMsg}`);
+            this.logger.error(`❌ [Request] Claude request error: ${errorMsg}${requestIdSuffix}`);
             let status = 500;
             let errorType = "api_error";
             // Use precise error type checking instead of string matching
@@ -2704,10 +2750,10 @@ class RequestHandler {
                         `[Request] Request #${proxyRequest.request_id} was properly cancelled by user, not counted in failure statistics.`
                     );
                 } else {
-                    this._logFinalRequestFailure(result.error, "Gemini fake stream");
+                    this._logFinalRequestFailure(result.error, "Gemini fake stream", proxyRequest.request_id);
                     // If keep-alives already started the SSE response, send an SSE error event instead of JSON.
                     if (res.headersSent) {
-                        this._handleRequestError(result.error, res, "gemini");
+                        this._handleRequestError(result.error, res, "gemini", proxyRequest.request_id);
                     } else {
                         this._sendErrorResponse(res, result.error.status || 500, result.error.message);
                     }
@@ -2758,10 +2804,12 @@ class RequestHandler {
                     }
 
                     if (message.event_type === "error") {
-                        this.logger.error(`[Request] Error received during Gemini pseudo-stream: ${message.message}`);
+                        this.logger.error(
+                            `❌ [Request] Error received during Gemini pseudo-stream: ${message.message}`
+                        );
                         this._markTrackedResponseError(res, message.message, 500);
                         hadStreamError = true;
-                        this._handleRequestError({ message: message.message }, res, "gemini");
+                        this._handleRequestError({ message: message.message }, res, "gemini", proxyRequest.request_id);
                         break;
                     }
 
@@ -2911,7 +2959,7 @@ class RequestHandler {
                 }
             } catch (e) {
                 this.logger.error(
-                    `[Request] Failed to parse and split Gemini response: ${e.message}. Sending raw data.`
+                    `❌ [Request] Failed to parse and split Gemini response: ${e.message}. Sending raw data.`
                 );
                 if (fullData) {
                     if (!this._isResponseWritable(res)) {
@@ -2939,21 +2987,22 @@ class RequestHandler {
                 }
             })();
             this.logger.info(
-                `✅ [Request] Response ended, reason: ${finishReason}, request ID: ${proxyRequest.request_id}`
+                `✅ [Request] Response completed (Gemini pseudo-stream, reason: ${finishReason}), request ID: ${proxyRequest.request_id}`
             );
         } catch (error) {
-            this._handleRequestError(error, res, "gemini");
+            this._handleRequestError(error, res, "gemini", proxyRequest.request_id);
         } finally {
             clearTimeout(connectionMaintainer);
             if (!res.writableEnded) {
                 res.end();
             }
-            this.logger.info(`[Request] Response processing ended, request ID: ${proxyRequest.request_id}`);
+            this.logger.debug(
+                `[Request] Pseudo-stream response processing ended, request ID: ${proxyRequest.request_id}`
+            );
         }
     }
 
     async _handleRealStreamResponse(proxyRequest, messageQueue, req, res) {
-        this.logger.info(`[Request] Request dispatched to browser for processing...`);
         let currentQueue = messageQueue;
         let currentQueueAuthIndex = this.currentAuthIndex;
         let headerMessage;
@@ -3016,7 +3065,9 @@ class RequestHandler {
                     `[Request] Request #${proxyRequest.request_id} was properly cancelled by user, not counted in failure statistics.`
                 );
             } else {
-                this._logFinalRequestFailure(headerMessage, "Gemini real stream");
+                this._logFinalRequestFailure(headerMessage, "Gemini real stream", proxyRequest.request_id, {
+                    afterRetries: false,
+                });
                 // Avoid switching account if the error is just a connection reset
                 if (!skipFinalFailureSwitch && !this._isConnectionResetError(headerMessage)) {
                     await this.authSwitcher.handleRequestFailureAndSwitch(headerMessage, null);
@@ -3054,12 +3105,12 @@ class RequestHandler {
             while (true) {
                 const dataMessage = await currentQueue.dequeue(this.timeouts.STREAM_CHUNK);
                 if (dataMessage.type === "STREAM_END") {
-                    this.logger.info("[Request] Received stream end signal.");
+                    this.logger.debug("[Request] Gemini real stream end signal received.");
                     break;
                 }
 
                 if (dataMessage.event_type === "error") {
-                    this.logger.error(`[Request] Error received during Gemini real stream: ${dataMessage.message}`);
+                    this.logger.error(`❌ [Request] Error received during Gemini real stream: ${dataMessage.message}`);
                     this._markTrackedResponseError(res, dataMessage.message, 500);
                     // Check if response is still writable before attempting to write
                     if (this._isResponseWritable(res)) {
@@ -3069,7 +3120,7 @@ class RequestHandler {
                             );
                         } catch (writeError) {
                             this.logger.debug(
-                                `[Request] Failed to write error to Gemini real stream: ${writeError.message}`
+                                `❌ [Request] Failed to write error to Gemini real stream: ${writeError.message}`
                             );
                         }
                     }
@@ -3102,7 +3153,7 @@ class RequestHandler {
                         const lastResponse = JSON.parse(jsonString);
                         const finishReason = lastResponse.candidates?.[0]?.finishReason || "UNKNOWN";
                         this.logger.info(
-                            `✅ [Request] Response ended, reason: ${finishReason}, request ID: ${proxyRequest.request_id}`
+                            `✅ [Request] Response completed (Gemini real stream, reason: ${finishReason}), request ID: ${proxyRequest.request_id}`
                         );
                     }
                 }
@@ -3115,14 +3166,14 @@ class RequestHandler {
                 this._handleRealStreamQueueClosedError(error, res, "gemini");
             } else if (error instanceof QueueTimeoutError || error.code === "QUEUE_TIMEOUT") {
                 // Keep behavior consistent with other interfaces: treat missing stream chunks as a timeout error.
-                this._handleRequestError(error, res, "gemini");
+                this._handleRequestError(error, res, "gemini", proxyRequest.request_id);
             } else {
                 // Unexpected error - rethrow to outer handler
                 throw error;
             }
         } finally {
             if (!res.writableEnded) res.end();
-            this.logger.info(
+            this.logger.debug(
                 `[Request] Real stream response connection closed, request ID: ${proxyRequest.request_id}`
             );
         }
@@ -3139,7 +3190,7 @@ class RequestHandler {
                 if (isUserAbortedError(result.error)) {
                     this.logger.info(`[Request] Request #${proxyRequest.request_id} was properly cancelled by user.`);
                 } else {
-                    this._logFinalRequestFailure(result.error, "Gemini non-stream");
+                    this._logFinalRequestFailure(result.error, "Gemini non-stream", proxyRequest.request_id);
                     // Avoid switching account if the error is just a connection reset
                     if (!result.error.skipAccountSwitch && !this._isConnectionResetError(result.error)) {
                         await this.authSwitcher.handleRequestFailureAndSwitch(result.error, null);
@@ -3173,13 +3224,13 @@ class RequestHandler {
             while (receiving) {
                 const message = await activeQueue.dequeue();
                 if (message.type === "STREAM_END") {
-                    this.logger.info("[Request] Received end signal, data reception complete.");
+                    this.logger.debug("[Request] Gemini non-stream end signal received.");
                     receiving = false;
                     break;
                 }
 
                 if (message.event_type === "error") {
-                    this.logger.error(`[Request] Error received during Gemini non-stream: ${message.message}`);
+                    this.logger.error(`❌ [Request] Error received during Gemini non-stream: ${message.message}`);
                     this._markTrackedResponseError(res, message.message, 500);
                     this._sendErrorResponse(res, 500, message.message);
                     return;
@@ -3197,7 +3248,7 @@ class RequestHandler {
                 this._logGeminiNativeResponseDebug(fullResponse, "non-stream");
                 const finishReason = fullResponse.candidates?.[0]?.finishReason || "UNKNOWN";
                 this.logger.info(
-                    `✅ [Request] Response ended, reason: ${finishReason}, request ID: ${proxyRequest.request_id}`
+                    `✅ [Request] Response completed (Gemini non-stream, reason: ${finishReason}), request ID: ${proxyRequest.request_id}`
                 );
             } catch (e) {
                 // Ignore JSON parsing errors for finish reason
@@ -3212,9 +3263,9 @@ class RequestHandler {
 
             res.send(fullBodyBuffer);
 
-            this.logger.info(`[Request] Complete non-stream response sent to client.`);
+            this.logger.debug(`[Request] Complete non-stream response sent to client.`);
         } catch (error) {
-            this._handleRequestError(error, res);
+            this._handleRequestError(error, res, "openai", proxyRequest.request_id);
         }
     }
 
@@ -3351,7 +3402,7 @@ class RequestHandler {
                     } catch (switchError) {
                         lastError = { ...errorPayload, skipAccountSwitch: true };
                         this.logger.error(
-                            `[Request] Account switch failed during immediate-switch retry flow: ${switchError.message}`
+                            `❌ [Request] Account switch failed during immediate-switch retry flow: ${switchError.message}`
                         );
                         break;
                     }
@@ -3382,7 +3433,7 @@ class RequestHandler {
                 // If it's the last attempt, break the loop to return failure
                 if (retryAttempt >= this.maxRetries) {
                     this.logger.error(
-                        `[Request] All ${this.maxRetries} retries failed for request #${proxyRequest.request_id}. Final error: ${errorPayload.message}`
+                        `❌ [Request] All ${this.maxRetries} retries failed for request #${proxyRequest.request_id}. Final error: ${errorPayload.message}`
                     );
                     break;
                 }
@@ -3436,6 +3487,7 @@ class RequestHandler {
         const streamState = {
             responseDefaults: streamOptions.responseDefaults || {},
         };
+        const requestId = streamOptions.requestId;
         // Keep Response API sequence numbers consistent across helpers that might write to the same SSE response.
         if (res.__responseApiSeq == null) res.__responseApiSeq = 0;
         streamState.sequenceNumber = res.__responseApiSeq;
@@ -3445,12 +3497,14 @@ class RequestHandler {
             while (true) {
                 const message = await messageQueue.dequeue(this.timeouts.STREAM_CHUNK);
                 if (message.type === "STREAM_END") {
-                    this.logger.info("[Request] OpenAI Response API stream end signal received.");
+                    this.logger.info(
+                        `✅ [Request] Response completed (OpenAI Response API stream), request ID: ${requestId}`
+                    );
                     break;
                 }
 
                 if (message.event_type === "error") {
-                    this.logger.error(`[Request] Error received during Response API stream: ${message.message}`);
+                    this.logger.error(`❌ [Request] Error received during Response API stream: ${message.message}`);
                     this._markTrackedResponseError(res, message.message, 500);
                     if (this._isResponseWritable(res)) {
                         try {
@@ -3468,7 +3522,7 @@ class RequestHandler {
                             );
                         } catch (writeError) {
                             this.logger.debug(
-                                `[Request] Failed to write error to Response API stream: ${writeError.message}`
+                                `❌ [Request] Failed to write error to Response API stream: ${writeError.message}`
                             );
                         }
                     }
@@ -3514,7 +3568,7 @@ class RequestHandler {
         }
     }
 
-    async _streamOpenAIResponse(messageQueue, res, model) {
+    async _streamOpenAIResponse(messageQueue, res, model, requestId) {
         const streamState = {};
 
         try {
@@ -3522,7 +3576,6 @@ class RequestHandler {
             while (true) {
                 const message = await messageQueue.dequeue(this.timeouts.STREAM_CHUNK);
                 if (message.type === "STREAM_END") {
-                    this.logger.info("[Request] OpenAI stream end signal received.");
                     if (this._isResponseWritable(res)) {
                         try {
                             res.write("data: [DONE]\n\n");
@@ -3532,11 +3585,12 @@ class RequestHandler {
                             );
                         }
                     }
+                    this.logger.info(`✅ [Request] Response completed (OpenAI stream), request ID: ${requestId}`);
                     break;
                 }
 
                 if (message.event_type === "error") {
-                    this.logger.error(`[Request] Error received during OpenAI stream: ${message.message}`);
+                    this.logger.error(`❌ [Request] Error received during OpenAI stream: ${message.message}`);
                     this._markTrackedResponseError(res, message.message, 500);
                     // Attempt to send error event to client if headers allowed, then close
                     // Check if response is still writable before attempting to write
@@ -3547,7 +3601,7 @@ class RequestHandler {
                             );
                         } catch (writeError) {
                             this.logger.debug(
-                                `[Request] Failed to write error to OpenAI stream: ${writeError.message}`
+                                `❌ [Request] Failed to write error to OpenAI stream: ${writeError.message}`
                             );
                         }
                     }
@@ -3591,20 +3645,20 @@ class RequestHandler {
         }
     }
 
-    async _sendOpenAIResponseAPINonStreamResponse(messageQueue, res, model, responseDefaults = {}) {
+    async _sendOpenAIResponseAPINonStreamResponse(messageQueue, res, model, responseDefaults = {}, requestId) {
         let fullBody = "";
         let receiving = true;
         while (receiving) {
             const message = await messageQueue.dequeue();
             if (message.type === "STREAM_END") {
-                this.logger.info("[Request] OpenAI Response API received end signal.");
+                this.logger.debug("[Request] OpenAI Response API received end signal.");
                 receiving = false;
                 break;
             }
 
             if (message.event_type === "error") {
                 this.logger.error(
-                    `[Adapter] Error during OpenAI Response API non-stream conversion: ${message.message}`
+                    `❌ [Adapter] Error during OpenAI Response API non-stream conversion: ${message.message}`
                 );
                 this._sendErrorResponse(res, 500, message.message);
                 return;
@@ -3624,25 +3678,28 @@ class RequestHandler {
                 responseDefaults
             );
             res.type("application/json").send(JSON.stringify(responseAPIResponse));
+            this.logger.info(
+                `✅ [Request] Response completed (OpenAI Response API non-stream), request ID: ${requestId}`
+            );
         } catch (e) {
-            this.logger.error(`[Adapter] Failed to parse response for OpenAI Response API: ${e.message}`);
+            this.logger.error(`❌ [Adapter] Failed to parse response for OpenAI Response API: ${e.message}`);
             this._sendErrorResponse(res, 500, "Failed to parse backend response");
         }
     }
 
-    async _sendOpenAINonStreamResponse(messageQueue, res, model) {
+    async _sendOpenAINonStreamResponse(messageQueue, res, model, requestId) {
         let fullBody = "";
         let receiving = true;
         while (receiving) {
             const message = await messageQueue.dequeue();
             if (message.type === "STREAM_END") {
-                this.logger.info("[Request] OpenAI received end signal.");
+                this.logger.debug("[Request] OpenAI received end signal.");
                 receiving = false;
                 break;
             }
 
             if (message.event_type === "error") {
-                this.logger.error(`[Adapter] Error during OpenAI non-stream conversion: ${message.message}`);
+                this.logger.error(`❌ [Adapter] Error during OpenAI non-stream conversion: ${message.message}`);
                 this._sendErrorResponse(res, 500, message.message);
                 return;
             }
@@ -3657,8 +3714,9 @@ class RequestHandler {
             const googleResponse = JSON.parse(fullBody);
             const openAIResponse = this.formatConverter.convertGoogleToOpenAINonStream(googleResponse, model);
             res.type("application/json").send(JSON.stringify(openAIResponse));
+            this.logger.info(`✅ [Request] Response completed (OpenAI non-stream), request ID: ${requestId}`);
         } catch (e) {
-            this.logger.error(`[Adapter] Failed to parse response for OpenAI: ${e.message}`);
+            this.logger.error(`❌ [Adapter] Failed to parse response for OpenAI: ${e.message}`);
             this._sendErrorResponse(res, 500, "Failed to parse backend response");
         }
     }
@@ -3710,16 +3768,19 @@ class RequestHandler {
         });
     }
 
-    _handleRequestError(error, res, format = "openai") {
+    _handleRequestError(error, res, format = "openai", requestId = null) {
         // Normalize error message to handle non-Error objects and missing/non-string messages
         const errorMsg = String(error?.message ?? error);
+        const requestIdSuffix = requestId ? `, request ID: ${requestId}` : "";
 
         // Check if this is a client disconnect - if so, just log and return
         if (this._isConnectionResetError(error)) {
             const isClientDisconnect = error.reason === "client_disconnect" || !this._isResponseWritable(res);
             if (isClientDisconnect) {
                 this._markTrackedClientAbort(res, errorMsg);
-                this.logger.info(`[Request] Request terminated: Queue closed (${error.reason || "connection_lost"})`);
+                this.logger.info(
+                    `[Request] Request terminated: Queue closed (${error.reason || "connection_lost"})${requestIdSuffix}`
+                );
                 if (!res.writableEnded) {
                     try {
                         res.end();
@@ -3732,7 +3793,9 @@ class RequestHandler {
         }
 
         if (res.headersSent) {
-            this.logger.error(`[Request] Request processing error (headers already sent): ${errorMsg}`);
+            this.logger.error(
+                `❌ [Request] Request processing error (headers already sent): ${errorMsg}${requestIdSuffix}`
+            );
 
             // Try to send error in the stream format
             if (this._isResponseWritable(res)) {
@@ -3808,7 +3871,9 @@ class RequestHandler {
                         this.logger.info("[Request] Error event sent to SSE stream");
                     } catch (writeError) {
                         const writeErrorMsg = String(writeError?.message ?? writeError);
-                        this.logger.error(`[Request] Failed to write error to stream: ${writeErrorMsg}`);
+                        this.logger.error(
+                            `❌ [Request] Failed to write error to stream: ${writeErrorMsg}${requestIdSuffix}`
+                        );
                     }
                 } else if (res.__proxyResponseStreamMode === "fake") {
                     // Request-scoped fake stream mode - try to send an SSE-style error chunk
@@ -3822,7 +3887,9 @@ class RequestHandler {
                         this._sendErrorChunkToClient(res, `Processing failed: ${errorMsg}`, status);
                     } catch (writeError) {
                         const writeErrorMsg = String(writeError?.message ?? writeError);
-                        this.logger.error(`[Request] Failed to write error chunk: ${writeErrorMsg}`);
+                        this.logger.error(
+                            `❌ [Request] Failed to write error chunk: ${writeErrorMsg}${requestIdSuffix}`
+                        );
                     }
                 }
 
@@ -3833,7 +3900,7 @@ class RequestHandler {
                 }
             }
         } else {
-            this.logger.error(`[Request] Request processing error: ${errorMsg}`);
+            this.logger.error(`❌ [Request] Request processing error: ${errorMsg}${requestIdSuffix}`);
             let status = 500;
             // Use precise error type checking instead of string matching
             if (error instanceof QueueTimeoutError || error.code === "QUEUE_TIMEOUT") {
@@ -4166,11 +4233,17 @@ class RequestHandler {
     }
 
     _advanceProxyRequestAttempt(proxyRequest) {
+        const previousAttemptId = proxyRequest.request_attempt_id;
         proxyRequest.request_attempt_number = (proxyRequest.request_attempt_number || 1) + 1;
         proxyRequest.request_attempt_id = this._generateRequestAttemptId(
             proxyRequest.request_id,
             proxyRequest.request_attempt_number
         );
+        if (previousAttemptId && previousAttemptId !== proxyRequest.request_attempt_id) {
+            this.logger.info(
+                `[Request] Retry attempt ID changed for request ID: ${proxyRequest.request_id}, attempt ID: ${proxyRequest.request_attempt_id}`
+            );
+        }
     }
 
     _forwardRequest(proxyRequest) {
