@@ -92,6 +92,25 @@ class RequestHandler {
         return fallback;
     }
 
+    _setResponseApiFormat(res, apiFormat) {
+        if (!res || !apiFormat) return;
+        res.__proxyApiFormat = apiFormat;
+    }
+
+    _resolveErrorFormat(res) {
+        const trackedFormat = res?.__proxyApiFormat;
+        if (trackedFormat && trackedFormat !== "upload") return trackedFormat;
+        return "gemini";
+    }
+
+    _getDefaultErrorType(format, statusCode) {
+        if (statusCode === 504) return "timeout_error";
+        if (statusCode === 503) {
+            return format === "claude" ? "overloaded_error" : "service_unavailable";
+        }
+        return "api_error";
+    }
+
     _startTrackedRequest(requestId, req, meta = {}) {
         const usageStatsService = this._getUsageStatsService();
         if (!usageStatsService) return;
@@ -232,10 +251,10 @@ class RequestHandler {
      * Handle queue closed error in real streaming mode with proper SSE error response
      * @param {Error} error - The error object (QueueClosedError)
      * @param {Object} res - Express response object
-     * @param {string} format - Response format ('openai', 'response_api', 'claude', or 'gemini')
      * @returns {boolean} true if error was handled, false otherwise
      */
-    _handleRealStreamQueueClosedError(error, res, format) {
+    _handleRealStreamQueueClosedError(error, res) {
+        const format = this._resolveErrorFormat(res);
         const isClientDisconnect = error.reason === "client_disconnect" || !this._isResponseWritable(res);
 
         if (isClientDisconnect) {
@@ -319,10 +338,10 @@ class RequestHandler {
      * Classify and handle fake stream errors
      * @param {Error} error - The error object
      * @param {Object} res - Express response object
-     * @param {string} format - Response format ('openai', 'response_api', 'claude', or 'gemini')
      * @throws {Error} Rethrows unexpected errors for outer handler
      */
-    _handleFakeStreamError(error, res, format) {
+    _handleFakeStreamError(error, res) {
+        const format = this._resolveErrorFormat(res);
         if (!this._isResponseWritable(res)) {
             return; // Client disconnected, no need to send error
         }
@@ -804,6 +823,7 @@ class RequestHandler {
             apiFormat: "gemini",
             requestCategory: this._categorizeRequest(req.path, "request"),
         });
+        this._setResponseApiFormat(res, "gemini");
         res.__proxyResponseStreamMode = null;
 
         try {
@@ -894,7 +914,7 @@ class RequestHandler {
                 // Handle queue timeout by notifying browser
                 this._handleQueueTimeout(error, requestId);
 
-                this._handleRequestError(error, res, "gemini", requestId);
+                this._handleRequestError(error, res, requestId);
             } finally {
                 this.connectionRegistry.removeMessageQueue(requestId, "request_complete");
                 if (this.needsSwitchingAfterRequest) {
@@ -923,6 +943,7 @@ class RequestHandler {
             requestCategory: "upload",
             streamMode: null,
         });
+        this._setResponseApiFormat(res, "upload");
 
         try {
             // Check current account's browser connection
@@ -977,7 +998,7 @@ class RequestHandler {
 
                 await this._handleNonStreamResponse(proxyRequest, messageQueue, req, res);
             } catch (error) {
-                this._handleRequestError(error, res, "gemini", requestId);
+                this._handleRequestError(error, res, requestId);
             } finally {
                 this.connectionRegistry.removeMessageQueue(requestId, "request_complete");
                 if (!res.writableEnded) res.end();
@@ -996,6 +1017,7 @@ class RequestHandler {
             requestCategory: "generation",
             streamMode: req.body.stream === true ? this.serverSystem.streamingMode : null,
         });
+        this._setResponseApiFormat(res, "openai");
         res.__proxyResponseStreamMode = null;
 
         try {
@@ -1016,7 +1038,7 @@ class RequestHandler {
             {
                 const ready = await this._waitForSystemAndConnectionIfBusy(res, {
                     sendError: (status, message) =>
-                        this._sendErrorResponse(res, status, message, "openai", "service_unavailable"),
+                        this._sendErrorResponse(res, status, message, "service_unavailable"),
                 });
                 if (!ready) {
                     this._markTrackedEarlyExitIfNeeded(res, "Service temporarily unavailable: System not ready.");
@@ -1054,13 +1076,7 @@ class RequestHandler {
                 this.logger.error(
                     `❌ [Adapter] OpenAI request translation failed: ${error.message}, request ID: ${requestId}`
                 );
-                return this._sendErrorResponse(
-                    res,
-                    400,
-                    "Invalid OpenAI request format.",
-                    "openai",
-                    "invalid_request_error"
-                );
+                return this._sendErrorResponse(res, 400, "Invalid OpenAI request format.", "invalid_request_error");
             }
 
             const effectiveStreamMode = modelStreamingMode || systemStreamMode;
@@ -1159,7 +1175,7 @@ class RequestHandler {
                         });
 
                         // Send standard HTTP error response
-                        this._sendErrorResponse(res, initialMessage.status || 500, initialMessage.message, "openai");
+                        this._sendErrorResponse(res, initialMessage.status || 500, initialMessage.message);
 
                         // Avoid switching account if the error is just a connection reset
                         if (!skipFinalFailureSwitch && !this._isConnectionResetError(initialMessage)) {
@@ -1223,14 +1239,9 @@ class RequestHandler {
                             if (connectionMaintainer) clearTimeout(connectionMaintainer);
                             if (isOpenAIStream && res.headersSent) {
                                 // If keep-alives already started the SSE response, send an SSE error event instead of JSON.
-                                this._handleRequestError(result.error, res, "openai", requestId);
+                                this._handleRequestError(result.error, res, requestId);
                             } else {
-                                this._sendErrorResponse(
-                                    res,
-                                    result.error.status || 500,
-                                    result.error.message,
-                                    "openai"
-                                );
+                                this._sendErrorResponse(res, result.error.status || 500, result.error.message);
                             }
 
                             // Avoid switching account if the error is just a connection reset
@@ -1335,7 +1346,7 @@ class RequestHandler {
                                 );
                             } catch (error) {
                                 // Classify error type and send appropriate response
-                                this._handleFakeStreamError(error, res, "openai");
+                                this._handleFakeStreamError(error, res);
                             }
                         } else {
                             // Non-stream
@@ -1349,7 +1360,7 @@ class RequestHandler {
                 // Handle queue timeout by notifying browser
                 this._handleQueueTimeout(error, requestId);
 
-                this._handleRequestError(error, res, "openai", requestId);
+                this._handleRequestError(error, res, requestId);
             } finally {
                 this.connectionRegistry.removeMessageQueue(requestId, "request_complete");
                 if (this.needsSwitchingAfterRequest) {
@@ -1377,6 +1388,7 @@ class RequestHandler {
             requestCategory: "generation",
             streamMode: req.body.stream === true ? this.serverSystem.streamingMode : null,
         });
+        this._setResponseApiFormat(res, "response_api");
         res.__proxyResponseStreamMode = null;
 
         try {
@@ -1397,7 +1409,7 @@ class RequestHandler {
             {
                 const ready = await this._waitForSystemAndConnectionIfBusy(res, {
                     sendError: (status, message) =>
-                        this._sendErrorResponse(res, status, message, "response_api", "service_unavailable"),
+                        this._sendErrorResponse(res, status, message, "service_unavailable"),
                 });
                 if (!ready) {
                     this._markTrackedEarlyExitIfNeeded(res, "Service temporarily unavailable: System not ready.");
@@ -1488,7 +1500,6 @@ class RequestHandler {
                     res,
                     400,
                     "Invalid OpenAI Response request format.",
-                    "response_api",
                     "invalid_request_error"
                 );
             }
@@ -1590,12 +1601,7 @@ class RequestHandler {
                         });
 
                         // Send standard HTTP error response
-                        this._sendErrorResponse(
-                            res,
-                            initialMessage.status || 500,
-                            initialMessage.message,
-                            "response_api"
-                        );
+                        this._sendErrorResponse(res, initialMessage.status || 500, initialMessage.message);
 
                         // Avoid switching account if the error is just a connection reset
                         if (!skipFinalFailureSwitch && !this._isConnectionResetError(initialMessage)) {
@@ -1666,14 +1672,9 @@ class RequestHandler {
                             if (connectionMaintainer) clearTimeout(connectionMaintainer);
                             if (isOpenAIStream && res.headersSent) {
                                 // If keep-alives already started the SSE response, send an SSE error event instead of JSON.
-                                this._handleRequestError(result.error, res, "response_api", requestId);
+                                this._handleRequestError(result.error, res, requestId);
                             } else {
-                                this._sendErrorResponse(
-                                    res,
-                                    result.error.status || 500,
-                                    result.error.message,
-                                    "response_api"
-                                );
+                                this._sendErrorResponse(res, result.error.status || 500, result.error.message);
                             }
 
                             // Avoid switching account if the error is just a connection reset
@@ -1788,7 +1789,7 @@ class RequestHandler {
                                 );
                             } catch (error) {
                                 // Classify error type and send appropriate response
-                                this._handleFakeStreamError(error, res, "response_api");
+                                this._handleFakeStreamError(error, res);
                             }
                         } else {
                             // Non-stream
@@ -1808,7 +1809,7 @@ class RequestHandler {
                 // Handle queue timeout by notifying browser
                 this._handleQueueTimeout(error, requestId);
 
-                this._handleRequestError(error, res, "response_api", requestId);
+                this._handleRequestError(error, res, requestId);
             } finally {
                 this.connectionRegistry.removeMessageQueue(requestId, "request_complete");
                 if (this.needsSwitchingAfterRequest) {
@@ -1836,6 +1837,7 @@ class RequestHandler {
             requestCategory: "generation",
             streamMode: req.body.stream === true ? this.serverSystem.streamingMode : null,
         });
+        this._setResponseApiFormat(res, "claude");
         res.__proxyResponseStreamMode = null;
 
         try {
@@ -1855,8 +1857,7 @@ class RequestHandler {
             // Wait for system to become ready if it's busy
             {
                 const ready = await this._waitForSystemAndConnectionIfBusy(res, {
-                    sendError: (status, message) =>
-                        this._sendErrorResponse(res, status, message, "claude", "overloaded_error"),
+                    sendError: (status, message) => this._sendErrorResponse(res, status, message, "overloaded_error"),
                 });
                 if (!ready) {
                     this._markTrackedEarlyExitIfNeeded(res, "Service temporarily unavailable: System not ready.");
@@ -1895,13 +1896,7 @@ class RequestHandler {
                 this.logger.error(
                     `❌ [Adapter] Claude request translation failed: ${error.message}, request ID: ${requestId}`
                 );
-                return this._sendErrorResponse(
-                    res,
-                    400,
-                    "Invalid Claude request format.",
-                    "claude",
-                    "invalid_request_error"
-                );
+                return this._sendErrorResponse(res, 400, "Invalid Claude request format.", "invalid_request_error");
             }
 
             const effectiveStreamMode = modelStreamingMode || systemStreamMode;
@@ -1999,13 +1994,7 @@ class RequestHandler {
                         this._logFinalRequestFailure(initialMessage, "Claude real stream", requestId, {
                             afterRetries: false,
                         });
-                        this._sendErrorResponse(
-                            res,
-                            initialMessage.status || 500,
-                            initialMessage.message,
-                            "claude",
-                            "api_error"
-                        );
+                        this._sendErrorResponse(res, initialMessage.status || 500, initialMessage.message, "api_error");
                         if (!skipFinalFailureSwitch && !this._isConnectionResetError(initialMessage)) {
                             await this.authSwitcher.handleRequestFailureAndSwitch(initialMessage, null);
                         } else if (skipFinalFailureSwitch) {
@@ -2059,13 +2048,12 @@ class RequestHandler {
                             if (connectionMaintainer) clearTimeout(connectionMaintainer);
                             if (isClaudeStream && res.headersSent) {
                                 // If keep-alives already started the SSE response, send an SSE error event instead of JSON.
-                                this._handleRequestError(result.error, res, "claude", requestId);
+                                this._handleRequestError(result.error, res, requestId);
                             } else {
                                 this._sendErrorResponse(
                                     res,
                                     result.error.status || 500,
                                     result.error.message,
-                                    "claude",
                                     "api_error"
                                 );
                             }
@@ -2168,7 +2156,7 @@ class RequestHandler {
                                 );
                             } catch (error) {
                                 // Classify error type and send appropriate response
-                                this._handleFakeStreamError(error, res, "claude");
+                                this._handleFakeStreamError(error, res);
                             }
                         } else {
                             // Non-stream
@@ -2182,7 +2170,7 @@ class RequestHandler {
                 // Handle queue timeout by notifying browser
                 this._handleQueueTimeout(error, requestId);
 
-                this._handleRequestError(error, res, "claude", requestId);
+                this._handleRequestError(error, res, requestId);
             } finally {
                 this.connectionRegistry.removeMessageQueue(requestId, "request_complete");
                 if (this.needsSwitchingAfterRequest) {
@@ -2211,6 +2199,7 @@ class RequestHandler {
             requestCategory: "count_tokens",
             streamMode: null,
         });
+        this._setResponseApiFormat(res, "claude");
 
         try {
             // Check current account's browser connection
@@ -2229,8 +2218,7 @@ class RequestHandler {
             // Wait for system to become ready if it's busy
             {
                 const ready = await this._waitForSystemAndConnectionIfBusy(res, {
-                    sendError: (status, message) =>
-                        this._sendErrorResponse(res, status, message, "claude", "overloaded_error"),
+                    sendError: (status, message) => this._sendErrorResponse(res, status, message, "overloaded_error"),
                 });
                 if (!ready) {
                     this._markTrackedEarlyExitIfNeeded(res, "Service temporarily unavailable: System not ready.");
@@ -2252,13 +2240,7 @@ class RequestHandler {
                 this.logger.error(
                     `❌ [Adapter] Claude request translation failed: ${error.message}, request ID: ${requestId}`
                 );
-                return this._sendErrorResponse(
-                    res,
-                    400,
-                    "Invalid Claude request format.",
-                    "claude",
-                    "invalid_request_error"
-                );
+                return this._sendErrorResponse(res, 400, "Invalid Claude request format.", "invalid_request_error");
             }
 
             // Build countTokens request
@@ -2309,7 +2291,7 @@ class RequestHandler {
                     this.logger.error(
                         `❌ [Request] Received error from browser, will trigger switching logic. Status code: ${response.status}, message: ${response.message}`
                     );
-                    this._sendErrorResponse(res, response.status || 500, response.message, "claude", "api_error");
+                    this._sendErrorResponse(res, response.status || 500, response.message, "api_error");
                     if (!this._isConnectionResetError(response)) {
                         await this.authSwitcher.handleRequestFailureAndSwitch(response, null);
                     }
@@ -2329,7 +2311,7 @@ class RequestHandler {
                         if (message.event_type === "error") {
                             this.logger.error(`❌ [Request] Error received during count tokens: ${message.message}`);
                             this._markTrackedResponseError(res, message.message, 500);
-                            return this._sendErrorResponse(res, 500, message.message, "claude", "api_error");
+                            return this._sendErrorResponse(res, 500, message.message, "api_error");
                         }
                         if (message.data) fullBody += message.data;
                     }
@@ -2356,7 +2338,7 @@ class RequestHandler {
                     `✅ [Request] Response completed (Claude count_tokens, input tokens: ${totalTokens}), request ID: ${requestId}`
                 );
             } catch (error) {
-                this._handleRequestError(error, res, "claude", requestId);
+                this._handleRequestError(error, res, requestId);
             } finally {
                 this.connectionRegistry.removeMessageQueue(requestId, "request_complete");
                 if (!res.writableEnded) res.end();
@@ -2377,6 +2359,7 @@ class RequestHandler {
             requestCategory: "count_tokens",
             streamMode: null,
         });
+        this._setResponseApiFormat(res, "response_api");
 
         try {
             // Check current account's browser connection
@@ -2396,7 +2379,7 @@ class RequestHandler {
             {
                 const ready = await this._waitForSystemAndConnectionIfBusy(res, {
                     sendError: (status, message) =>
-                        this._sendErrorResponse(res, status, message, "response_api", "service_unavailable"),
+                        this._sendErrorResponse(res, status, message, "service_unavailable"),
                 });
                 if (!ready) {
                     this._markTrackedEarlyExitIfNeeded(res, "Service temporarily unavailable: System not ready.");
@@ -2422,7 +2405,6 @@ class RequestHandler {
                     res,
                     400,
                     "Invalid OpenAI Response request format.",
-                    "response_api",
                     "invalid_request_error"
                 );
             }
@@ -2474,7 +2456,7 @@ class RequestHandler {
                         `❌ [Request] Received error from browser for input_tokens, will trigger switching logic. Status code: ${response.status}, message: ${response.message}`
                     );
 
-                    this._sendErrorResponse(res, response.status || 500, response.message, "response_api");
+                    this._sendErrorResponse(res, response.status || 500, response.message);
 
                     // Avoid switching account if the error is just a connection reset
                     if (!this._isConnectionResetError(response)) {
@@ -2502,7 +2484,7 @@ class RequestHandler {
                                 `❌ [Request] Error received during input_tokens count: ${message.message}`
                             );
                             this._markTrackedResponseError(res, message.message, 500);
-                            this._sendErrorResponse(res, 500, message.message, "response_api");
+                            this._sendErrorResponse(res, 500, message.message);
                             return;
                         }
                         if (message.data) fullBody += message.data;
@@ -2515,7 +2497,7 @@ class RequestHandler {
                     geminiResponse = JSON.parse(fullBody || response.body);
                 } catch (parseError) {
                     this.logger.error(`❌ [Request] Failed to parse countTokens response: ${parseError.message}`);
-                    this._sendErrorResponse(res, 500, "Failed to parse backend response", "response_api");
+                    this._sendErrorResponse(res, 500, "Failed to parse backend response");
                     return;
                 }
 
@@ -2537,7 +2519,7 @@ class RequestHandler {
                     `✅ [Request] Response completed (OpenAI Response input_tokens, input tokens: ${totalTokens}), request ID: ${requestId}`
                 );
             } catch (error) {
-                this._handleRequestError(error, res, "response_api", requestId);
+                this._handleRequestError(error, res, requestId);
             } finally {
                 this.connectionRegistry.removeMessageQueue(requestId, "request_complete");
                 if (!res.writableEnded) res.end();
@@ -2618,7 +2600,7 @@ class RequestHandler {
             // Only handle connection reset errors here (client disconnect)
             // Let other errors (timeout, parsing, logic errors) propagate to outer catch
             if (this._isConnectionResetError(error)) {
-                this._handleRealStreamQueueClosedError(error, res, "claude");
+                this._handleRealStreamQueueClosedError(error, res);
                 return;
             }
 
@@ -2640,7 +2622,7 @@ class RequestHandler {
 
             if (message.event_type === "error") {
                 this.logger.error(`❌ [Adapter] Error during Claude non-stream conversion: ${message.message}`);
-                this._sendErrorResponse(res, 500, message.message, "claude", "api_error");
+                this._sendErrorResponse(res, 500, message.message, "api_error");
                 return;
             }
 
@@ -2656,7 +2638,7 @@ class RequestHandler {
             this.logger.info(`✅ [Request] Response completed (Claude non-stream), request ID: ${requestId}`);
         } catch (e) {
             this.logger.error(`❌ [Adapter] Failed to parse response for Claude: ${e.message}`);
-            this._sendErrorResponse(res, 500, "Failed to parse backend response", "claude", "api_error");
+            this._sendErrorResponse(res, 500, "Failed to parse backend response", "api_error");
         }
     }
 
@@ -2700,7 +2682,7 @@ class RequestHandler {
                     this._logFinalRequestFailure(result.error, "Gemini fake stream", proxyRequest.request_id);
                     // If keep-alives already started the SSE response, send an SSE error event instead of JSON.
                     if (res.headersSent) {
-                        this._handleRequestError(result.error, res, "gemini", proxyRequest.request_id);
+                        this._handleRequestError(result.error, res, proxyRequest.request_id);
                     } else {
                         this._sendErrorResponse(res, result.error.status || 500, result.error.message);
                     }
@@ -2756,7 +2738,7 @@ class RequestHandler {
                         );
                         this._markTrackedResponseError(res, message.message, 500);
                         hadStreamError = true;
-                        this._handleRequestError({ message: message.message }, res, "gemini", proxyRequest.request_id);
+                        this._handleRequestError({ message: message.message }, res, proxyRequest.request_id);
                         break;
                     }
 
@@ -2769,7 +2751,7 @@ class RequestHandler {
                 // Don't attempt to write if it's a connection reset or if response is destroyed
                 if (!this._isConnectionResetError(error)) {
                     // Classify error type and send appropriate response
-                    this._handleFakeStreamError(error, res, "gemini");
+                    this._handleFakeStreamError(error, res);
                 } else {
                     this.logger.debug(
                         "[Request] Gemini pseudo-stream interrupted by connection reset, skipping error write"
@@ -2937,7 +2919,7 @@ class RequestHandler {
                 `✅ [Request] Response completed (Gemini pseudo-stream, reason: ${finishReason}), request ID: ${proxyRequest.request_id}`
             );
         } catch (error) {
-            this._handleRequestError(error, res, "gemini", proxyRequest.request_id);
+            this._handleRequestError(error, res, proxyRequest.request_id);
         } finally {
             clearTimeout(connectionMaintainer);
             if (!res.writableEnded) {
@@ -3112,10 +3094,10 @@ class RequestHandler {
         } catch (error) {
             // Handle queue closed errors (account switch, context closed, etc.)
             if (this._isConnectionResetError(error)) {
-                this._handleRealStreamQueueClosedError(error, res, "gemini");
+                this._handleRealStreamQueueClosedError(error, res);
             } else if (error instanceof QueueTimeoutError || error.code === "QUEUE_TIMEOUT") {
                 // Keep behavior consistent with other interfaces: treat missing stream chunks as a timeout error.
-                this._handleRequestError(error, res, "gemini", proxyRequest.request_id);
+                this._handleRequestError(error, res, proxyRequest.request_id);
             } else {
                 // Unexpected error - rethrow to outer handler
                 throw error;
@@ -3214,7 +3196,7 @@ class RequestHandler {
 
             this.logger.debug(`[Request] Complete non-stream response sent to client.`);
         } catch (error) {
-            this._handleRequestError(error, res, "gemini", proxyRequest.request_id);
+            this._handleRequestError(error, res, proxyRequest.request_id);
         }
     }
 
@@ -3502,7 +3484,7 @@ class RequestHandler {
             // Only handle connection reset errors here (client disconnect / queue closed).
             // Let other errors (timeout, parsing, logic errors) propagate to the outer catch.
             if (this._isConnectionResetError(error)) {
-                this._handleRealStreamQueueClosedError(error, res, "response_api");
+                this._handleRealStreamQueueClosedError(error, res);
                 return;
             }
 
@@ -3578,7 +3560,7 @@ class RequestHandler {
             // Only handle connection reset errors here (client disconnect)
             // Let other errors (timeout, parsing, logic errors) propagate to outer catch
             if (this._isConnectionResetError(error)) {
-                this._handleRealStreamQueueClosedError(error, res, "openai");
+                this._handleRealStreamQueueClosedError(error, res);
                 return;
             }
 
@@ -3602,7 +3584,7 @@ class RequestHandler {
                 this.logger.error(
                     `❌ [Adapter] Error during OpenAI Response API non-stream conversion: ${message.message}`
                 );
-                this._sendErrorResponse(res, 500, message.message, "response_api");
+                this._sendErrorResponse(res, 500, message.message);
                 return;
             }
 
@@ -3625,7 +3607,7 @@ class RequestHandler {
             );
         } catch (e) {
             this.logger.error(`❌ [Adapter] Failed to parse response for OpenAI Response API: ${e.message}`);
-            this._sendErrorResponse(res, 500, "Failed to parse backend response", "response_api");
+            this._sendErrorResponse(res, 500, "Failed to parse backend response");
         }
     }
 
@@ -3642,7 +3624,7 @@ class RequestHandler {
 
             if (message.event_type === "error") {
                 this.logger.error(`❌ [Adapter] Error during OpenAI non-stream conversion: ${message.message}`);
-                this._sendErrorResponse(res, 500, message.message, "openai");
+                this._sendErrorResponse(res, 500, message.message);
                 return;
             }
 
@@ -3659,7 +3641,7 @@ class RequestHandler {
             this.logger.info(`✅ [Request] Response completed (OpenAI non-stream), request ID: ${requestId}`);
         } catch (e) {
             this.logger.error(`❌ [Adapter] Failed to parse response for OpenAI: ${e.message}`);
-            this._sendErrorResponse(res, 500, "Failed to parse backend response", "openai");
+            this._sendErrorResponse(res, 500, "Failed to parse backend response");
         }
     }
 
@@ -3710,7 +3692,8 @@ class RequestHandler {
         });
     }
 
-    _handleRequestError(error, res, format = "openai", requestId = null) {
+    _handleRequestError(error, res, requestId = null) {
+        const format = this._resolveErrorFormat(res);
         // Normalize error message to handle non-Error objects and missing/non-string messages
         const errorMsg = String(error?.message ?? error);
         const requestIdSuffix = requestId ? `, request ID: ${requestId}` : "";
@@ -3821,12 +3804,15 @@ class RequestHandler {
                     // Request-scoped fake stream mode - try to send an SSE-style error chunk
                     try {
                         let status = 500;
+                        let errorType = "api_error";
                         if (error instanceof QueueTimeoutError || error.code === "QUEUE_TIMEOUT") {
                             status = 504;
+                            errorType = "timeout_error";
                         } else if (this._isConnectionResetError(error)) {
                             status = 503;
+                            errorType = this._getDefaultErrorType(format, status);
                         }
-                        this._sendErrorChunkToClient(res, `Processing failed: ${errorMsg}`, status);
+                        this._sendErrorChunkToClient(res, `Processing failed: ${errorMsg}`, status, errorType);
                     } catch (writeError) {
                         const writeErrorMsg = String(writeError?.message ?? writeError);
                         this.logger.error(
@@ -3854,17 +3840,18 @@ class RequestHandler {
                 errorType = format === "claude" ? "overloaded_error" : "service_unavailable";
                 this.logger.info(`[Request] Queue closed, returning 503 Service Unavailable.`);
             }
-            this._sendErrorResponse(res, status, `Proxy error: ${errorMsg}`, format, errorType);
+            this._sendErrorResponse(res, status, `Proxy error: ${errorMsg}`, errorType);
         }
     }
 
-    _sendErrorResponse(res, status, message, format = "gemini", errorType = null) {
+    _sendErrorResponse(res, status, message, errorType = null) {
         if (!res.headersSent) {
             const statusCode = Number(status) || 500;
-            const resolvedErrorType = errorType || "api_error";
+            const resolvedFormat = this._resolveErrorFormat(res);
+            const resolvedErrorType = errorType || this._getDefaultErrorType(resolvedFormat, statusCode);
             let errorPayload;
 
-            if (format === "claude") {
+            if (resolvedFormat === "claude") {
                 errorPayload = {
                     error: {
                         message,
@@ -3872,7 +3859,7 @@ class RequestHandler {
                     },
                     type: "error",
                 };
-            } else if (format === "openai") {
+            } else if (resolvedFormat === "openai") {
                 errorPayload = {
                     error: {
                         code: statusCode,
@@ -3880,7 +3867,7 @@ class RequestHandler {
                         type: resolvedErrorType,
                     },
                 };
-            } else if (format === "response_api") {
+            } else if (resolvedFormat === "response_api") {
                 errorPayload = {
                     error: {
                         code: resolvedErrorType,
@@ -3912,7 +3899,9 @@ class RequestHandler {
         );
     }
 
-    _sendErrorChunkToClient(res, message, statusCode = 500) {
+    _sendErrorChunkToClient(res, message, statusCode = 500, errorType = null) {
+        const format = this._resolveErrorFormat(res);
+        const resolvedErrorType = errorType || this._getDefaultErrorType(format, statusCode);
         if (!res.headersSent) {
             res.setHeader("Content-Type", "text/event-stream");
             res.setHeader("Cache-Control", "no-cache");
@@ -3922,7 +3911,41 @@ class RequestHandler {
         // Check if response is still writable before attempting to write
         if (this._isResponseWritable(res)) {
             try {
-                res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
+                if (format === "response_api") {
+                    if (res.__responseApiSeq == null) res.__responseApiSeq = 0;
+                    res.__responseApiSeq += 1;
+                    res.write(
+                        `event: error\ndata: ${JSON.stringify({
+                            code: resolvedErrorType,
+                            message,
+                            param: null,
+                            sequence_number: res.__responseApiSeq,
+                            type: "error",
+                        })}\n\n`
+                    );
+                } else if (format === "claude") {
+                    res.write(
+                        `event: error\ndata: ${JSON.stringify({
+                            error: {
+                                message,
+                                type: resolvedErrorType,
+                            },
+                            type: "error",
+                        })}\n\n`
+                    );
+                } else if (format === "openai") {
+                    res.write(
+                        `data: ${JSON.stringify({
+                            error: {
+                                code: statusCode,
+                                message,
+                                type: resolvedErrorType,
+                            },
+                        })}\n\n`
+                    );
+                } else {
+                    res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
+                }
             } catch (writeError) {
                 this.logger.debug(`[Request] Failed to write error chunk to client: ${writeError.message}`);
             }
