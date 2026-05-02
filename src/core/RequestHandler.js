@@ -551,10 +551,10 @@ class RequestHandler {
         return true;
     }
 
-    _createImmediateSwitchTracker() {
+    _createImmediateSwitchTracker(initialAuthIndex = this.currentAuthIndex) {
         const attemptedAuthIndices = new Set();
-        if (Number.isInteger(this.currentAuthIndex) && this.currentAuthIndex >= 0) {
-            attemptedAuthIndices.add(this.currentAuthIndex);
+        if (Number.isInteger(initialAuthIndex) && initialAuthIndex >= 0) {
+            attemptedAuthIndices.add(initialAuthIndex);
         }
         return { attemptedAuthIndices };
     }
@@ -589,6 +589,48 @@ class RequestHandler {
 
         tracker.attemptedAuthIndices.add(newAuthIndex);
         return true;
+    }
+
+    async _prepareImmediateStatusRetry(errorDetails, requestId, tracker, sourceAuthIndex) {
+        const currentAuthIndex = this.currentAuthIndex;
+        const hasSourceAuth = Number.isInteger(sourceAuthIndex) && sourceAuthIndex >= 0;
+        const hasCurrentAuth = Number.isInteger(currentAuthIndex) && currentAuthIndex >= 0;
+
+        if (hasSourceAuth && hasCurrentAuth && sourceAuthIndex !== currentAuthIndex) {
+            const ready = await this._waitForSystemAndConnectionIfBusy(null, {
+                sendError: () => {},
+            });
+            if (!ready) {
+                throw new Error("System not ready after non-current account retry preparation.");
+            }
+
+            const retryAuthIndex = this.currentAuthIndex;
+            if (sourceAuthIndex === retryAuthIndex) {
+                return this._performImmediateSwitchRetry(errorDetails, requestId, tracker);
+            }
+            if (!Number.isInteger(retryAuthIndex) || retryAuthIndex < 0) {
+                this.logger.warn(
+                    `[Request] Non-current account retry for request #${requestId} did not find a valid current account.`
+                );
+                return false;
+            }
+            if (tracker.attemptedAuthIndices.has(retryAuthIndex)) {
+                this.logger.warn(
+                    `[Request] Non-current account retry for request #${requestId} would reuse already-attempted account #${retryAuthIndex}, stopping account-switch retries.`
+                );
+                return false;
+            }
+
+            this.logger.warn(
+                `[Request] Received ${errorDetails.status} from non-current account #${sourceAuthIndex}; ` +
+                    `retrying request #${requestId} on current account #${retryAuthIndex} without switching.`
+            );
+
+            tracker.attemptedAuthIndices.add(retryAuthIndex);
+            return true;
+        }
+
+        return this._performImmediateSwitchRetry(errorDetails, requestId, tracker);
     }
 
     _logFinalRequestFailure(errorDetails, contextLabel = "Request") {
@@ -1033,9 +1075,10 @@ class RequestHandler {
 
                 if (useRealStream) {
                     let currentQueue = messageQueue;
+                    let currentQueueAuthIndex = this.currentAuthIndex;
                     let initialMessage;
                     let skipFinalFailureSwitch = false;
-                    const immediateSwitchTracker = this._createImmediateSwitchTracker();
+                    const immediateSwitchTracker = this._createImmediateSwitchTracker(currentQueueAuthIndex);
 
                     // eslint-disable-next-line no-constant-condition
                     while (true) {
@@ -1057,10 +1100,11 @@ class RequestHandler {
                             this.logger.warn(
                                 `[Request] OpenAI real stream received ${initialStatus}, switching account and retrying...`
                             );
-                            const switched = await this._performImmediateSwitchRetry(
+                            const switched = await this._prepareImmediateStatusRetry(
                                 initialMessage,
                                 requestId,
-                                immediateSwitchTracker
+                                immediateSwitchTracker,
+                                currentQueueAuthIndex
                             );
                             if (!switched) {
                                 skipFinalFailureSwitch = true;
@@ -1078,6 +1122,7 @@ class RequestHandler {
                                 this.currentAuthIndex,
                                 proxyRequest.request_attempt_id
                             );
+                            currentQueueAuthIndex = this.currentAuthIndex;
                             continue;
                         }
 
@@ -1439,9 +1484,10 @@ class RequestHandler {
 
                 if (useRealStream) {
                     let currentQueue = messageQueue;
+                    let currentQueueAuthIndex = this.currentAuthIndex;
                     let initialMessage;
                     let skipFinalFailureSwitch = false;
-                    const immediateSwitchTracker = this._createImmediateSwitchTracker();
+                    const immediateSwitchTracker = this._createImmediateSwitchTracker(currentQueueAuthIndex);
 
                     // eslint-disable-next-line no-constant-condition
                     while (true) {
@@ -1463,10 +1509,11 @@ class RequestHandler {
                             this.logger.warn(
                                 `[Request] OpenAI Response API real stream received ${initialStatus}, switching account and retrying...`
                             );
-                            const switched = await this._performImmediateSwitchRetry(
+                            const switched = await this._prepareImmediateStatusRetry(
                                 initialMessage,
                                 requestId,
-                                immediateSwitchTracker
+                                immediateSwitchTracker,
+                                currentQueueAuthIndex
                             );
                             if (!switched) {
                                 skipFinalFailureSwitch = true;
@@ -1484,6 +1531,7 @@ class RequestHandler {
                                 this.currentAuthIndex,
                                 proxyRequest.request_attempt_id
                             );
+                            currentQueueAuthIndex = this.currentAuthIndex;
                             continue;
                         }
 
@@ -1822,9 +1870,10 @@ class RequestHandler {
 
                 if (useRealStream) {
                     let currentQueue = messageQueue;
+                    let currentQueueAuthIndex = this.currentAuthIndex;
                     let initialMessage;
                     let skipFinalFailureSwitch = false;
-                    const immediateSwitchTracker = this._createImmediateSwitchTracker();
+                    const immediateSwitchTracker = this._createImmediateSwitchTracker(currentQueueAuthIndex);
 
                     // eslint-disable-next-line no-constant-condition
                     while (true) {
@@ -1846,10 +1895,11 @@ class RequestHandler {
                             this.logger.warn(
                                 `[Request] Claude real stream received ${initialStatus}, switching account and retrying...`
                             );
-                            const switched = await this._performImmediateSwitchRetry(
+                            const switched = await this._prepareImmediateStatusRetry(
                                 initialMessage,
                                 requestId,
-                                immediateSwitchTracker
+                                immediateSwitchTracker,
+                                currentQueueAuthIndex
                             );
                             if (!switched) {
                                 skipFinalFailureSwitch = true;
@@ -1867,6 +1917,7 @@ class RequestHandler {
                                 this.currentAuthIndex,
                                 proxyRequest.request_attempt_id
                             );
+                            currentQueueAuthIndex = this.currentAuthIndex;
                             continue;
                         }
 
@@ -2895,9 +2946,10 @@ class RequestHandler {
     async _handleRealStreamResponse(proxyRequest, messageQueue, req, res) {
         this.logger.info(`[Request] Request dispatched to browser for processing...`);
         let currentQueue = messageQueue;
+        let currentQueueAuthIndex = this.currentAuthIndex;
         let headerMessage;
         let skipFinalFailureSwitch = false;
-        const immediateSwitchTracker = this._createImmediateSwitchTracker();
+        const immediateSwitchTracker = this._createImmediateSwitchTracker(currentQueueAuthIndex);
 
         // eslint-disable-next-line no-constant-condition
         while (true) {
@@ -2921,10 +2973,11 @@ class RequestHandler {
                 this.logger.warn(
                     `[Request] Gemini real stream received ${headerStatus}, switching account and retrying...`
                 );
-                const switched = await this._performImmediateSwitchRetry(
+                const switched = await this._prepareImmediateStatusRetry(
                     headerMessage,
                     proxyRequest.request_id,
-                    immediateSwitchTracker
+                    immediateSwitchTracker,
+                    currentQueueAuthIndex
                 );
                 if (!switched) {
                     skipFinalFailureSwitch = true;
@@ -2943,6 +2996,7 @@ class RequestHandler {
                     this.currentAuthIndex,
                     proxyRequest.request_attempt_id
                 );
+                currentQueueAuthIndex = this.currentAuthIndex;
                 continue;
             }
 
@@ -3199,7 +3253,7 @@ class RequestHandler {
         // Track the authIndex for the current queue to ensure proper cleanup
         let currentQueueAuthIndex = this.currentAuthIndex;
         let retryAttempt = 1;
-        const immediateSwitchTracker = this._createImmediateSwitchTracker();
+        const immediateSwitchTracker = this._createImmediateSwitchTracker(currentQueueAuthIndex);
 
         while (retryAttempt <= this.maxRetries) {
             // Record attempt at the start of each retry, before forwarding.
@@ -3277,10 +3331,11 @@ class RequestHandler {
                 ) {
                     this.logger.warn(`[Request] Received ${errorStatus}, switching account and retrying...`);
                     try {
-                        const switched = await this._performImmediateSwitchRetry(
+                        const switched = await this._prepareImmediateStatusRetry(
                             errorPayload,
                             proxyRequest.request_id,
-                            immediateSwitchTracker
+                            immediateSwitchTracker,
+                            currentQueueAuthIndex
                         );
                         if (!switched) {
                             lastError = { ...errorPayload, skipAccountSwitch: true };
