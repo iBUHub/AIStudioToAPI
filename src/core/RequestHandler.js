@@ -3877,11 +3877,14 @@ class RequestHandler {
                     },
                 };
             } else {
+                let statusText = "INTERNAL";
+                if (statusCode === 504) statusText = "DEADLINE_EXCEEDED";
+                else if (statusCode === 503) statusText = "UNAVAILABLE";
                 errorPayload = {
                     error: {
                         code: statusCode,
                         message,
-                        status: "SERVICE_UNAVAILABLE",
+                        status: statusText,
                     },
                 };
             }
