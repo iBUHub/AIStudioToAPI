@@ -1015,7 +1015,8 @@ class RequestHandler {
             // Wait for system to become ready if it's busy
             {
                 const ready = await this._waitForSystemAndConnectionIfBusy(res, {
-                    sendError: (status, message) => this._sendErrorResponse(res, status, message, "openai"),
+                    sendError: (status, message) =>
+                        this._sendErrorResponse(res, status, message, "openai", "service_unavailable"),
                 });
                 if (!ready) {
                     this._markTrackedEarlyExitIfNeeded(res, "Service temporarily unavailable: System not ready.");
@@ -1053,7 +1054,13 @@ class RequestHandler {
                 this.logger.error(
                     `❌ [Adapter] OpenAI request translation failed: ${error.message}, request ID: ${requestId}`
                 );
-                return this._sendErrorResponse(res, 400, "Invalid OpenAI request format.", "openai");
+                return this._sendErrorResponse(
+                    res,
+                    400,
+                    "Invalid OpenAI request format.",
+                    "openai",
+                    "invalid_request_error"
+                );
             }
 
             const effectiveStreamMode = modelStreamingMode || systemStreamMode;
@@ -1389,7 +1396,8 @@ class RequestHandler {
             // Wait for system to become ready if it's busy
             {
                 const ready = await this._waitForSystemAndConnectionIfBusy(res, {
-                    sendError: (status, message) => this._sendErrorResponse(res, status, message, "response_api"),
+                    sendError: (status, message) =>
+                        this._sendErrorResponse(res, status, message, "response_api", "service_unavailable"),
                 });
                 if (!ready) {
                     this._markTrackedEarlyExitIfNeeded(res, "Service temporarily unavailable: System not ready.");
@@ -1476,7 +1484,13 @@ class RequestHandler {
                 this.logger.error(
                     `❌ [Adapter] OpenAI Response request translation failed: ${error.message}, request ID: ${requestId}`
                 );
-                return this._sendErrorResponse(res, 400, "Invalid OpenAI Response request format.", "response_api");
+                return this._sendErrorResponse(
+                    res,
+                    400,
+                    "Invalid OpenAI Response request format.",
+                    "response_api",
+                    "invalid_request_error"
+                );
             }
 
             const effectiveStreamMode = modelStreamingMode || systemStreamMode;
@@ -2381,7 +2395,8 @@ class RequestHandler {
             // Wait for system to become ready if it's busy
             {
                 const ready = await this._waitForSystemAndConnectionIfBusy(res, {
-                    sendError: (status, message) => this._sendErrorResponse(res, status, message, "response_api"),
+                    sendError: (status, message) =>
+                        this._sendErrorResponse(res, status, message, "response_api", "service_unavailable"),
                 });
                 if (!ready) {
                     this._markTrackedEarlyExitIfNeeded(res, "Service temporarily unavailable: System not ready.");
@@ -2403,7 +2418,13 @@ class RequestHandler {
                 this.logger.error(
                     `❌ [Adapter] OpenAI Response input_tokens translation failed: ${error.message}, request ID: ${requestId}`
                 );
-                return this._sendErrorResponse(res, 400, "Invalid OpenAI Response request format.", "response_api");
+                return this._sendErrorResponse(
+                    res,
+                    400,
+                    "Invalid OpenAI Response request format.",
+                    "response_api",
+                    "invalid_request_error"
+                );
             }
 
             // Gemini countTokens accepts either:
