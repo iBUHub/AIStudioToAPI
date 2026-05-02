@@ -977,7 +977,7 @@ class RequestHandler {
 
                 await this._handleNonStreamResponse(proxyRequest, messageQueue, req, res);
             } catch (error) {
-                this._handleRequestError(error, res, "openai", requestId);
+                this._handleRequestError(error, res, "gemini", requestId);
             } finally {
                 this.connectionRegistry.removeMessageQueue(requestId, "request_complete");
                 if (!res.writableEnded) res.end();
@@ -3273,7 +3273,7 @@ class RequestHandler {
 
             this.logger.debug(`[Request] Complete non-stream response sent to client.`);
         } catch (error) {
-            this._handleRequestError(error, res, "openai", proxyRequest.request_id);
+            this._handleRequestError(error, res, "gemini", proxyRequest.request_id);
         }
     }
 
