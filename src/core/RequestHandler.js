@@ -21,6 +21,7 @@ const WS_CONNECTION_READY_TIMEOUT_MS = 10000;
 const DEFAULT_TIMEOUTS = {
     FAKE_STREAM: 300000, // 300 seconds (5 minutes) - timeout for fake streaming (buffered response)
     STREAM_CHUNK: 60000, // 60 seconds - timeout between stream chunks
+    ACCOUNT_SWITCH: 60000, // 60 seconds - timeout for account switch / direct recovery operations
 };
 
 class RequestHandler {
@@ -660,16 +661,21 @@ class RequestHandler {
                 this.authSwitcher.isSystemBusy = true;
                 this.logger.info(`[System] Set isSystemBusy=true for direct recovery to account #${recoveryAuthIndex}`);
 
-                await this.browserManager.launchOrSwitchContext(recoveryAuthIndex);
-                this.logger.info(`✅ [System] Browser successfully recovered to account #${recoveryAuthIndex}!`);
+                await this._withTimeout(
+                    (async () => {
+                        await this.browserManager.launchOrSwitchContext(recoveryAuthIndex);
+                        this.logger.info(`✅ [System] Browser successfully recovered to account #${recoveryAuthIndex}!`);
 
-                // Wait for WebSocket connection to be established
-                this.logger.info("[System] Waiting for WebSocket connection to be ready...");
-                const connectionReady = await this._waitForConnection(WS_CONNECTION_READY_TIMEOUT_MS);
-                if (!connectionReady) {
-                    throw new Error("WebSocket connection not established within timeout period");
-                }
-                this.logger.info("✅ [System] WebSocket connection is ready!");
+                        this.logger.info("[System] Waiting for WebSocket connection to be ready...");
+                        const connectionReady = await this._waitForConnection(WS_CONNECTION_READY_TIMEOUT_MS);
+                        if (!connectionReady) {
+                            throw new Error("WebSocket connection not established within timeout period");
+                        }
+                        this.logger.info("✅ [System] WebSocket connection is ready!");
+                    })(),
+                    this.timeouts.ACCOUNT_SWITCH,
+                    `Direct recovery to account #${recoveryAuthIndex} timed out after 60s`
+                );
                 recoverySuccess = true;
             } else if (this.authSource.getRotationIndices().length > 0) {
                 // Don't set isSystemBusy here - let switchToNextAuth manage it
@@ -4137,6 +4143,14 @@ class RequestHandler {
 
     _generateRequestAttemptId(requestId, attemptNumber) {
         return `${requestId}_attempt_${attemptNumber}_${Math.random().toString(36).substring(2, 8)}`;
+    }
+
+    _withTimeout(promise, ms, message) {
+        let timer;
+        const timeout = new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error(message)), ms);
+        });
+        return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
     }
 }
 
