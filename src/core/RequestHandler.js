@@ -1014,7 +1014,9 @@ class RequestHandler {
 
             // Wait for system to become ready if it's busy
             {
-                const ready = await this._waitForSystemAndConnectionIfBusy(res);
+                const ready = await this._waitForSystemAndConnectionIfBusy(res, {
+                    sendError: (status, message) => this._sendErrorResponse(res, status, message, "openai"),
+                });
                 if (!ready) {
                     this._markTrackedEarlyExitIfNeeded(res, "Service temporarily unavailable: System not ready.");
                     return;
@@ -1386,7 +1388,9 @@ class RequestHandler {
 
             // Wait for system to become ready if it's busy
             {
-                const ready = await this._waitForSystemAndConnectionIfBusy(res);
+                const ready = await this._waitForSystemAndConnectionIfBusy(res, {
+                    sendError: (status, message) => this._sendErrorResponse(res, status, message, "response_api"),
+                });
                 if (!ready) {
                     this._markTrackedEarlyExitIfNeeded(res, "Service temporarily unavailable: System not ready.");
                     return;
@@ -2376,7 +2380,9 @@ class RequestHandler {
 
             // Wait for system to become ready if it's busy
             {
-                const ready = await this._waitForSystemAndConnectionIfBusy(res);
+                const ready = await this._waitForSystemAndConnectionIfBusy(res, {
+                    sendError: (status, message) => this._sendErrorResponse(res, status, message, "response_api"),
+                });
                 if (!ready) {
                     this._markTrackedEarlyExitIfNeeded(res, "Service temporarily unavailable: System not ready.");
                     return;
@@ -2510,7 +2516,7 @@ class RequestHandler {
                     `✅ [Request] Response completed (OpenAI Response input_tokens, input tokens: ${totalTokens}), request ID: ${requestId}`
                 );
             } catch (error) {
-                this._handleRequestError(error, res, "openai", requestId);
+                this._handleRequestError(error, res, "response_api", requestId);
             } finally {
                 this.connectionRegistry.removeMessageQueue(requestId, "request_complete");
                 if (!res.writableEnded) res.end();
@@ -3731,7 +3737,7 @@ class RequestHandler {
                             errorMessage = `Stream timeout: ${errorMsg}`;
                         } else if (this._isConnectionResetError(error)) {
                             errorCode = 503;
-                            errorType = "service_unavailable";
+                            errorType = format === "claude" ? "overloaded_error" : "service_unavailable";
                             errorMessage = `Service unavailable: ${errorMsg}`;
                         }
 
@@ -3824,7 +3830,7 @@ class RequestHandler {
                 errorType = "timeout_error";
             } else if (this._isConnectionResetError(error)) {
                 status = 503;
-                errorType = "service_unavailable";
+                errorType = format === "claude" ? "overloaded_error" : "service_unavailable";
                 this.logger.info(`[Request] Queue closed, returning 503 Service Unavailable.`);
             }
             this._sendErrorResponse(res, status, `Proxy error: ${errorMsg}`, format, errorType);
