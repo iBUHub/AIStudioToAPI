@@ -17,8 +17,8 @@ const { QueueClosedError, QueueTimeoutError } = require("../utils/MessageQueue")
 const WS_RECONNECT_WAIT_MS = 130000;
 const WS_CONNECTION_READY_TIMEOUT_MS = 10000;
 
-// Timeout constants (in milliseconds)
-const TIMEOUTS = {
+// Default timeout constants (in milliseconds)
+const DEFAULT_TIMEOUTS = {
     FAKE_STREAM: 300000, // 300 seconds (5 minutes) - timeout for fake streaming (buffered response)
     STREAM_CHUNK: 60000, // 60 seconds - timeout between stream chunks
 };
@@ -41,7 +41,10 @@ class RequestHandler {
         this.needsSwitchingAfterRequest = false;
 
         // Timeout settings
-        this.timeouts = TIMEOUTS;
+        this.timeouts = {
+            FAKE_STREAM: this.config.fakeStreamTimeoutMs || DEFAULT_TIMEOUTS.FAKE_STREAM,
+            STREAM_CHUNK: this.config.streamTimeoutMs || DEFAULT_TIMEOUTS.STREAM_CHUNK,
+        };
     }
 
     // Delegate properties to AuthSwitcher

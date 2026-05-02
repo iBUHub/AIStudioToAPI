@@ -27,6 +27,7 @@ class ConfigLoader {
             enableAuthUpdate: true,
             enableUsageStats: true,
             failureThreshold: 3,
+            fakeStreamTimeoutMs: 300000,
             forceThinking: false,
             forceUrlContext: false,
             forceWebSearch: false,
@@ -38,6 +39,7 @@ class ConfigLoader {
             retryDelay: 2000,
             safetySettingsThreshold: "OFF",
             streamingMode: "real",
+            streamTimeoutMs: 60000,
             switchOnUses: 40,
             wsPort: 9998,
         };
@@ -64,6 +66,18 @@ class ConfigLoader {
         if (process.env.RETRY_DELAY) {
             const parsed = parseInt(process.env.RETRY_DELAY, 10);
             config.retryDelay = Number.isFinite(parsed) ? Math.max(50, parsed) : config.retryDelay;
+        }
+        if (process.env.STREAM_TIMEOUT_MS) {
+            const parsed = parseInt(process.env.STREAM_TIMEOUT_MS, 10);
+            config.streamTimeoutMs = Number.isFinite(parsed)
+                ? Math.min(300000, Math.max(1, parsed))
+                : config.streamTimeoutMs;
+        }
+        if (process.env.FAKE_STREAM_TIMEOUT_MS) {
+            const parsed = parseInt(process.env.FAKE_STREAM_TIMEOUT_MS, 10);
+            config.fakeStreamTimeoutMs = Number.isFinite(parsed)
+                ? Math.min(300000, Math.max(1, parsed))
+                : config.fakeStreamTimeoutMs;
         }
         if (process.env.WS_PORT) {
             // WS_PORT environment variable is no longer supported
@@ -181,6 +195,8 @@ class ConfigLoader {
         this.logger.info(`  HTTP Server Port: ${config.httpPort}`);
         this.logger.info(`  Listening Address: ${config.host}`);
         this.logger.info(`  Streaming Mode: ${config.streamingMode}`);
+        this.logger.info(`  Stream Timeout: ${config.streamTimeoutMs}ms`);
+        this.logger.info(`  Fake/Non-Stream Timeout: ${config.fakeStreamTimeoutMs}ms`);
         this.logger.info(`  Force Thinking: ${config.forceThinking}`);
         this.logger.info(`  Force Web Search: ${config.forceWebSearch}`);
         this.logger.info(`  Force URL Context: ${config.forceUrlContext}`);

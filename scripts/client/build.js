@@ -230,8 +230,8 @@ class RequestProcessor {
             this.cancelledAttempts.delete(attemptKey);
         }
 
-        // Timeout constants - aligned with server-side timeouts
-        const IDLE_TIMEOUT_DURATION = 300000; // 300 seconds (5 minutes) - matches FAKE_STREAM timeout
+        // Browser-side safety cap. Server-side timeouts can be configured with env vars.
+        const IDLE_TIMEOUT_DURATION = 300000; // 300 seconds (5 minutes)
         const abortController = new AbortController();
         const activeOperation = { abortController, requestAttemptId };
         this.activeOperations.set(operationId, activeOperation);
@@ -670,8 +670,8 @@ class ProxySystem extends EventTarget {
             let fullBody = "";
 
             // --- Core modification: Correctly dispatch streaming and non-streaming data inside the loop ---
-            // Add timeout protection for each chunk read - aligned with server-side timeouts
-            const CHUNK_READ_TIMEOUT = 300000; // 300 seconds (5 minutes) - matches MESSAGE_QUEUE_DEFAULT timeout
+            // Browser-side safety cap for each chunk read.
+            const CHUNK_READ_TIMEOUT = 300000; // 300 seconds (5 minutes)
             let processing = true;
             while (processing) {
                 // Check if WebSocket is still connected
