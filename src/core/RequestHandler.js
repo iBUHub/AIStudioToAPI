@@ -559,6 +559,10 @@ class RequestHandler {
         return { attemptedAuthIndices };
     }
 
+    _getImmediateStatusRetryCloseReason(status) {
+        return `immediate_status_retry_${status}`;
+    }
+
     async _performImmediateSwitchRetry(errorDetails, requestId, tracker) {
         await this.authSwitcher.handleRequestFailureAndSwitch(
             { message: errorDetails.message, status: Number(errorDetails.status) },
@@ -1117,7 +1121,7 @@ class RequestHandler {
                             }
 
                             try {
-                                currentQueue.close("retry_after_429");
+                                currentQueue.close(this._getImmediateStatusRetryCloseReason(initialStatus));
                             } catch {
                                 /* empty */
                             }
@@ -1526,7 +1530,7 @@ class RequestHandler {
                             }
 
                             try {
-                                currentQueue.close("retry_after_429");
+                                currentQueue.close(this._getImmediateStatusRetryCloseReason(initialStatus));
                             } catch {
                                 /* empty */
                             }
@@ -1912,7 +1916,7 @@ class RequestHandler {
                             }
 
                             try {
-                                currentQueue.close("retry_after_429");
+                                currentQueue.close(this._getImmediateStatusRetryCloseReason(initialStatus));
                             } catch {
                                 /* empty */
                             }
@@ -2988,7 +2992,7 @@ class RequestHandler {
                 }
 
                 try {
-                    currentQueue.close("retry_after_429");
+                    currentQueue.close(this._getImmediateStatusRetryCloseReason(headerStatus));
                 } catch {
                     /* empty */
                 }
