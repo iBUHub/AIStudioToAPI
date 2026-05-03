@@ -1309,14 +1309,11 @@ class BrowserManager {
         // This browser instance is temporary and specific to the VNC session.
         // It does NOT affect the main `this.browser` used for the API proxy.
         const vncBrowser = await firefox.launch({
-            args: this.launchArgs,
             env: {
                 ...process.env,
                 ...extraArgs.env,
             },
             executablePath: this.browserExecutablePath,
-            firefoxUserPrefs: this.firefoxUserPrefs,
-            // Must be false for VNC to be visible.
             headless: false,
             ...(proxyConfig ? { proxy: proxyConfig } : {}),
         });
