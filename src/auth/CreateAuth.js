@@ -373,7 +373,7 @@ class CreateAuth {
                             padding: 0 !important;
                             width: 100vw !important;
                             height: 100vh !important;
-                            overflow: hidden !important;
+                            overflow: auto !important;
                         }
                     \`;
                     document.addEventListener("DOMContentLoaded", () => {
