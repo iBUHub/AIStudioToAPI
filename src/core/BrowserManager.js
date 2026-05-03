@@ -1324,13 +1324,18 @@ class BrowserManager {
 
         this.logger.info("✅ [VNC] Temporary VNC browser instance launched successfully.");
 
+        let contextOptions = {};
         if (extraArgs.isMobile) {
-            this.logger.info(
-                "[VNC] Mobile client detected; using desktop browser context to avoid mixed fingerprints."
-            );
+            this.logger.info("[VNC] Mobile client detected; applying Firefox Android context for VNC login.");
+            contextOptions = {
+                hasTouch: true,
+                userAgent: "Mozilla/5.0 (Android 10; Mobile; rv:128.0) Gecko/128.0 Firefox/128.0",
+            };
         }
 
-        const context = await vncBrowser.newContext(proxyConfig ? { proxy: proxyConfig } : {});
+        const context = await vncBrowser.newContext(
+            proxyConfig ? { ...contextOptions, proxy: proxyConfig } : contextOptions
+        );
         this.logger.info("✅ [VNC] VNC browser context successfully created.");
 
         // Return both the browser and context so the caller can manage their lifecycle.
