@@ -901,9 +901,6 @@ class RequestHandler {
                 this._setupClientDisconnectHandler(res, requestId);
 
                 if (wantsStream) {
-                    this.logger.info(
-                        `[Request] Client enabled streaming (${proxyRequest.streaming_mode}), entering streaming processing mode...`
-                    );
                     if (proxyRequest.streaming_mode === "fake") {
                         await this._handlePseudoStreamResponse(proxyRequest, messageQueue, req, res);
                     } else {
@@ -2546,7 +2543,7 @@ class RequestHandler {
                 const message = await messageQueue.dequeue(this.timeouts.STREAM_CHUNK);
 
                 if (message.type === "STREAM_END") {
-                    this.logger.info(`✅ [Request] Response completed (Claude stream), request ID: ${requestId}`);
+                    this.logger.info(`✅ [Request] Response completed (Claude real stream), request ID: ${requestId}`);
                     break;
                 }
 
@@ -2649,8 +2646,6 @@ class RequestHandler {
     }
 
     async _handlePseudoStreamResponse(proxyRequest, messageQueue, req, res) {
-        this.logger.info("[Request] Entering pseudo-stream mode...");
-
         // Per user request, convert the backend call to non-streaming.
         proxyRequest.path = proxyRequest.path.replace(":streamGenerateContent", ":generateContent");
         if (proxyRequest.query_params && proxyRequest.query_params.alt) {
@@ -2726,6 +2721,7 @@ class RequestHandler {
             }
             // Clear the keep-alive timer as we are about to send real data
             clearTimeout(connectionMaintainer);
+            this.logger.info(`[Request] Gemini streaming response (Fake Mode) started...`);
 
             // Read all data chunks until STREAM_END to handle potential fragmentation
             let fullData = "";
@@ -2914,15 +2910,8 @@ class RequestHandler {
                 }
             }
 
-            const finishReason = (() => {
-                try {
-                    return JSON.parse(fullData).candidates?.[0]?.finishReason || "UNKNOWN";
-                } catch {
-                    return "UNKNOWN";
-                }
-            })();
             this.logger.info(
-                `✅ [Request] Response completed (Gemini pseudo-stream, reason: ${finishReason}), request ID: ${proxyRequest.request_id}`
+                `✅ [Request] Response completed (Gemini fake stream), request ID: ${proxyRequest.request_id}`
             );
         } catch (error) {
             this._handleRequestError(error, res, proxyRequest.request_id);
@@ -3036,14 +3025,15 @@ class RequestHandler {
         if (!res.get("Content-Type")) {
             res.type("text/event-stream");
         }
-        this.logger.info("[Request] Starting streaming transmission...");
+        this.logger.info(`[Request] Gemini streaming response (Real Mode) started...`);
         try {
-            let lastChunk = "";
             // eslint-disable-next-line no-constant-condition
             while (true) {
                 const dataMessage = await currentQueue.dequeue(this.timeouts.STREAM_CHUNK);
                 if (dataMessage.type === "STREAM_END") {
-                    this.logger.debug("[Request] Gemini real stream end signal received.");
+                    this.logger.info(
+                        `✅ [Request] Response completed (Gemini real stream), request ID: ${proxyRequest.request_id}`
+                    );
                     break;
                 }
 
@@ -3075,7 +3065,6 @@ class RequestHandler {
                     }
                     try {
                         res.write(dataMessage.data);
-                        lastChunk = dataMessage.data;
                     } catch (writeError) {
                         this.logger.debug(
                             `[Request] Failed to write Gemini data chunk to stream: ${writeError.message}`
@@ -3083,20 +3072,6 @@ class RequestHandler {
                         break;
                     }
                 }
-            }
-            try {
-                if (lastChunk.startsWith("data: ")) {
-                    const jsonString = lastChunk.substring(6).trim();
-                    if (jsonString) {
-                        const lastResponse = JSON.parse(jsonString);
-                        const finishReason = lastResponse.candidates?.[0]?.finishReason || "UNKNOWN";
-                        this.logger.info(
-                            `✅ [Request] Response completed (Gemini real stream, reason: ${finishReason}), request ID: ${proxyRequest.request_id}`
-                        );
-                    }
-                }
-            } catch (e) {
-                // Ignore JSON parsing errors for finish reason
             }
         } catch (error) {
             // Handle queue closed errors (account switch, context closed, etc.)
@@ -3118,8 +3093,6 @@ class RequestHandler {
     }
 
     async _handleNonStreamResponse(proxyRequest, messageQueue, req, res) {
-        this.logger.info(`[Request] Entering non-stream processing mode...`);
-
         try {
             const result = await this._executeRequestWithRetries(proxyRequest, messageQueue);
 
@@ -3184,10 +3157,6 @@ class RequestHandler {
             try {
                 const fullResponse = JSON.parse(fullBodyBuffer.toString());
                 this._logGeminiNativeResponseDebug(fullResponse, "non-stream");
-                const finishReason = fullResponse.candidates?.[0]?.finishReason || "UNKNOWN";
-                this.logger.info(
-                    `✅ [Request] Response completed (Gemini non-stream, reason: ${finishReason}), request ID: ${proxyRequest.request_id}`
-                );
             } catch (e) {
                 // Ignore JSON parsing errors for finish reason
             }
@@ -3200,7 +3169,9 @@ class RequestHandler {
             }
 
             res.send(fullBodyBuffer);
-
+            this.logger.info(
+                `✅ [Request] Response completed (Gemini non-stream), request ID: ${proxyRequest.request_id}`
+            );
             this.logger.debug(`[Request] Complete non-stream response sent to client.`);
         } catch (error) {
             this._handleRequestError(error, res, proxyRequest.request_id);
@@ -3429,7 +3400,7 @@ class RequestHandler {
                 const message = await messageQueue.dequeue(this.timeouts.STREAM_CHUNK);
                 if (message.type === "STREAM_END") {
                     this.logger.info(
-                        `✅ [Request] Response completed (OpenAI Response API stream), request ID: ${requestId}`
+                        `✅ [Request] Response completed (OpenAI Response API real stream), request ID: ${requestId}`
                     );
                     break;
                 }
@@ -3516,7 +3487,7 @@ class RequestHandler {
                             );
                         }
                     }
-                    this.logger.info(`✅ [Request] Response completed (OpenAI stream), request ID: ${requestId}`);
+                    this.logger.info(`✅ [Request] Response completed (OpenAI real stream), request ID: ${requestId}`);
                     break;
                 }
 
