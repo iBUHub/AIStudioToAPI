@@ -7,7 +7,7 @@
 
 const fs = require("fs");
 const path = require("path");
-const { firefox, devices } = require("playwright");
+const { firefox } = require("playwright");
 const os = require("os");
 
 const { parseProxyFromEnv } = require("../utils/ProxyUtils");
@@ -1309,14 +1309,11 @@ class BrowserManager {
         // This browser instance is temporary and specific to the VNC session.
         // It does NOT affect the main `this.browser` used for the API proxy.
         const vncBrowser = await firefox.launch({
-            args: this.launchArgs,
             env: {
                 ...process.env,
                 ...extraArgs.env,
             },
             executablePath: this.browserExecutablePath,
-            firefoxUserPrefs: this.firefoxUserPrefs,
-            // Must be false for VNC to be visible.
             headless: false,
             ...(proxyConfig ? { proxy: proxyConfig } : {}),
         });
@@ -1329,12 +1326,10 @@ class BrowserManager {
 
         let contextOptions = {};
         if (extraArgs.isMobile) {
-            this.logger.info("[VNC] Mobile device detected. Applying mobile user-agent, viewport, and touch events.");
-            const mobileDevice = devices["Pixel 5"];
+            this.logger.info("[VNC] Mobile client detected; applying Firefox Android context for VNC login.");
             contextOptions = {
-                hasTouch: mobileDevice.hasTouch,
-                userAgent: mobileDevice.userAgent,
-                viewport: { height: 915, width: 412 }, // Set a specific portrait viewport
+                hasTouch: true,
+                userAgent: "Mozilla/5.0 (Android 10; Mobile; rv:128.0) Gecko/128.0 Firefox/128.0",
             };
         }
 

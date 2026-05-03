@@ -277,7 +277,7 @@ class CreateAuth {
             });
             sessionResources.x11vnc = x11vnc;
 
-            await this._waitForPort(vncPort, 5000, signal);
+            await this._waitForPort(vncPort, 30000, signal);
             this.logger.info("[VNC] VNC server is ready.");
             checkAborted();
 
@@ -331,7 +331,7 @@ class CreateAuth {
             });
             sessionResources.websockify = websockify;
 
-            await this._waitForPort(websockifyPort, 5000, signal);
+            await this._waitForPort(websockifyPort, 30000, signal);
             this.logger.info("[VNC] Websockify is ready.");
             checkAborted();
 
@@ -373,7 +373,7 @@ class CreateAuth {
                             padding: 0 !important;
                             width: 100vw !important;
                             height: 100vh !important;
-                            overflow: hidden !important;
+                            overflow: auto !important;
                         }
                     \`;
                     document.addEventListener("DOMContentLoaded", () => {
