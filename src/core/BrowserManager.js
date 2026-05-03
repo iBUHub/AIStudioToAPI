@@ -7,7 +7,7 @@
 
 const fs = require("fs");
 const path = require("path");
-const { firefox, devices } = require("playwright");
+const { firefox } = require("playwright");
 const os = require("os");
 
 const { parseProxyFromEnv } = require("../utils/ProxyUtils");
@@ -1324,20 +1324,13 @@ class BrowserManager {
 
         this.logger.info("✅ [VNC] Temporary VNC browser instance launched successfully.");
 
-        let contextOptions = {};
         if (extraArgs.isMobile) {
-            this.logger.info("[VNC] Mobile device detected. Applying mobile user-agent, viewport, and touch events.");
-            const mobileDevice = devices["Pixel 5"];
-            contextOptions = {
-                hasTouch: mobileDevice.hasTouch,
-                userAgent: mobileDevice.userAgent,
-                viewport: { height: 915, width: 412 }, // Set a specific portrait viewport
-            };
+            this.logger.info(
+                "[VNC] Mobile client detected; using desktop browser context to avoid mixed fingerprints."
+            );
         }
 
-        const context = await vncBrowser.newContext(
-            proxyConfig ? { ...contextOptions, proxy: proxyConfig } : contextOptions
-        );
+        const context = await vncBrowser.newContext(proxyConfig ? { proxy: proxyConfig } : {});
         this.logger.info("✅ [VNC] VNC browser context successfully created.");
 
         // Return both the browser and context so the caller can manage their lifecycle.
