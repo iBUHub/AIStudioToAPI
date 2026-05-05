@@ -4137,9 +4137,9 @@ class RequestHandler {
             if (bodyObj.contents) {
                 this.formatConverter.ensureThoughtSignature(bodyObj);
             }
-            // if (bodyObj.tools) {
-            //     this.formatConverter.sanitizeGeminiTools(bodyObj);
-            // }
+            if (bodyObj.tools) {
+                this.formatConverter.sanitizeGeminiTools(bodyObj);
+            }
         }
 
         // Force web search and URL context for native Google requests

@@ -286,31 +286,17 @@ class FormatConverter {
         // Helper function to recursively sanitize schema:
         // 1. Remove unsupported fields ($schema, additionalProperties)
         // 2. Convert lowercase type to uppercase (object -> OBJECT, string -> STRING, etc.)
-        const sanitizeSchema = (obj, isPropertiesMap = false) => {
+        const sanitizeSchema = obj => {
             if (!obj || typeof obj !== "object") return obj;
 
             const result = Array.isArray(obj) ? [] : {};
 
             for (const key of Object.keys(obj)) {
-                // Skip fields not supported by Gemini API
-                const unsupportedKeys = [
-                    "$schema",
-                    "additionalProperties",
-                    "ref",
-                    "$ref",
-                    "propertyNames",
-                    "patternProperties",
-                    "unevaluatedProperties",
-                ];
-                if (!isPropertiesMap && unsupportedKeys.includes(key)) {
-                    continue;
-                }
-
                 if (key === "type" && typeof obj[key] === "string") {
                     // Convert lowercase type to uppercase for Gemini
                     result[key] = obj[key].toUpperCase();
                 } else if (typeof obj[key] === "object" && obj[key] !== null) {
-                    result[key] = sanitizeSchema(obj[key], key === "properties");
+                    result[key] = sanitizeSchema(obj[key]);
                 } else {
                     result[key] = obj[key];
                 }
