@@ -47,7 +47,8 @@ body:
       label: 请求接口
       description: 指您遇到问题时请求的 API 类型
       options:
-        - OpenAI
+        - OpenAI - Chat Completions
+        - OpenAI - Responses
         - Gemini
         - Anthropic
     validations:
