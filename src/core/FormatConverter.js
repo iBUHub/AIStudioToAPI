@@ -350,6 +350,8 @@ class FormatConverter {
                 "exclusiveMinimum",
                 "exclusiveMaximum",
                 "const",
+                "$comment",
+                "enumDescriptions",
             ];
 
             if (isResponseSchema) {
@@ -456,6 +458,28 @@ class FormatConverter {
                 result[key] = this._convertSchemaToGemini(obj[key], isResponseSchema, recursionFlag);
             } else {
                 result[key] = obj[key];
+            }
+        }
+
+        if (!isProperties && Array.isArray(obj.enumDescriptions) && obj.enumDescriptions.length > 0) {
+            const enumValues = Array.isArray(result.enum) ? result.enum : [];
+            const enumDescriptionLines = obj.enumDescriptions
+                .map((description, index) => {
+                    if (description === undefined || description === null || description === "") {
+                        return null;
+                    }
+
+                    const enumValue = enumValues[index];
+                    const label = enumValue === undefined ? `value ${index + 1}` : String(enumValue);
+                    return `- ${label}: ${description}`;
+                })
+                .filter(Boolean);
+
+            if (enumDescriptionLines.length > 0) {
+                const enumDescriptionText = `Enum descriptions:\n${enumDescriptionLines.join("\n")}`;
+                result.description = result.description
+                    ? `${result.description}\n\n${enumDescriptionText}`
+                    : enumDescriptionText;
             }
         }
 
