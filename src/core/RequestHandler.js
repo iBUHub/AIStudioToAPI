@@ -732,6 +732,7 @@ class RequestHandler {
                 this.authSwitcher.isSystemBusy = true;
                 this.logger.info(`[System] Set isSystemBusy=true for direct recovery to account #${recoveryAuthIndex}`);
 
+                await this.browserManager.preCleanupForSwitch(recoveryAuthIndex);
                 await this.browserManager.launchOrSwitchContext(recoveryAuthIndex);
                 this.logger.info(`✅ [System] Browser successfully recovered to account #${recoveryAuthIndex}!`);
 
