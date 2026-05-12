@@ -3217,8 +3217,12 @@ class RequestHandler {
     async _executeRequestWithRetries(proxyRequest, messageQueue) {
         let lastError = null;
         let currentQueue = messageQueue;
-        // Track the authIndex for the current queue to ensure proper cleanup
-        let currentQueueAuthIndex = this.currentAuthIndex;
+        const registeredQueueAuthIndex = this.connectionRegistry.getAuthIndexForRequest(proxyRequest.request_id);
+        // Track the authIndex registered for the current queue, which may differ from the global current account.
+        let currentQueueAuthIndex =
+            Number.isInteger(registeredQueueAuthIndex) && registeredQueueAuthIndex >= 0
+                ? registeredQueueAuthIndex
+                : this.currentAuthIndex;
         let retryAttempt = 1;
         const immediateSwitchTracker = this._createImmediateSwitchTracker(currentQueueAuthIndex);
 
