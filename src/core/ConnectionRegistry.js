@@ -309,13 +309,19 @@ class ConnectionRegistry extends EventEmitter {
 
     getConnectionByAuth(authIndex, log = true) {
         const connection = this.connectionsByAuth.get(authIndex);
-        if (connection && log) {
+
+        if (!log) {
+            return connection;
+        }
+
+        if (connection) {
             this.logger.debug(`[Registry] Found WebSocket connection for authIndex=${authIndex}`);
-        } else if (this.logger.getLevel?.() === "DEBUG") {
+        } else {
             this.logger.debug(
                 `[Registry] No WebSocket connection found for authIndex=${authIndex}. Available: [${Array.from(this.connectionsByAuth.keys()).join(", ")}]`
             );
         }
+
         return connection;
     }
 

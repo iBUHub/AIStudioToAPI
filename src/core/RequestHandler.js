@@ -3286,7 +3286,7 @@ class RequestHandler {
                         Number.isInteger(currentAuthIndex) &&
                         currentAuthIndex >= 0 &&
                         currentQueueAuthIndex !== currentAuthIndex &&
-                        Boolean(this.connectionRegistry.getConnectionByAuth(currentAuthIndex));
+                        Boolean(this.connectionRegistry.getConnectionByAuth(currentAuthIndex, false));
 
                     if (isClientDisconnect) {
                         this.logger.warn(`[Request] Message queue closed due to client disconnect, aborting retries.`);
