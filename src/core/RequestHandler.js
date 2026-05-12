@@ -3271,10 +3271,45 @@ class RequestHandler {
                     // Check the actual closure reason to provide accurate error messages
                     const reason = error.reason || "unknown";
                     const isClientDisconnect = reason === "client_disconnect";
+                    const currentAuthIndex = this.currentAuthIndex;
+                    const isClosedAccountRetryable = reason === "context_closed" || reason === "page_closed";
+                    const canRetryOnCurrentAccount =
+                        !isClientDisconnect &&
+                        isClosedAccountRetryable &&
+                        retryAttempt < this.maxRetries &&
+                        Number.isInteger(currentQueueAuthIndex) &&
+                        currentQueueAuthIndex >= 0 &&
+                        Number.isInteger(currentAuthIndex) &&
+                        currentAuthIndex >= 0 &&
+                        currentQueueAuthIndex !== currentAuthIndex &&
+                        Boolean(this.connectionRegistry.getConnectionByAuth(currentAuthIndex));
 
                     if (isClientDisconnect) {
                         this.logger.warn(`[Request] Message queue closed due to client disconnect, aborting retries.`);
                         lastError = { message: "Connection lost (client disconnect)", status: 503 };
+                    } else if (canRetryOnCurrentAccount) {
+                        this.logger.warn(
+                            `[Request] Message queue for non-current account #${currentQueueAuthIndex} closed ` +
+                                `(reason: ${reason}); retrying request #${proxyRequest.request_id} on current account #${currentAuthIndex}.`
+                        );
+                        lastError = {
+                            message: `Queue closed: ${error.message || reason}`,
+                            reason,
+                            status: 503,
+                        };
+                        this._advanceProxyRequestAttempt(proxyRequest);
+                        currentQueue = this.connectionRegistry.createMessageQueue(
+                            proxyRequest.request_id,
+                            currentAuthIndex,
+                            proxyRequest.request_attempt_id
+                        );
+                        currentQueueAuthIndex = currentAuthIndex;
+                        if (Number.isInteger(currentQueueAuthIndex) && currentQueueAuthIndex >= 0) {
+                            immediateSwitchTracker.attemptedAuthIndices.add(currentQueueAuthIndex);
+                        }
+                        await new Promise(resolve => setTimeout(resolve, this.retryDelay));
+                        retryAttempt++;
+                        continue;
                     } else {
                         // Queue closed for other reasons (account_switch, system_reset, etc.)
                         this.logger.warn(`[Request] Message queue closed (reason: ${reason}), aborting retries.`);
