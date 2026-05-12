@@ -493,19 +493,13 @@ class ConnectionRegistry extends EventEmitter {
         return entry ? entry.requestAttemptId || null : null;
     }
 
-    /**
-     * Get the number of active message queues for a specific account
-     * @param {number} authIndex - The account index to inspect
-     * @returns {number} Number of active message queues
-     */
-    getMessageQueueCountForAuth(authIndex) {
-        let count = 0;
+    _hasMessageQueueForAuth(authIndex) {
         for (const entry of this.messageQueues.values()) {
             if (entry.authIndex === authIndex) {
-                count++;
+                return true;
             }
         }
-        return count;
+        return false;
     }
 
     /**
@@ -592,7 +586,7 @@ class ConnectionRegistry extends EventEmitter {
         if (!Number.isInteger(authIndex) || authIndex < 0) {
             return;
         }
-        if (this.getMessageQueueCountForAuth(authIndex) === 0) {
+        if (!this._hasMessageQueueForAuth(authIndex)) {
             this.emit("authQueuesDrained", authIndex);
         }
     }

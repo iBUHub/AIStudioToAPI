@@ -1561,11 +1561,11 @@ class BrowserManager {
             });
     }
 
-    _getActiveQueueCountForAuth(authIndex) {
-        if (!this.connectionRegistry?.getMessageQueueCountForAuth) {
-            return 0;
+    _hasActiveQueueForAuth(authIndex) {
+        if (this.connectionRegistry?._hasMessageQueueForAuth) {
+            return this.connectionRegistry._hasMessageQueueForAuth(authIndex);
         }
-        return this.connectionRegistry.getMessageQueueCountForAuth(authIndex);
+        return false;
     }
 
     _cancelPendingContextClosure(authIndex, reason = "closure_cancelled") {
@@ -1577,28 +1577,27 @@ class BrowserManager {
         return true;
     }
 
-    _scheduleContextClosureWhenIdle(authIndex, reason, activeQueueCount) {
+    _scheduleContextClosureWhenIdle(authIndex, reason) {
         if (!this.contexts.has(authIndex)) {
             return false;
         }
         const existingReason = this.pendingContextClosures.get(authIndex);
         if (existingReason) {
             this.logger.debug(
-                `[ContextPool] Context #${authIndex} is already pending close (${existingReason}), active queues: ${activeQueueCount}`
+                `[ContextPool] Context #${authIndex} is already pending close (${existingReason}), active queues are still present`
             );
             return false;
         }
         this.pendingContextClosures.set(authIndex, reason);
         this.logger.info(
-            `[ContextPool] Deferring close for busy context #${authIndex} (${activeQueueCount} active queue(s), reason: ${reason})`
+            `[ContextPool] Deferring close for busy context #${authIndex} (active queue(s) present, reason: ${reason})`
         );
         return false;
     }
 
     async _closeContextForPoolIfPossible(authIndex, reason) {
-        const activeQueueCount = this._getActiveQueueCountForAuth(authIndex);
-        if (activeQueueCount > 0) {
-            return this._scheduleContextClosureWhenIdle(authIndex, reason, activeQueueCount);
+        if (this._hasActiveQueueForAuth(authIndex)) {
+            return this._scheduleContextClosureWhenIdle(authIndex, reason);
         }
 
         this.pendingContextClosures.delete(authIndex);
@@ -1621,10 +1620,9 @@ class BrowserManager {
             return false;
         }
 
-        const activeQueueCount = this._getActiveQueueCountForAuth(authIndex);
-        if (activeQueueCount > 0) {
+        if (this._hasActiveQueueForAuth(authIndex)) {
             this.logger.debug(
-                `[ContextPool] Pending close for context #${authIndex} is still waiting on ${activeQueueCount} active queue(s).`
+                `[ContextPool] Pending close for context #${authIndex} is still waiting on active queue(s).`
             );
             return false;
         }
@@ -1656,9 +1654,8 @@ class BrowserManager {
         const busy = [];
 
         for (const authIndex of indices) {
-            const activeQueueCount = this._getActiveQueueCountForAuth(authIndex);
-            if (activeQueueCount > 0) {
-                busy.push({ activeQueueCount, authIndex });
+            if (this._hasActiveQueueForAuth(authIndex)) {
+                busy.push({ authIndex });
             } else {
                 idle.push(authIndex);
             }
@@ -1895,7 +1892,7 @@ class BrowserManager {
 
         this.logger.info(
             `[ContextPool] Pre-cleanup before switch to #${targetAuthIndex}: immediate=[${toRemoveNow}], deferred=[${toDefer.map(
-                entry => `${entry.authIndex}:${entry.activeQueueCount}`
+                entry => entry.authIndex
             )}] (${this.contexts.size} ready + ${this.initializingContexts.size} initializing)`
         );
 
@@ -1904,7 +1901,7 @@ class BrowserManager {
         }
 
         for (const entry of toDefer) {
-            this._scheduleContextClosureWhenIdle(entry.authIndex, "pre_cleanup_for_switch", entry.activeQueueCount);
+            this._scheduleContextClosureWhenIdle(entry.authIndex, "pre_cleanup_for_switch");
         }
 
         if (toDefer.length > 0) {
@@ -1991,7 +1988,7 @@ class BrowserManager {
 
         this.logger.info(
             `[ContextPool] Rebalance: targets=[${[...targets]}], removeNow=[${idle}], removeDeferred=[${busy.map(
-                entry => `${entry.authIndex}:${entry.activeQueueCount}`
+                entry => entry.authIndex
             )}], candidates=[${candidates}]`
         );
 
@@ -2000,7 +1997,7 @@ class BrowserManager {
         }
 
         for (const entry of busy) {
-            this._scheduleContextClosureWhenIdle(entry.authIndex, "rebalance", entry.activeQueueCount);
+            this._scheduleContextClosureWhenIdle(entry.authIndex, "rebalance");
         }
 
         // Preload candidates if ready and initializing contexts still leave room in the pool
