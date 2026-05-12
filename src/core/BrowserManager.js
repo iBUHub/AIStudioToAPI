@@ -1562,8 +1562,8 @@ class BrowserManager {
     }
 
     _hasActiveQueueForAuth(authIndex) {
-        if (this.connectionRegistry?._hasMessageQueueForAuth) {
-            return this.connectionRegistry._hasMessageQueueForAuth(authIndex);
+        if (this.connectionRegistry?.hasMessageQueueForAuth) {
+            return this.connectionRegistry.hasMessageQueueForAuth(authIndex);
         }
         return false;
     }
@@ -1586,13 +1586,13 @@ class BrowserManager {
             this.logger.debug(
                 `[ContextPool] Context #${authIndex} is already pending close (${existingReason}), active queues are still present`
             );
-            return true;
+            return false;
         }
         this.pendingContextClosures.set(authIndex, reason);
         this.logger.info(
             `[ContextPool] Deferring close for busy context #${authIndex} (active queue(s) present, reason: ${reason})`
         );
-        return true;
+        return false;
     }
 
     async _closeContextForPoolIfPossible(authIndex, reason) {

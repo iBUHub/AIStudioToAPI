@@ -316,7 +316,7 @@ class ConnectionRegistry extends EventEmitter {
 
         if (connection) {
             this.logger.debug(`[Registry] Found WebSocket connection for authIndex=${authIndex}`);
-        } else {
+        } else if (this.logger.getLevel?.() === "DEBUG") {
             this.logger.debug(
                 `[Registry] No WebSocket connection found for authIndex=${authIndex}. Available: [${Array.from(this.connectionsByAuth.keys()).join(", ")}]`
             );
@@ -493,7 +493,12 @@ class ConnectionRegistry extends EventEmitter {
         return entry ? entry.requestAttemptId || null : null;
     }
 
-    _hasMessageQueueForAuth(authIndex) {
+    /**
+     * Check whether a specific account has any active message queue.
+     * @param {number} authIndex - The account index to inspect
+     * @returns {boolean} True if at least one active message queue belongs to the account
+     */
+    hasMessageQueueForAuth(authIndex) {
         for (const entry of this.messageQueues.values()) {
             if (entry.authIndex === authIndex) {
                 return true;
@@ -586,7 +591,7 @@ class ConnectionRegistry extends EventEmitter {
         if (!Number.isInteger(authIndex) || authIndex < 0) {
             return;
         }
-        if (!this._hasMessageQueueForAuth(authIndex)) {
+        if (!this.hasMessageQueueForAuth(authIndex)) {
             this.emit("authQueuesDrained", authIndex);
         }
     }
