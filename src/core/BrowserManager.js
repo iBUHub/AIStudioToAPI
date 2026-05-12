@@ -56,6 +56,7 @@ class BrowserManager {
         // ConnectionRegistry reference (set after construction to avoid circular dependency)
         this.connectionRegistry = null;
         this._onAuthQueuesDrained = null;
+        this._isSystemBusyProvider = null;
         this.pendingContextClosures = new Map();
 
         // Background wakeup service status (instance-level, tracks this.page)
@@ -163,6 +164,19 @@ class BrowserManager {
                 });
             };
             this.connectionRegistry.on("authQueuesDrained", this._onAuthQueuesDrained);
+        }
+    }
+
+    setSystemBusyProvider(provider) {
+        this._isSystemBusyProvider = typeof provider === "function" ? provider : null;
+    }
+
+    _isSystemBusy() {
+        try {
+            return this._isSystemBusyProvider?.() === true;
+        } catch (error) {
+            this.logger.warn(`[ContextPool] Failed to read system busy state: ${error.message}`);
+            return false;
         }
     }
 
@@ -1621,6 +1635,10 @@ class BrowserManager {
             `[ContextPool] Closing deferred context #${authIndex} now that all queues are drained (reason: ${pendingReason}).`
         );
         await this.closeContext(authIndex);
+        if (this._isSystemBusy()) {
+            this.logger.info("[ContextPool] Skipping rebalance after deferred close because system is busy.");
+            return true;
+        }
         this.rebalanceContextPool().catch(error => {
             this.logger.error(`[ContextPool] Rebalance after deferred close failed: ${error.message}`);
         });
@@ -1985,8 +2003,9 @@ class BrowserManager {
             this._scheduleContextClosureWhenIdle(entry.authIndex, "rebalance", entry.activeQueueCount);
         }
 
-        // Preload candidates if we have room in the pool
-        if (candidates.length > 0 && (isUnlimited || this.contexts.size < maxContexts)) {
+        // Preload candidates if ready and initializing contexts still leave room in the pool
+        const poolOccupancy = this.contexts.size + this.initializingContexts.size;
+        if (candidates.length > 0 && (isUnlimited || poolOccupancy < maxContexts)) {
             this._preloadBackgroundContexts(candidates, isUnlimited ? 0 : maxContexts);
         }
     }

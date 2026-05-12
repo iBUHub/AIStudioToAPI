@@ -111,6 +111,7 @@ class ProxyServerSystem extends EventEmitter {
             this.config,
             this.authSource
         );
+        this.browserManager.setSystemBusyProvider(() => this.requestHandler?.isSystemBusy === true);
 
         this.httpServer = null;
         this.wsServer = null;
