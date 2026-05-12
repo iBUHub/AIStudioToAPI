@@ -436,7 +436,9 @@ class ConnectionRegistry extends EventEmitter {
                 this.logger.debug(`[Registry] Failed to close existing queue for ${requestId}: ${e.message}`);
             }
             this.messageQueues.delete(requestId);
-            this._emitAuthQueuesDrainedIfNeeded(existingAuthIndex);
+            if (existingAuthIndex !== authIndex) {
+                this._emitAuthQueuesDrainedIfNeeded(existingAuthIndex);
+            }
         }
 
         const queue = new MessageQueue();
