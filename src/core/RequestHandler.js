@@ -3417,6 +3417,17 @@ class RequestHandler {
 
                 // Wait before the next retry
                 await new Promise(resolve => setTimeout(resolve, this.retryDelay));
+                if (
+                    !(await this._waitForSystemAndConnectionIfBusy(null, {
+                        connectionMessage: "Service temporarily unavailable: Connection not ready before retry.",
+                    }))
+                ) {
+                    lastError = {
+                        message: `WebSocket connection not ready before retry on account #${this.currentAuthIndex}.`,
+                        status: 503,
+                    };
+                    break;
+                }
                 retryAttempt++;
             }
         }
