@@ -1586,13 +1586,13 @@ class BrowserManager {
             this.logger.debug(
                 `[ContextPool] Context #${authIndex} is already pending close (${existingReason}), active queues are still present`
             );
-            return false;
+            return true;
         }
         this.pendingContextClosures.set(authIndex, reason);
         this.logger.info(
             `[ContextPool] Deferring close for busy context #${authIndex} (active queue(s) present, reason: ${reason})`
         );
-        return false;
+        return true;
     }
 
     async _closeContextForPoolIfPossible(authIndex, reason) {
