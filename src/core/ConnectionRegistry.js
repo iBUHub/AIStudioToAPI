@@ -530,8 +530,8 @@ class ConnectionRegistry extends EventEmitter {
             this.logger.info(
                 `[Registry] Force closed ${count} pending message queue(s) for account #${authIndex} (reason: ${reason})`
             );
+            this._emitAuthQueuesDrainedIfNeeded(authIndex);
         }
-        this._emitAuthQueuesDrainedIfNeeded(authIndex);
         return count;
     }
 
