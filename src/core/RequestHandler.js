@@ -537,10 +537,6 @@ class RequestHandler {
     }
 
     async _waitForSystemAndConnectionIfBusy(res = null, options = {}) {
-        if (!this.authSwitcher.isSystemBusy) {
-            return true;
-        }
-
         const {
             busyMessage = "Server undergoing internal maintenance (account switching/recovery), please try again later.",
             connectionMessage = "Service temporarily unavailable: Connection not established after switching.",
