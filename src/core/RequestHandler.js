@@ -64,6 +64,10 @@ class RequestHandler {
         return this.authSwitcher.isSystemBusy;
     }
 
+    set isSystemBusy(value) {
+        this.authSwitcher.isSystemBusy = value === true;
+    }
+
     _getUsageStatsService() {
         return this.serverSystem.usageStatsService || null;
     }
@@ -3274,7 +3278,7 @@ class RequestHandler {
                     const isClientDisconnect = reason === "client_disconnect";
                     const currentAuthIndex = this.currentAuthIndex;
                     const isClosedAccountRetryable = reason === "context_closed" || reason === "page_closed";
-                    const canRetryOnCurrentAccount =
+                    const canRetryOnCurrentAccountCandidate =
                         !isClientDisconnect &&
                         isClosedAccountRetryable &&
                         retryAttempt < this.maxRetries &&
@@ -3282,7 +3286,23 @@ class RequestHandler {
                         currentQueueAuthIndex >= 0 &&
                         Number.isInteger(currentAuthIndex) &&
                         currentAuthIndex >= 0 &&
-                        currentQueueAuthIndex !== currentAuthIndex &&
+                        currentQueueAuthIndex !== currentAuthIndex;
+
+                    if (canRetryOnCurrentAccountCandidate) {
+                        const ready = await this._waitForSystemAndConnectionIfBusy(null, {
+                            connectionMessage: "Service temporarily unavailable: Connection not ready before retry.",
+                        });
+                        if (!ready) {
+                            lastError = {
+                                message: `WebSocket connection not ready before retry on account #${this.currentAuthIndex}.`,
+                                status: 503,
+                            };
+                            break;
+                        }
+                    }
+
+                    const canRetryOnCurrentAccount =
+                        canRetryOnCurrentAccountCandidate &&
                         Boolean(this.connectionRegistry.getConnectionByAuth(currentAuthIndex, false));
 
                     if (isClientDisconnect) {
