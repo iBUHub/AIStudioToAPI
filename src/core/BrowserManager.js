@@ -1621,6 +1621,9 @@ class BrowserManager {
             `[ContextPool] Closing deferred context #${authIndex} now that all queues are drained (reason: ${pendingReason}).`
         );
         await this.closeContext(authIndex);
+        this.rebalanceContextPool().catch(error => {
+            this.logger.error(`[ContextPool] Rebalance after deferred close failed: ${error.message}`);
+        });
         return true;
     }
 
@@ -1883,11 +1886,7 @@ class BrowserManager {
         }
 
         for (const entry of toDefer) {
-            this._scheduleContextClosureWhenIdle(
-                entry.authIndex,
-                "pre_cleanup_for_switch",
-                entry.activeQueueCount
-            );
+            this._scheduleContextClosureWhenIdle(entry.authIndex, "pre_cleanup_for_switch", entry.activeQueueCount);
         }
 
         if (toDefer.length > 0) {
@@ -1925,6 +1924,10 @@ class BrowserManager {
             targets = new Set(nonExpiredAvailable);
         } else {
             targets = new Set(ordered.slice(0, maxContexts));
+        }
+
+        for (const idx of targets) {
+            this._cancelPendingContextClosure(idx, "rebalance_target");
         }
 
         // Remove contexts not in targets (except current)
