@@ -55,6 +55,8 @@ class BrowserManager {
 
         // ConnectionRegistry reference (set after construction to avoid circular dependency)
         this.connectionRegistry = null;
+        this._onAuthQueuesDrained = null;
+        this.pendingContextClosures = new Map();
 
         // Background wakeup service status (instance-level, tracks this.page)
         // Prevents multiple BackgroundWakeup instances from running simultaneously
@@ -148,7 +150,20 @@ class BrowserManager {
      * @param {ConnectionRegistry} connectionRegistry - The ConnectionRegistry instance
      */
     setConnectionRegistry(connectionRegistry) {
+        if (this.connectionRegistry && this._onAuthQueuesDrained) {
+            this.connectionRegistry.off("authQueuesDrained", this._onAuthQueuesDrained);
+        }
         this.connectionRegistry = connectionRegistry;
+        if (this.connectionRegistry) {
+            this._onAuthQueuesDrained = authIndex => {
+                this._closePendingContextIfIdle(authIndex).catch(error => {
+                    this.logger.error(
+                        `[ContextPool] Failed to close pending context #${authIndex} after queue drain: ${error.message}`
+                    );
+                });
+            };
+            this.connectionRegistry.on("authQueuesDrained", this._onAuthQueuesDrained);
+        }
     }
 
     /**
@@ -206,9 +221,7 @@ class BrowserManager {
                 // Check if background preload was aborted (only for background tasks)
                 if (isBackgroundTask && this._backgroundPreloadAbort) {
                     this.logger.info(`${logPrefix} WebSocket wait aborted (background preload aborted)`);
-                    throw new Error(
-                        `Context initialization aborted for index ${authIndex} (background preload aborted)`
-                    );
+                    throw new ContextAbortedError(authIndex, "background preload aborted");
                 }
 
                 // Read state fresh each iteration
@@ -1486,21 +1499,46 @@ class BrowserManager {
      * @returns {Promise<void>} Resolves when the background task has been aborted and cleaned up
      */
     async abortBackgroundPreload() {
-        if (!this._backgroundPreloadTask) {
+        const currentTask = this._backgroundPreloadTask;
+        if (!currentTask) {
             return; // No task to abort
         }
 
         this.logger.info(`[ContextPool] Aborting background preload task...`);
         this._backgroundPreloadAbort = true;
+        const timeoutMessage = "Background preload abort timed out after 10s";
 
         try {
-            await this._backgroundPreloadTask;
+            await this._withTimeout(currentTask, 10_000, timeoutMessage);
         } catch (error) {
-            // Ignore errors from aborted task
+            if (error.message === timeoutMessage) {
+                this.logger.warn(
+                    `[ContextPool] Background preload did not stop within 10s, forcing browser/context pool reset.`
+                );
+                if (this.browser) {
+                    await this.closeBrowser();
+                } else {
+                    this._cleanupAllContexts();
+                }
+                if (this._backgroundPreloadTask === currentTask) {
+                    this._backgroundPreloadTask = null;
+                }
+                return;
+            }
+
+            // Ignore non-timeout errors from aborted task
             this.logger.debug(`[ContextPool] Background preload aborted: ${error.message}`);
         }
 
         this.logger.info(`[ContextPool] Background preload aborted successfully`);
+    }
+
+    _withTimeout(promise, ms, message) {
+        let timer;
+        const timeout = new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error(message)), ms);
+        });
+        return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
     }
 
     /**
@@ -1530,6 +1568,105 @@ class BrowserManager {
                     this._backgroundPreloadTask = null;
                 }
             });
+    }
+
+    _getActiveQueueCountForAuth(authIndex) {
+        if (!this.connectionRegistry?.getMessageQueueCountForAuth) {
+            return 0;
+        }
+        return this.connectionRegistry.getMessageQueueCountForAuth(authIndex);
+    }
+
+    _cancelPendingContextClosure(authIndex, reason = "closure_cancelled") {
+        if (!this.pendingContextClosures.has(authIndex)) {
+            return false;
+        }
+        this.pendingContextClosures.delete(authIndex);
+        this.logger.info(`[ContextPool] Cancelled pending close for context #${authIndex} (${reason}).`);
+        return true;
+    }
+
+    _scheduleContextClosureWhenIdle(authIndex, reason, activeQueueCount) {
+        if (!this.contexts.has(authIndex)) {
+            return false;
+        }
+        const existingReason = this.pendingContextClosures.get(authIndex);
+        if (existingReason) {
+            this.logger.debug(
+                `[ContextPool] Context #${authIndex} is already pending close (${existingReason}), active queues: ${activeQueueCount}`
+            );
+            return false;
+        }
+        this.pendingContextClosures.set(authIndex, reason);
+        this.logger.info(
+            `[ContextPool] Deferring close for busy context #${authIndex} (${activeQueueCount} active queue(s), reason: ${reason})`
+        );
+        return false;
+    }
+
+    async _closeContextForPoolIfPossible(authIndex, reason) {
+        const activeQueueCount = this._getActiveQueueCountForAuth(authIndex);
+        if (activeQueueCount > 0) {
+            return this._scheduleContextClosureWhenIdle(authIndex, reason, activeQueueCount);
+        }
+
+        this.pendingContextClosures.delete(authIndex);
+        await this.closeContext(authIndex);
+        return true;
+    }
+
+    async _closePendingContextIfIdle(authIndex) {
+        if (!this.pendingContextClosures.has(authIndex)) {
+            return false;
+        }
+        if (authIndex === this._currentAuthIndex) {
+            this.logger.debug(
+                `[ContextPool] Skipping pending close for context #${authIndex} because it is active again as current.`
+            );
+            return false;
+        }
+        if (!this.contexts.has(authIndex)) {
+            this.pendingContextClosures.delete(authIndex);
+            return false;
+        }
+
+        const activeQueueCount = this._getActiveQueueCountForAuth(authIndex);
+        if (activeQueueCount > 0) {
+            this.logger.debug(
+                `[ContextPool] Pending close for context #${authIndex} is still waiting on ${activeQueueCount} active queue(s).`
+            );
+            return false;
+        }
+
+        const pendingReason = this.pendingContextClosures.get(authIndex);
+        this.pendingContextClosures.delete(authIndex);
+        this.logger.info(
+            `[ContextPool] Closing deferred context #${authIndex} now that all queues are drained (reason: ${pendingReason}).`
+        );
+        await this.closeContext(authIndex);
+        return true;
+    }
+
+    async _flushPendingContextClosures() {
+        for (const authIndex of [...this.pendingContextClosures.keys()]) {
+            await this._closePendingContextIfIdle(authIndex);
+        }
+    }
+
+    _prioritizeContextsForRemoval(indices) {
+        const idle = [];
+        const busy = [];
+
+        for (const authIndex of indices) {
+            const activeQueueCount = this._getActiveQueueCountForAuth(authIndex);
+            if (activeQueueCount > 0) {
+                busy.push({ activeQueueCount, authIndex });
+            } else {
+                idle.push(authIndex);
+            }
+        }
+
+        return { busy, idle };
     }
 
     /**
@@ -1754,15 +1891,32 @@ class BrowserManager {
             }
         }
 
-        // Remove contexts according to priority until we have enough space
-        const toRemove = removalPriority.slice(0, removeCount);
+        const { busy, idle } = this._prioritizeContextsForRemoval(removalPriority);
+        const toRemoveNow = idle.slice(0, removeCount);
+        const toDefer = busy.slice(0, Math.max(0, removeCount - toRemoveNow.length));
 
         this.logger.info(
-            `[ContextPool] Pre-cleanup: removing ${toRemove.length} contexts before switch to #${targetAuthIndex}: [${toRemove}] (${this.contexts.size} ready + ${this.initializingContexts.size} initializing)`
+            `[ContextPool] Pre-cleanup before switch to #${targetAuthIndex}: immediate=[${toRemoveNow}], deferred=[${toDefer.map(
+                entry => `${entry.authIndex}:${entry.activeQueueCount}`
+            )}] (${this.contexts.size} ready + ${this.initializingContexts.size} initializing)`
         );
 
-        for (const idx of toRemove) {
-            await this.closeContext(idx);
+        for (const idx of toRemoveNow) {
+            await this._closeContextForPoolIfPossible(idx, "pre_cleanup_for_switch");
+        }
+
+        for (const entry of toDefer) {
+            this._scheduleContextClosureWhenIdle(
+                entry.authIndex,
+                "pre_cleanup_for_switch",
+                entry.activeQueueCount
+            );
+        }
+
+        if (toDefer.length > 0) {
+            this.logger.warn(
+                `[ContextPool] Allowing temporary MAX_CONTEXTS overflow while busy contexts drain before switch to #${targetAuthIndex}.`
+            );
         }
     }
 
@@ -1835,12 +1989,20 @@ class BrowserManager {
         // If a foreground task is running, _executePreloadTask will skip it (line 1382)
         const candidates = ordered.filter(idx => !activeContexts.has(idx));
 
+        const { busy, idle } = this._prioritizeContextsForRemoval(toRemove);
+
         this.logger.info(
-            `[ContextPool] Rebalance: targets=[${[...targets]}], remove=[${toRemove}], candidates=[${candidates}]`
+            `[ContextPool] Rebalance: targets=[${[...targets]}], removeNow=[${idle}], removeDeferred=[${busy.map(
+                entry => `${entry.authIndex}:${entry.activeQueueCount}`
+            )}], candidates=[${candidates}]`
         );
 
-        for (const idx of toRemove) {
-            await this.closeContext(idx);
+        for (const idx of idle) {
+            await this._closeContextForPoolIfPossible(idx, "rebalance");
+        }
+
+        for (const entry of busy) {
+            this._scheduleContextClosureWhenIdle(entry.authIndex, "rebalance", entry.activeQueueCount);
         }
 
         // Preload candidates if we have room in the pool
@@ -2115,6 +2277,8 @@ class BrowserManager {
             throw new Error(`Invalid authIndex: ${authIndex}. Must be >= 0.`);
         }
 
+        this._cancelPendingContextClosure(authIndex, "context_reused");
+
         // [Auth Switch] Save current auth data before switching
         if (this.browser && this._currentAuthIndex >= 0 && this._currentAuthIndex !== authIndex) {
             try {
@@ -2194,6 +2358,7 @@ class BrowserManager {
 
                         // Switch to new context
                         this._activateContext(contextData.context, contextData.page, authIndex);
+                        await this._flushPendingContextClosures();
 
                         this.logger.info(`✅ [FastSwitch] Switched to account #${authIndex} instantly!`);
                         return;
@@ -2249,6 +2414,7 @@ class BrowserManager {
             const { context, page } = await this._initializeContext(authIndex, false);
 
             this._activateContext(context, page, authIndex);
+            await this._flushPendingContextClosures();
 
             // If this account was marked as expired but login succeeded, restore it
             if (this.authSource.isExpired(authIndex)) {
@@ -2456,6 +2622,8 @@ class BrowserManager {
      * @param {number} authIndex - The auth index to close
      */
     async closeContext(authIndex) {
+        this.pendingContextClosures.delete(authIndex);
+
         // If context is being initialized in background, signal abort and wait
         if (this.initializingContexts.has(authIndex)) {
             this.logger.info(`[Browser] Context #${authIndex} is being initialized, marking for abort and waiting...`);
@@ -2549,6 +2717,7 @@ class BrowserManager {
         this.contexts.clear();
         this.initializingContexts.clear();
         this.abortedContexts.clear();
+        this.pendingContextClosures.clear();
         this._wsInitState.clear();
         this.context = null;
         this.page = null;

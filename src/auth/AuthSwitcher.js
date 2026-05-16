@@ -49,6 +49,14 @@ class AuthSwitcher {
     //     return available[nextIndexInArray];
     // }
 
+    _withTimeout(promise, ms, message) {
+        let timer;
+        const timeout = new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error(message)), ms);
+        });
+        return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+    }
+
     async switchToNextAuth() {
         const available = this.authSource.getRotationIndices();
 
@@ -75,7 +83,11 @@ class AuthSwitcher {
                 this.logger.info("==================================================");
 
                 try {
-                    await this.browserManager.launchOrSwitchContext(singleIndex);
+                    await this._withTimeout(
+                        this.browserManager.launchOrSwitchContext(singleIndex),
+                        60_000,
+                        `Single account #${singleIndex} restart timed out after 60s`
+                    );
                     this.resetCounters();
                     this.browserManager.rebalanceContextPool().catch(err => {
                         this.logger.error(`[Auth] Background rebalance failed: ${err.message}`);
@@ -131,8 +143,14 @@ class AuthSwitcher {
 
                 try {
                     // Pre-cleanup: remove excess contexts BEFORE creating new one to avoid exceeding maxContexts
-                    await this.browserManager.preCleanupForSwitch(accountIndex);
-                    await this.browserManager.switchAccount(accountIndex);
+                    await this._withTimeout(
+                        (async () => {
+                            await this.browserManager.preCleanupForSwitch(accountIndex);
+                            await this.browserManager.switchAccount(accountIndex);
+                        })(),
+                        60_000,
+                        `Account #${accountIndex} switch timed out after 60s`
+                    );
                     this.resetCounters();
                     this.browserManager.rebalanceContextPool().catch(err => {
                         this.logger.error(`[Auth] Background rebalance failed: ${err.message}`);
@@ -166,8 +184,14 @@ class AuthSwitcher {
 
                 try {
                     // Pre-cleanup: remove excess contexts BEFORE creating new one to avoid exceeding maxContexts
-                    await this.browserManager.preCleanupForSwitch(originalStartAccount);
-                    await this.browserManager.switchAccount(originalStartAccount);
+                    await this._withTimeout(
+                        (async () => {
+                            await this.browserManager.preCleanupForSwitch(originalStartAccount);
+                            await this.browserManager.switchAccount(originalStartAccount);
+                        })(),
+                        60_000,
+                        `Fallback account #${originalStartAccount} switch timed out after 60s`
+                    );
                     this.resetCounters();
                     this.browserManager.rebalanceContextPool().catch(err => {
                         this.logger.error(`[Auth] Background rebalance failed: ${err.message}`);
@@ -227,8 +251,14 @@ class AuthSwitcher {
         try {
             this.logger.info(`🔄 [Auth] Starting switch to specified account #${targetIndex}...`);
             // Pre-cleanup: remove excess contexts BEFORE creating new one to avoid exceeding maxContexts
-            await this.browserManager.preCleanupForSwitch(targetIndex);
-            await this.browserManager.switchAccount(targetIndex);
+            await this._withTimeout(
+                (async () => {
+                    await this.browserManager.preCleanupForSwitch(targetIndex);
+                    await this.browserManager.switchAccount(targetIndex);
+                })(),
+                60_000,
+                `Switch to account #${targetIndex} timed out after 60s`
+            );
             this.resetCounters();
             this.browserManager.rebalanceContextPool().catch(err => {
                 this.logger.error(`[Auth] Background rebalance failed: ${err.message}`);
