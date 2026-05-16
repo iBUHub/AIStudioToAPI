@@ -25,7 +25,8 @@ body:
       label: API Endpoint
       description: The API type you are requesting when the issue occurs
       options:
-        - OpenAI
+        - OpenAI - Chat Completions
+        - OpenAI - Responses
         - Gemini
         - Anthropic
     validations:
