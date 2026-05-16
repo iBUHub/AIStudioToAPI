@@ -309,13 +309,19 @@ class ConnectionRegistry extends EventEmitter {
 
     getConnectionByAuth(authIndex, log = true) {
         const connection = this.connectionsByAuth.get(authIndex);
-        if (connection && log) {
+
+        if (!log) {
+            return connection;
+        }
+
+        if (connection) {
             this.logger.debug(`[Registry] Found WebSocket connection for authIndex=${authIndex}`);
         } else if (this.logger.getLevel?.() === "DEBUG") {
             this.logger.debug(
                 `[Registry] No WebSocket connection found for authIndex=${authIndex}. Available: [${Array.from(this.connectionsByAuth.keys()).join(", ")}]`
             );
         }
+
         return connection;
     }
 
@@ -426,6 +432,7 @@ class ConnectionRegistry extends EventEmitter {
         // This prevents stale queues from lingering when retrying failed requests
         const existingEntry = this.messageQueues.get(requestId);
         if (existingEntry) {
+            const existingAuthIndex = existingEntry.authIndex;
             this.logger.debug(
                 `[Registry] Found existing message queue for request ${requestId} (authIndex=${existingEntry.authIndex}), closing it before creating new one`
             );
@@ -435,6 +442,9 @@ class ConnectionRegistry extends EventEmitter {
                 this.logger.debug(`[Registry] Failed to close existing queue for ${requestId}: ${e.message}`);
             }
             this.messageQueues.delete(requestId);
+            if (existingAuthIndex !== authIndex) {
+                this._emitAuthQueuesDrainedIfNeeded(existingAuthIndex);
+            }
         }
 
         const queue = new MessageQueue();
@@ -456,8 +466,10 @@ class ConnectionRegistry extends EventEmitter {
     removeMessageQueue(requestId, reason = "handler_cleanup") {
         const entry = this.messageQueues.get(requestId);
         if (entry) {
+            const authIndex = entry.authIndex;
             entry.queue.close(reason);
             this.messageQueues.delete(requestId);
+            this._emitAuthQueuesDrainedIfNeeded(authIndex);
         }
     }
 
@@ -479,6 +491,20 @@ class ConnectionRegistry extends EventEmitter {
     getRequestAttemptIdForRequest(requestId) {
         const entry = this.messageQueues.get(requestId);
         return entry ? entry.requestAttemptId || null : null;
+    }
+
+    /**
+     * Check whether a specific account has any active message queue.
+     * @param {number} authIndex - The account index to inspect
+     * @returns {boolean} True if at least one active message queue belongs to the account
+     */
+    hasMessageQueueForAuth(authIndex) {
+        for (const entry of this.messageQueues.values()) {
+            if (entry.authIndex === authIndex) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -504,6 +530,7 @@ class ConnectionRegistry extends EventEmitter {
             this.logger.info(
                 `[Registry] Force closed ${count} pending message queue(s) for account #${authIndex} (reason: ${reason})`
             );
+            this._emitAuthQueuesDrainedIfNeeded(authIndex);
         }
         return count;
     }
@@ -548,6 +575,7 @@ class ConnectionRegistry extends EventEmitter {
                     this.logger.debug(`[Registry] Failed to close stale queue for ${requestId}: ${e.message}`);
                 }
                 this.messageQueues.delete(requestId);
+                this._emitAuthQueuesDrainedIfNeeded(entry.authIndex);
                 cleanedCount++;
             }
         }
@@ -557,6 +585,15 @@ class ConnectionRegistry extends EventEmitter {
         }
 
         return cleanedCount;
+    }
+
+    _emitAuthQueuesDrainedIfNeeded(authIndex) {
+        if (!Number.isInteger(authIndex) || authIndex < 0) {
+            return;
+        }
+        if (!this.hasMessageQueueForAuth(authIndex)) {
+            this.emit("authQueuesDrained", authIndex);
+        }
     }
 
     /**

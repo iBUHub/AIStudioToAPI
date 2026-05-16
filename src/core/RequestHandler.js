@@ -64,6 +64,10 @@ class RequestHandler {
         return this.authSwitcher.isSystemBusy;
     }
 
+    set isSystemBusy(value) {
+        this.authSwitcher.isSystemBusy = value === true;
+    }
+
     _getUsageStatsService() {
         return this.serverSystem.usageStatsService || null;
     }
@@ -537,10 +541,6 @@ class RequestHandler {
     }
 
     async _waitForSystemAndConnectionIfBusy(res = null, options = {}) {
-        if (!this.authSwitcher.isSystemBusy) {
-            return true;
-        }
-
         const {
             busyMessage = "Server undergoing internal maintenance (account switching/recovery), please try again later.",
             connectionMessage = "Service temporarily unavailable: Connection not established after switching.",
@@ -732,6 +732,7 @@ class RequestHandler {
                 this.authSwitcher.isSystemBusy = true;
                 this.logger.info(`[System] Set isSystemBusy=true for direct recovery to account #${recoveryAuthIndex}`);
 
+                await this.browserManager.preCleanupForSwitch(recoveryAuthIndex);
                 await this.browserManager.launchOrSwitchContext(recoveryAuthIndex);
                 this.logger.info(`✅ [System] Browser successfully recovered to account #${recoveryAuthIndex}!`);
 
@@ -3217,8 +3218,12 @@ class RequestHandler {
     async _executeRequestWithRetries(proxyRequest, messageQueue) {
         let lastError = null;
         let currentQueue = messageQueue;
-        // Track the authIndex for the current queue to ensure proper cleanup
-        let currentQueueAuthIndex = this.currentAuthIndex;
+        const registeredQueueAuthIndex = this.connectionRegistry.getAuthIndexForRequest(proxyRequest.request_id);
+        // Track the authIndex registered for the current queue, which may differ from the global current account.
+        let currentQueueAuthIndex =
+            Number.isInteger(registeredQueueAuthIndex) && registeredQueueAuthIndex >= 0
+                ? registeredQueueAuthIndex
+                : this.currentAuthIndex;
         let retryAttempt = 1;
         const immediateSwitchTracker = this._createImmediateSwitchTracker(currentQueueAuthIndex);
 
@@ -3271,10 +3276,61 @@ class RequestHandler {
                     // Check the actual closure reason to provide accurate error messages
                     const reason = error.reason || "unknown";
                     const isClientDisconnect = reason === "client_disconnect";
+                    const currentAuthIndex = this.currentAuthIndex;
+                    const isClosedAccountRetryable = reason === "context_closed" || reason === "page_closed";
+                    const canRetryOnCurrentAccountCandidate =
+                        !isClientDisconnect &&
+                        isClosedAccountRetryable &&
+                        retryAttempt < this.maxRetries &&
+                        Number.isInteger(currentQueueAuthIndex) &&
+                        currentQueueAuthIndex >= 0 &&
+                        Number.isInteger(currentAuthIndex) &&
+                        currentAuthIndex >= 0 &&
+                        currentQueueAuthIndex !== currentAuthIndex;
+
+                    if (canRetryOnCurrentAccountCandidate) {
+                        const ready = await this._waitForSystemAndConnectionIfBusy(null, {
+                            connectionMessage: "Service temporarily unavailable: Connection not ready before retry.",
+                        });
+                        if (!ready) {
+                            lastError = {
+                                message: `WebSocket connection not ready before retry on account #${this.currentAuthIndex}.`,
+                                status: 503,
+                            };
+                            break;
+                        }
+                    }
+
+                    const canRetryOnCurrentAccount =
+                        canRetryOnCurrentAccountCandidate &&
+                        Boolean(this.connectionRegistry.getConnectionByAuth(currentAuthIndex, false));
 
                     if (isClientDisconnect) {
                         this.logger.warn(`[Request] Message queue closed due to client disconnect, aborting retries.`);
                         lastError = { message: "Connection lost (client disconnect)", status: 503 };
+                    } else if (canRetryOnCurrentAccount) {
+                        this.logger.warn(
+                            `[Request] Message queue for non-current account #${currentQueueAuthIndex} closed ` +
+                                `(reason: ${reason}); retrying request #${proxyRequest.request_id} on current account #${currentAuthIndex}.`
+                        );
+                        lastError = {
+                            message: `Queue closed: ${error.message || reason}`,
+                            reason,
+                            status: 503,
+                        };
+                        this._advanceProxyRequestAttempt(proxyRequest);
+                        currentQueue = this.connectionRegistry.createMessageQueue(
+                            proxyRequest.request_id,
+                            currentAuthIndex,
+                            proxyRequest.request_attempt_id
+                        );
+                        currentQueueAuthIndex = currentAuthIndex;
+                        if (Number.isInteger(currentQueueAuthIndex) && currentQueueAuthIndex >= 0) {
+                            immediateSwitchTracker.attemptedAuthIndices.add(currentQueueAuthIndex);
+                        }
+                        await new Promise(resolve => setTimeout(resolve, this.retryDelay));
+                        retryAttempt++;
+                        continue;
                     } else {
                         // Queue closed for other reasons (account_switch, system_reset, etc.)
                         this.logger.warn(`[Request] Message queue closed (reason: ${reason}), aborting retries.`);
@@ -3377,6 +3433,17 @@ class RequestHandler {
 
                 // Wait before the next retry
                 await new Promise(resolve => setTimeout(resolve, this.retryDelay));
+                if (
+                    !(await this._waitForSystemAndConnectionIfBusy(null, {
+                        connectionMessage: "Service temporarily unavailable: Connection not ready before retry.",
+                    }))
+                ) {
+                    lastError = {
+                        message: `WebSocket connection not ready before retry on account #${this.currentAuthIndex}.`,
+                        status: 503,
+                    };
+                    break;
+                }
                 retryAttempt++;
             }
         }

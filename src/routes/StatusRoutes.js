@@ -467,9 +467,9 @@ class StatusRoutes {
                     `[WebUI] Current active account #${currentAuthIndex} was deleted. Closing context and connection...`
                 );
                 // Set system busy flag to prevent new requests during cleanup
-                const previousBusy = this.serverSystem.isSystemBusy === true;
+                const previousBusy = this.serverSystem.requestHandler.isSystemBusy === true;
                 if (!previousBusy) {
-                    this.serverSystem.isSystemBusy = true;
+                    this.serverSystem.requestHandler.isSystemBusy = true;
                 }
                 try {
                     // 1. Terminate pending requests for the current account
@@ -484,7 +484,7 @@ class StatusRoutes {
                 } finally {
                     // Reset system busy flag after cleanup completes
                     if (!previousBusy) {
-                        this.serverSystem.isSystemBusy = false;
+                        this.serverSystem.requestHandler.isSystemBusy = false;
                     }
                 }
             }
@@ -657,9 +657,9 @@ class StatusRoutes {
 
                 if (targetIndex === currentAuthIndex) {
                     // Set system busy flag to prevent new requests during cleanup
-                    const previousBusy = this.serverSystem.isSystemBusy === true;
+                    const previousBusy = this.serverSystem.requestHandler.isSystemBusy === true;
                     if (!previousBusy) {
-                        this.serverSystem.isSystemBusy = true;
+                        this.serverSystem.requestHandler.isSystemBusy = true;
                     }
                     try {
                         // If deleting the current account, terminate its pending requests first
@@ -671,7 +671,7 @@ class StatusRoutes {
                     } finally {
                         // Reset system busy flag after cleanup completes
                         if (!previousBusy) {
-                            this.serverSystem.isSystemBusy = false;
+                            this.serverSystem.requestHandler.isSystemBusy = false;
                         }
                     }
                 } else {
