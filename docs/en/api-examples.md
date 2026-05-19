@@ -74,6 +74,18 @@ curl -X POST http://localhost:7860/v1/chat/completions \
   }'
 ```
 
+### 📐 Text Embeddings [Official Docs](https://ai.google.dev/gemini-api/docs/embeddings)
+
+```bash
+curl -X POST http://localhost:7860/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your-api-key-1" \
+  -d '{
+    "model": "gemini-embedding-001",
+    "input": "What is artificial intelligence?"
+  }'
+```
+
 ### 💬 Responses API
 
 ```bash
@@ -340,13 +352,29 @@ curl -X POST http://localhost:7860/v1beta/models/gemini-2.5-flash-preview-tts:ge
 
 > 💡 **Tip**: TTS responses return base64-encoded audio data in `audio/L16;codec=pcm;rate=24000` format. You need to decode and convert it to WAV format for playback.
 
-### 📐 Text Embeddings
+### 📐 Text Embeddings [Official Docs](https://ai.google.dev/gemini-api/docs/embeddings)
 
-Use the `batchEmbedContents` endpoint to generate text embedding vectors.
-
-> ⚠️ **Note**: The `embedContent` endpoint is no longer supported. Please use `batchEmbedContents` instead.
+Use the `embedContent` or `batchEmbedContents` endpoint to generate text embedding vectors.
 
 #### Single Text Embedding
+
+```bash
+curl -X POST http://localhost:7860/v1beta/models/gemini-embedding-001:embedContent \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your-api-key-1" \
+  -d '{
+    "model": "models/gemini-embedding-001",
+    "content": {
+      "parts": [
+        {
+          "text": "What is artificial intelligence?"
+        }
+      ]
+    }
+  }'
+```
+
+#### Single Batch Text Embedding
 
 ```bash
 curl -X POST http://localhost:7860/v1beta/models/gemini-embedding-001:batchEmbedContents \

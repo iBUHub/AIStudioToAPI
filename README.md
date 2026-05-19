@@ -196,6 +196,7 @@ services:
 
 - `GET /v1/models`: 列出模型。
 - `POST /v1/chat/completions`: 聊天补全和图片生成，支持非流式、真流式和假流式。
+- `POST /v1/embeddings`: 生成文本嵌入向量。
 - `POST /v1/responses`: OpenAI Responses API 兼容接口，用于对话生成，不支持图像生成，支持非流式、真流式和假流式。
 - `POST /v1/responses/input_tokens`: 计算 OpenAI Responses API 请求的输入 token 数量。
 
@@ -206,6 +207,7 @@ services:
 - `GET /v1beta/models`: 列出可用的 Gemini 模型。
 - `POST /v1beta/models/{model_name}:generateContent`: 生成内容、图片和语音。
 - `POST /v1beta/models/{model_name}:streamGenerateContent`: 流式生成内容、图片和语音，支持真流式和假流式。
+- `POST /v1beta/models/{model_name}:embedContent`: 生成单条文本嵌入向量。
 - `POST /v1beta/models/{model_name}:batchEmbedContents`: 批量生成文本嵌入向量。
 - `POST /v1beta/models/{model_name}:predict`: Imagen 系列模型图像生成。
 

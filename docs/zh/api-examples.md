@@ -74,6 +74,18 @@ curl -X POST http://localhost:7860/v1/chat/completions \
   }'
 ```
 
+### 📐 文本嵌入 [官方文档](https://ai.google.dev/gemini-api/docs/embeddings?hl=zh-cn)
+
+```bash
+curl -X POST http://localhost:7860/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your-api-key-1" \
+  -d '{
+    "model": "gemini-embedding-001",
+    "input": "什么是人工智能？"
+  }'
+```
+
 ### 💬 Responses API
 
 ```bash
@@ -340,13 +352,29 @@ curl -X POST http://localhost:7860/v1beta/models/gemini-2.5-flash-preview-tts:ge
 
 > 💡 **提示**：TTS 响应返回的是 `audio/L16;codec=pcm;rate=24000` 格式的 base64 编码音频数据，需要解码后转换为 WAV 格式播放。
 
-### 📐 文本嵌入 (Embeddings)
+### 📐 文本嵌入 (Embeddings) [官方文档](https://ai.google.dev/gemini-api/docs/embeddings?hl=zh-cn)
 
-使用 `batchEmbedContents` 端点生成文本嵌入向量。
-
-> ⚠️ **注意**：`embedContent` 端点已不再支持，请使用 `batchEmbedContents` 端点。
+使用 `embedContent` 或 `batchEmbedContents` 端点生成文本嵌入向量。
 
 #### 单个文本嵌入
+
+```bash
+curl -X POST http://localhost:7860/v1beta/models/gemini-embedding-001:embedContent \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your-api-key-1" \
+  -d '{
+    "model": "models/gemini-embedding-001",
+    "content": {
+      "parts": [
+        {
+          "text": "什么是人工智能？"
+        }
+      ]
+    }
+  }'
+```
+
+#### 单条 batch 文本嵌入
 
 ```bash
 curl -X POST http://localhost:7860/v1beta/models/gemini-embedding-001:batchEmbedContents \

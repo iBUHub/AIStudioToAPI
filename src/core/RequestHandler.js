@@ -87,10 +87,6 @@ class RequestHandler {
         return match?.[1] || null;
     }
 
-    _isOpenAIEmbeddingsPath(pathValue) {
-        return typeof pathValue === "string" && /^\/v1(?:\/openai)?\/embeddings\/?$/i.test(pathValue);
-    }
-
     _convertEmbedContentBodyToBatch(bodyObj, modelName) {
         return {
             requests: [
@@ -102,18 +98,6 @@ class RequestHandler {
         };
     }
 
-    _normalizeBatchEmbedContentBody(bodyObj, modelName) {
-        if (!bodyObj || !Array.isArray(bodyObj.requests)) return bodyObj;
-
-        return {
-            ...bodyObj,
-            requests: bodyObj.requests.map(request => ({
-                ...request,
-                model: `models/${modelName}`,
-            })),
-        };
-    }
-
     _convertBatchEmbedResponseToEmbedContent(fullBodyBuffer) {
         const batchResponse = JSON.parse(fullBodyBuffer.toString());
         const embedding = Array.isArray(batchResponse.embeddings) ? batchResponse.embeddings[0] : null;
@@ -122,14 +106,12 @@ class RequestHandler {
             throw new Error("Backend batchEmbedContents response did not contain embeddings[0].");
         }
 
-        return Buffer.from(JSON.stringify({ embedding }));
-    }
-
-    _isNonRetryableEmbeddingClientError(errorDetails, proxyRequest) {
-        const status = Number(errorDetails?.status);
-        if (status !== 400 && status !== 404) return false;
-
-        return this._categorizeRequest(proxyRequest?.path, "request") === "embedding";
+        return Buffer.from(
+            JSON.stringify({
+                embedding,
+                ...(batchResponse.usageMetadata ? { usageMetadata: batchResponse.usageMetadata } : {}),
+            })
+        );
     }
 
     _categorizeRequest(pathValue, fallback = "request") {
@@ -137,7 +119,7 @@ class RequestHandler {
         if (
             pathValue.includes("embedContent") ||
             pathValue.includes("batchEmbedContents") ||
-            this._isOpenAIEmbeddingsPath(pathValue)
+            pathValue.includes("embeddings")
         )
             return "embedding";
         if (pathValue.includes("countTokens") || pathValue.includes("input_tokens")) return "count_tokens";
@@ -873,12 +855,11 @@ class RequestHandler {
     // Process standard Google API requests
     async processRequest(req, res) {
         const requestId = this._generateRequestId();
-        const apiFormat = this._isOpenAIEmbeddingsPath(req.path) ? "openai" : "gemini";
         this._startTrackedRequest(requestId, req, {
-            apiFormat,
+            apiFormat: "gemini",
             requestCategory: this._categorizeRequest(req.path, "request"),
         });
-        this._setResponseApiFormat(res, apiFormat);
+        this._setResponseApiFormat(res, "gemini");
         res.__proxyResponseStreamMode = null;
 
         try {
@@ -934,7 +915,7 @@ class RequestHandler {
 
             this._updateTrackedRequest(requestId, {
                 isStreaming: wantsStream,
-                model: proxyRequest.tracking_model || this._extractModelFromPath(proxyRequest.path),
+                model: this._extractModelFromPath(proxyRequest.path),
                 path: proxyRequest.path,
                 requestCategory: this._categorizeRequest(
                     proxyRequest.path,
@@ -978,6 +959,87 @@ class RequestHandler {
                     });
                     this.needsSwitchingAfterRequest = false;
                 }
+                if (!res.writableEnded) res.end();
+            }
+        } finally {
+            this._finalizeTrackedRequest(requestId, res);
+        }
+    }
+
+    // Process OpenAI embeddings requests
+    async processOpenAIEmbeddingsRequest(req, res) {
+        const requestId = this._generateRequestId();
+        this._startTrackedRequest(requestId, req, {
+            apiFormat: "openai",
+            isStreaming: false,
+            requestCategory: "embedding",
+            streamMode: null,
+        });
+        this._setResponseApiFormat(res, "openai");
+        res.__proxyResponseStreamMode = null;
+
+        try {
+            if (!this.connectionRegistry.getConnectionByAuth(this.currentAuthIndex)) {
+                this.logger.warn(`[Request] No WebSocket connection for current account #${this.currentAuthIndex}`);
+                const recovered = await this._handleBrowserRecovery(res);
+                if (!recovered) {
+                    this._markTrackedEarlyExitIfNeeded(
+                        res,
+                        "Service temporarily unavailable: Browser recovery failed."
+                    );
+                    return;
+                }
+            }
+
+            const ready = await this._waitForSystemAndConnectionIfBusy(res, {
+                sendError: (status, message) => this._sendErrorResponse(res, status, message, "service_unavailable"),
+            });
+            if (!ready) {
+                this._markTrackedEarlyExitIfNeeded(res, "Service temporarily unavailable: System not ready.");
+                return;
+            }
+
+            if (this.browserManager) {
+                this.browserManager.notifyUserActivity();
+            }
+
+            const { cleanModelName, googleRequest, path } = this.formatConverter.translateOpenAIEmbeddingsToGoogle(
+                req.body
+            );
+            const proxyRequest = {
+                body: JSON.stringify(googleRequest),
+                headers: req.headers,
+                is_generative: false,
+                method: "POST",
+                path,
+                query_params: req.query || {},
+                request_id: requestId,
+                streaming_mode: "fake",
+                tracking_model: cleanModelName,
+            };
+            this._initializeProxyRequestAttempt(proxyRequest);
+            this._updateTrackedRequest(requestId, {
+                isStreaming: false,
+                model: proxyRequest.tracking_model,
+                path: proxyRequest.path,
+                requestCategory: "embedding",
+                streamMode: null,
+            });
+
+            try {
+                const messageQueue = this.connectionRegistry.createMessageQueue(
+                    requestId,
+                    this.currentAuthIndex,
+                    proxyRequest.request_attempt_id
+                );
+                this._setupClientDisconnectHandler(res, requestId);
+
+                await this._handleNonStreamResponse(proxyRequest, messageQueue, req, res);
+            } catch (error) {
+                this._handleQueueTimeout(error, requestId);
+                this._handleRequestError(error, res, requestId);
+            } finally {
+                this.connectionRegistry.removeMessageQueue(requestId, "request_complete");
                 if (!res.writableEnded) res.end();
             }
         } finally {
@@ -3353,7 +3415,11 @@ class RequestHandler {
                 lastError = errorPayload;
                 this._cancelCurrentAttemptBeforeRetry(proxyRequest, currentQueueAuthIndex);
 
-                if (this._isNonRetryableEmbeddingClientError(errorPayload, proxyRequest)) {
+                const errorStatus = Number(errorPayload?.status);
+                const isNonRetryableEmbeddingClientError =
+                    (errorStatus === 400 || errorStatus === 404) &&
+                    this._categorizeRequest(proxyRequest?.path, "request") === "embedding";
+                if (isNonRetryableEmbeddingClientError) {
                     lastError = { ...errorPayload, skipAccountSwitch: true };
                     this.logger.warn(
                         `[Request] Embedding request failed with non-retryable status ${errorPayload.status}; skipping retries and account switching.`
@@ -3362,7 +3428,6 @@ class RequestHandler {
                 }
 
                 // Check if we should stop retrying immediately based on status code
-                const errorStatus = Number(errorPayload?.status);
                 if (
                     Number.isFinite(errorStatus) &&
                     this.config?.immediateSwitchStatusCodes?.includes(errorStatus) &&
@@ -4118,12 +4183,8 @@ class RequestHandler {
         const fullPath = req.path;
         let cleanPath = fullPath.replace(/^\/proxy/, "");
         const bodyObj = req.body;
-        const originalBodyObj =
-            bodyObj && typeof bodyObj === "object" && !Array.isArray(bodyObj)
-                ? JSON.parse(JSON.stringify(bodyObj))
-                : bodyObj;
+        let requestBodyObj = bodyObj;
         let responseTransform = null;
-        let trackingModel = null;
 
         this.logger.debug(`[Proxy] Debug: incoming Gemini Body (Google Native) = ${JSON.stringify(bodyObj, null, 2)}`);
 
@@ -4223,27 +4284,9 @@ class RequestHandler {
         if (req.method === "POST" && embedContentMatch) {
             const modelName = embedContentMatch[1];
             cleanPath = `/v1beta/models/${modelName}:batchEmbedContents`;
-            Object.keys(bodyObj).forEach(key => delete bodyObj[key]);
-            Object.assign(bodyObj, this._convertEmbedContentBodyToBatch(originalBodyObj, modelName));
+            requestBodyObj = this._convertEmbedContentBodyToBatch(bodyObj, modelName);
             responseTransform = "batchEmbedToEmbedContent";
-            trackingModel = modelName;
             this.logger.info(`[Proxy] Rewriting embedContent to batchEmbedContents for model "${modelName}".`);
-        }
-
-        const batchEmbedContentMatch = cleanPath.match(/^\/v1beta\/models\/([^:]+):batchEmbedContents$/);
-        if (req.method === "POST" && !responseTransform && batchEmbedContentMatch) {
-            const modelName = batchEmbedContentMatch[1];
-            Object.keys(bodyObj).forEach(key => delete bodyObj[key]);
-            Object.assign(bodyObj, this._normalizeBatchEmbedContentBody(originalBodyObj, modelName));
-            trackingModel = modelName;
-        }
-
-        if (req.method === "POST" && this._isOpenAIEmbeddingsPath(cleanPath) && bodyObj) {
-            const rawModelName = typeof bodyObj.model === "string" ? bodyObj.model : null;
-            if (rawModelName) {
-                trackingModel = rawModelName.replace(/^models\//, "");
-            }
-            cleanPath = "/v1/openai/embeddings";
         }
 
         // Force web search and URL context for native Google requests
@@ -4299,10 +4342,12 @@ class RequestHandler {
             bodyObj.safetySettings = this.formatConverter.getDefaultSafetySettings();
         }
 
-        this.logger.debug(`[Proxy] Debug: Final Gemini Request (Google Native) = ${JSON.stringify(bodyObj, null, 2)}`);
+        this.logger.debug(
+            `[Proxy] Debug: Final Gemini Request (Google Native) = ${JSON.stringify(requestBodyObj, null, 2)}`
+        );
 
         return {
-            body: req.method !== "GET" ? JSON.stringify(bodyObj) : undefined,
+            body: req.method !== "GET" ? JSON.stringify(requestBodyObj) : undefined,
             headers: req.headers,
             is_generative:
                 req.method === "POST" &&
@@ -4313,7 +4358,6 @@ class RequestHandler {
             request_id: requestId,
             response_transform: responseTransform,
             streaming_mode: modelStreamingMode || this.serverSystem.streamingMode,
-            tracking_model: trackingModel,
         };
     }
 

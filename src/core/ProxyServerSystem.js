@@ -490,7 +490,7 @@ class ProxyServerSystem extends EventEmitter {
         });
 
         app.post(["/v1/embeddings", "/v1/openai/embeddings"], (req, res) => {
-            this.requestHandler.processRequest(req, res);
+            this.requestHandler.processOpenAIEmbeddingsRequest(req, res);
         });
 
         // OpenAI Response API compatible endpoint
