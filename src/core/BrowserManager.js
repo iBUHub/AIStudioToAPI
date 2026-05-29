@@ -19,6 +19,10 @@ const {
 } = require("../utils/CustomErrors");
 
 const WS_INIT_TIMEOUT_MS = 120000;
+const FIREFOX_DOH_DISABLED_PREFS = {
+    "network.trr.mode": 5,
+    "network.trr.uri": "",
+};
 
 /**
  * Browser Manager Module
@@ -107,6 +111,7 @@ class BrowserManager {
             "network.dns.disablePrefetch": true, // Disable DNS prefetching
             "network.http.speculative-parallel-limit": 0, // Disable speculative connections
             "network.prefetch-next": false, // Disable link prefetching
+            ...FIREFOX_DOH_DISABLED_PREFS, // Disable DoH/TRR to respect system DNS/hosts
             "permissions.default.geo": 0, // 0 = Always deny geolocation
             "services.sync.enabled": false, // Disable Firefox Sync
             "toolkit.cosmeticAnimations.enabled": false, // Disable UI animations
@@ -1343,6 +1348,7 @@ class BrowserManager {
                 ...extraArgs.env,
             },
             executablePath: this.browserExecutablePath,
+            firefoxUserPrefs: FIREFOX_DOH_DISABLED_PREFS,
             headless: false,
             ...(proxyConfig ? { proxy: proxyConfig } : {}),
         });

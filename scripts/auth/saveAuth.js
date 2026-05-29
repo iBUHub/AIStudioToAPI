@@ -14,6 +14,11 @@ const path = require("path");
 // Load environment variables from .env file
 require("dotenv").config({ path: path.resolve(__dirname, "..", "..", ".env") });
 
+const FIREFOX_DOH_DISABLED_PREFS = {
+    "network.trr.mode": 5,
+    "network.trr.uri": "",
+};
+
 // Initialize language from environment variable passed by setupAuth.js
 const normalizeLanguage = value => {
     const normalized = String(value || "")
@@ -926,6 +931,7 @@ const autoFillRecoveryEmailIfRequired = async (page, recoveryEmail, randomWait) 
 
     const browser = await firefox.launch({
         executablePath: browserExecutablePath,
+        firefoxUserPrefs: FIREFOX_DOH_DISABLED_PREFS,
         headless: runtimeOptions.headless,
         ...(proxyConfig ? { proxy: proxyConfig } : {}),
     });
