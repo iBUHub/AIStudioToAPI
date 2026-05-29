@@ -36,6 +36,28 @@ class FormatConverter {
         minimal: "MINIMAL",
     };
 
+    static DEPRECATED_MODEL_ALIASES = {
+        "gemini-3-pro-image-preview": "gemini-3-pro-image",
+        "gemini-3.1-flash-image-preview": "gemini-3.1-flash-image",
+    };
+
+    static normalizeDeprecatedModelAlias(modelName) {
+        if (!modelName || typeof modelName !== "string") {
+            return modelName;
+        }
+
+        const modelsPrefix = "models/";
+        const hasModelsPrefix = modelName.startsWith(modelsPrefix);
+        const bareModelName = hasModelsPrefix ? modelName.slice(modelsPrefix.length) : modelName;
+        const replacementModelName = FormatConverter.DEPRECATED_MODEL_ALIASES[bareModelName];
+
+        if (!replacementModelName) {
+            return modelName;
+        }
+
+        return hasModelsPrefix ? `${modelsPrefix}${replacementModelName}` : replacementModelName;
+    }
+
     /**
      * Parse web search suffix from model name.
      * Only supports the LAST hyphen token: `-search` (case-insensitive).
@@ -508,8 +530,9 @@ class FormatConverter {
             FormatConverter.parseModelWebSearchSuffix(rawModel);
         const { cleanModelName: streamStrippedModel, streamingMode: modelStreamingMode } =
             FormatConverter.parseModelStreamingModeSuffix(searchStrippedModel);
-        const { cleanModelName, thinkingLevel: modelThinkingLevel } =
+        const { cleanModelName: parsedModelName, thinkingLevel: modelThinkingLevel } =
             FormatConverter.parseModelThinkingLevel(streamStrippedModel);
+        const cleanModelName = FormatConverter.normalizeDeprecatedModelAlias(parsedModelName);
 
         if (modelForceWebSearch) {
             this.logger.info(
@@ -525,6 +548,9 @@ class FormatConverter {
             this.logger.info(
                 `[Adapter] Detected thinkingLevel suffix in model name: "${streamStrippedModel}" -> model="${cleanModelName}", thinkingLevel="${modelThinkingLevel}"`
             );
+        }
+        if (cleanModelName !== parsedModelName) {
+            this.logger.info(`[Adapter] Remapped deprecated model alias: "${parsedModelName}" -> "${cleanModelName}"`);
         }
 
         let systemInstruction = null;
@@ -2079,8 +2105,9 @@ class FormatConverter {
             FormatConverter.parseModelWebSearchSuffix(rawModel);
         const { cleanModelName: streamStrippedModel, streamingMode: modelStreamingMode } =
             FormatConverter.parseModelStreamingModeSuffix(searchStrippedModel);
-        const { cleanModelName, thinkingLevel: modelThinkingLevel } =
+        const { cleanModelName: parsedModelName, thinkingLevel: modelThinkingLevel } =
             FormatConverter.parseModelThinkingLevel(streamStrippedModel);
+        const cleanModelName = FormatConverter.normalizeDeprecatedModelAlias(parsedModelName);
 
         if (modelForceWebSearch) {
             this.logger.info(
@@ -2096,6 +2123,9 @@ class FormatConverter {
             this.logger.info(
                 `[Adapter] Detected thinkingLevel suffix in model name: "${streamStrippedModel}" -> model="${cleanModelName}", thinkingLevel="${modelThinkingLevel}"`
             );
+        }
+        if (cleanModelName !== parsedModelName) {
+            this.logger.info(`[Adapter] Remapped deprecated model alias: "${parsedModelName}" -> "${cleanModelName}"`);
         }
 
         let systemInstruction = null;
@@ -2863,8 +2893,9 @@ class FormatConverter {
             FormatConverter.parseModelWebSearchSuffix(rawModel);
         const { cleanModelName: streamStrippedModel, streamingMode: modelStreamingMode } =
             FormatConverter.parseModelStreamingModeSuffix(searchStrippedModel);
-        const { cleanModelName, thinkingLevel: modelThinkingLevel } =
+        const { cleanModelName: parsedModelName, thinkingLevel: modelThinkingLevel } =
             FormatConverter.parseModelThinkingLevel(streamStrippedModel);
+        const cleanModelName = FormatConverter.normalizeDeprecatedModelAlias(parsedModelName);
 
         if (modelForceWebSearch) {
             this.logger.info(
@@ -2880,6 +2911,9 @@ class FormatConverter {
             this.logger.info(
                 `[Adapter] Detected thinkingLevel suffix in model name: "${streamStrippedModel}" -> model="${cleanModelName}", thinkingLevel="${modelThinkingLevel}"`
             );
+        }
+        if (cleanModelName !== parsedModelName) {
+            this.logger.info(`[Adapter] Remapped deprecated model alias: "${parsedModelName}" -> "${cleanModelName}"`);
         }
 
         const googleContents = [];

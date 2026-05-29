@@ -4126,8 +4126,9 @@ class RequestHandler {
                 FormatConverter.parseModelWebSearchSuffix(rawModelName);
             const { cleanModelName: streamStrippedModel, streamingMode: parsedStreamingMode } =
                 FormatConverter.parseModelStreamingModeSuffix(searchStrippedModel);
-            const { cleanModelName, thinkingLevel: parsedThinkingLevel } =
+            const { cleanModelName: parsedModelName, thinkingLevel: parsedThinkingLevel } =
                 FormatConverter.parseModelThinkingLevel(streamStrippedModel);
+            const cleanModelName = FormatConverter.normalizeDeprecatedModelAlias(parsedModelName);
             modelForceWebSearch = parsedForceWebSearch;
             modelStreamingMode = parsedStreamingMode;
             modelThinkingLevel = parsedThinkingLevel;
@@ -4150,8 +4151,25 @@ class RequestHandler {
                 );
             }
 
+            if (cleanModelName !== parsedModelName) {
+                this.logger.info(`[Proxy] Remapped deprecated model alias: "${parsedModelName}" -> "${cleanModelName}"`);
+            }
+
             // Always strip recognized directives from path model name
             if (cleanModelName !== rawModelName) {
+                cleanPath = `${pathPrefix}${cleanModelName}${pathSuffix}`;
+            }
+        }
+
+        const genericModelPathMatch = cleanPath.match(/^(\/v1beta\/models\/)([^:]+)(:.+)$/);
+        if (!modelPathMatch && genericModelPathMatch) {
+            const pathPrefix = genericModelPathMatch[1];
+            const rawModelName = genericModelPathMatch[2];
+            const pathSuffix = genericModelPathMatch[3];
+            const cleanModelName = FormatConverter.normalizeDeprecatedModelAlias(rawModelName);
+
+            if (cleanModelName !== rawModelName) {
+                this.logger.info(`[Proxy] Remapped deprecated model alias: "${rawModelName}" -> "${cleanModelName}"`);
                 cleanPath = `${pathPrefix}${cleanModelName}${pathSuffix}`;
             }
         }
