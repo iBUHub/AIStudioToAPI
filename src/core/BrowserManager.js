@@ -217,6 +217,22 @@ class BrowserManager {
         );
     }
 
+    _throwIfContextInitAborted(authIndex, isBackgroundTask = false, logPrefix = null, action = "Context init") {
+        if (this.abortedContexts.has(authIndex)) {
+            if (logPrefix) {
+                this.logger.info(`${logPrefix} ${action} aborted (context marked for deletion)`);
+            }
+            throw new ContextAbortedError(authIndex, "marked for deletion");
+        }
+
+        if (isBackgroundTask && this._backgroundPreloadAbort) {
+            if (logPrefix) {
+                this.logger.info(`${logPrefix} ${action} aborted (background preload aborted)`);
+            }
+            throw new ContextAbortedError(authIndex, "background preload aborted");
+        }
+    }
+
     async _clickButtonByTextIfVisible(page, text, logPrefix = "[Browser]", debugName = "button") {
         try {
             // Use DOM operation to find and click button
@@ -336,19 +352,7 @@ class BrowserManager {
 
         try {
             while (Date.now() - startTime < timeout) {
-                // Check if this specific context was marked for abort
-                if (this.abortedContexts.has(authIndex)) {
-                    this.logger.info(`${logPrefix} WebSocket wait aborted (context marked for deletion)`);
-                    throw new ContextAbortedError(authIndex, "marked for deletion");
-                }
-
-                // Check if background preload was aborted (only for background tasks)
-                if (isBackgroundTask && this._backgroundPreloadAbort) {
-                    this.logger.info(`${logPrefix} WebSocket wait aborted (background preload aborted)`);
-                    throw new Error(
-                        `Context initialization aborted for index ${authIndex} (background preload aborted)`
-                    );
-                }
+                this._throwIfContextInitAborted(authIndex, isBackgroundTask, logPrefix, "WebSocket wait");
 
                 // Read state fresh each iteration
                 const state = this._wsInitState.get(authIndex);
@@ -1999,14 +2003,7 @@ class BrowserManager {
 
         try {
             // Check if this context has been marked for abort before starting
-            if (this.abortedContexts.has(authIndex)) {
-                throw new ContextAbortedError(authIndex, "marked for deletion");
-            }
-
-            // Check if background preload was aborted (only for background tasks)
-            if (isBackgroundTask && this._backgroundPreloadAbort) {
-                throw new ContextAbortedError(authIndex, "background preload aborted");
-            }
+            this._throwIfContextInitAborted(authIndex, isBackgroundTask);
 
             // Initialize per-context WebSocket state to ensure clean state for this context
             // Each context gets its own state object, preventing cross-contamination
@@ -2024,9 +2021,7 @@ class BrowserManager {
             const randomHeight = 1080 + Math.floor(Math.random() * 50);
 
             // Check abort status before expensive operations
-            if (this.abortedContexts.has(authIndex) || (isBackgroundTask && this._backgroundPreloadAbort)) {
-                throw new ContextAbortedError(authIndex, "marked for deletion");
-            }
+            this._throwIfContextInitAborted(authIndex, isBackgroundTask);
 
             context = await this.browser.newContext({
                 deviceScaleFactor: 1,
@@ -2036,9 +2031,7 @@ class BrowserManager {
             });
 
             // Check abort status after context creation
-            if (this.abortedContexts.has(authIndex) || (isBackgroundTask && this._backgroundPreloadAbort)) {
-                throw new ContextAbortedError(authIndex, "marked for deletion");
-            }
+            this._throwIfContextInitAborted(authIndex, isBackgroundTask);
 
             // Inject Privacy Script immediately after context creation
             const privacyScript = this._getPrivacyProtectionScript(authIndex);
@@ -2113,22 +2106,16 @@ class BrowserManager {
             });
 
             // Check abort status before navigation (most time-consuming part)
-            if (this.abortedContexts.has(authIndex) || (isBackgroundTask && this._backgroundPreloadAbort)) {
-                throw new ContextAbortedError(authIndex, "marked for deletion");
-            }
+            this._throwIfContextInitAborted(authIndex, isBackgroundTask);
 
             await this._navigateAndWakeUpPage(page, `[Context#${authIndex}]`);
 
             // Check abort status after navigation
-            if (this.abortedContexts.has(authIndex) || (isBackgroundTask && this._backgroundPreloadAbort)) {
-                throw new ContextAbortedError(authIndex, "marked for deletion");
-            }
+            this._throwIfContextInitAborted(authIndex, isBackgroundTask);
 
             await this._checkPageStatusAndErrors(page, `[Context#${authIndex}]`, authIndex);
 
-            if (this.abortedContexts.has(authIndex) || (isBackgroundTask && this._backgroundPreloadAbort)) {
-                throw new ContextAbortedError(authIndex, "marked for deletion");
-            }
+            this._throwIfContextInitAborted(authIndex, isBackgroundTask);
 
             // Wait for WebSocket initialization (no retry)
             // Check if initialization already succeeded (console listener may have detected it)
@@ -2152,9 +2139,7 @@ class BrowserManager {
             }
 
             // Final check before adding to contexts map
-            if (this.abortedContexts.has(authIndex) || (isBackgroundTask && this._backgroundPreloadAbort)) {
-                throw new ContextAbortedError(authIndex, "marked for deletion");
-            }
+            this._throwIfContextInitAborted(authIndex, isBackgroundTask);
 
             // Save to contexts map - with atomic abort check to prevent race condition
             // between the check above and actually adding to the map
@@ -2165,7 +2150,7 @@ class BrowserManager {
                     page,
                 });
             } else {
-                throw new ContextAbortedError(authIndex, "marked for deletion");
+                this._throwIfContextInitAborted(authIndex, isBackgroundTask);
             }
 
             // Update auth file
