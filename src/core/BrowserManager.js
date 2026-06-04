@@ -318,6 +318,9 @@ class BrowserManager {
                 return true;
             }
         } catch (error) {
+            if (this._isCriticalPageError(error)) {
+                throw error;
+            }
             this.logger.warn(`${logPrefix} ⚠️ Error while checking for Launch button: ${error.message}`);
         }
 
