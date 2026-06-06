@@ -2205,7 +2205,7 @@ class FormatConverter {
                 return { result: content };
             }
 
-            return ensureGeminiFunctionResponseObject(content || { result: "" });
+            return ensureGeminiFunctionResponseObject(content ?? { result: "" });
         };
 
         // Convert Claude messages to Google format
