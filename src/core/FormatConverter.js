@@ -2117,15 +2117,46 @@ class FormatConverter {
             }
         }
 
-        // Extract system message (Claude uses a separate 'system' field)
+        const appendSystemContent = content => {
+            let text = "";
+            if (typeof content === "string") {
+                text = content;
+            } else if (Array.isArray(content)) {
+                text = content
+                    .map(block => {
+                        if (typeof block === "string") return block;
+                        if (block && block.type === "text") return block.text || "";
+                        return block?.text || "";
+                    })
+                    .filter(Boolean)
+                    .join("\n");
+            } else if (content && typeof content === "object") {
+                text = content.text || "";
+            }
+
+            if (!text) return;
+
+            if (systemInstruction) {
+                systemInstruction.parts[0].text = `${systemInstruction.parts[0].text}\n${text}`;
+            } else {
+                systemInstruction = {
+                    parts: [{ text }],
+                    role: "system",
+                };
+            }
+        };
+
+        // Extract system messages into Gemini systemInstruction.
         if (claudeBody.system) {
-            const systemContent = Array.isArray(claudeBody.system)
-                ? claudeBody.system.map(block => (typeof block === "string" ? block : block.text || "")).join("\n")
-                : claudeBody.system;
-            systemInstruction = {
-                parts: [{ text: systemContent }],
-                role: "system",
-            };
+            appendSystemContent(claudeBody.system);
+        }
+
+        if (Array.isArray(claudeBody.messages)) {
+            for (const message of claudeBody.messages) {
+                if (message.role === "system") {
+                    appendSystemContent(message.content);
+                }
+            }
         }
 
         // Buffer for accumulating consecutive tool result parts
@@ -2179,6 +2210,8 @@ class FormatConverter {
 
         // Convert Claude messages to Google format
         for (const message of claudeBody.messages) {
+            if (message.role === "system") continue;
+
             const googleParts = [];
 
             // Handle tool_result role (Claude's function response)
@@ -2210,12 +2243,11 @@ class FormatConverter {
                     // Process non-tool_result content in the same message
                     const otherContent = message.content.filter(block => block.type !== "tool_result");
                     if (otherContent.length > 0) {
-                        flushToolParts();
                         for (const block of otherContent) {
                             if (block.type === "text") {
-                                googleParts.push({ text: block.text });
+                                pendingToolParts.push({ text: block.text });
                             } else if (block.type === "image") {
-                                googleParts.push({
+                                pendingToolParts.push({
                                     inlineData: {
                                         data: block.source.data,
                                         mimeType: block.source.media_type,
