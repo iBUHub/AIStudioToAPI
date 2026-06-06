@@ -16,7 +16,9 @@ const ProxyServerSystem = require("./src/core/ProxyServerSystem");
  * Initialize and start the server
  */
 const initializeServer = async () => {
-    const initialAuthIndex = parseInt(process.env.INITIAL_AUTH_INDEX, 10) || null;
+    const parsedInitialAuthIndex = parseInt(process.env.INITIAL_AUTH_INDEX, 10);
+    const initialAuthIndex =
+        Number.isInteger(parsedInitialAuthIndex) && parsedInitialAuthIndex >= 0 ? parsedInitialAuthIndex : null;
 
     try {
         const serverSystem = new ProxyServerSystem();
