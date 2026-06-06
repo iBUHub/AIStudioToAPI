@@ -2141,6 +2141,42 @@ class FormatConverter {
             }
         };
 
+        const ensureGeminiFunctionResponseObject = value => {
+            if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+                return value;
+            }
+            return { result: value };
+        };
+
+        const normalizeClaudeToolResultContent = content => {
+            if (typeof content === "string") {
+                try {
+                    return ensureGeminiFunctionResponseObject(JSON.parse(content));
+                } catch {
+                    return { result: content };
+                }
+            }
+
+            if (Array.isArray(content)) {
+                const textParts = content
+                    .filter(c => c && c.type === "text")
+                    .map(c => c.text || "")
+                    .join("\n");
+
+                if (textParts.length > 0) {
+                    try {
+                        return ensureGeminiFunctionResponseObject(JSON.parse(textParts));
+                    } catch {
+                        return { result: textParts };
+                    }
+                }
+
+                return { result: content };
+            }
+
+            return ensureGeminiFunctionResponseObject(content || { result: "" });
+        };
+
         // Convert Claude messages to Google format
         for (const message of claudeBody.messages) {
             const googleParts = [];
@@ -2150,28 +2186,7 @@ class FormatConverter {
                 const toolResults = message.content.filter(block => block.type === "tool_result");
                 if (toolResults.length > 0) {
                     for (const toolResult of toolResults) {
-                        let responseContent;
-                        if (typeof toolResult.content === "string") {
-                            try {
-                                responseContent = JSON.parse(toolResult.content);
-                            } catch (e) {
-                                /* eslint-disable-line no-unused-vars */
-                                responseContent = { result: toolResult.content };
-                            }
-                        } else if (Array.isArray(toolResult.content)) {
-                            // Handle array content (text blocks, etc.)
-                            const textParts = toolResult.content
-                                .filter(c => c.type === "text")
-                                .map(c => c.text)
-                                .join("\n");
-                            try {
-                                responseContent = JSON.parse(textParts);
-                            } catch {
-                                responseContent = { result: textParts };
-                            }
-                        } else {
-                            responseContent = toolResult.content || { result: "" };
-                        }
+                        const responseContent = normalizeClaudeToolResultContent(toolResult.content);
 
                         // Resolve function name using the map
                         const toolUseId = toolResult.tool_use_id;
