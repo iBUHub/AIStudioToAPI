@@ -562,6 +562,34 @@
                                         stroke-linejoin="round"
                                         style="margin-right: 6px; vertical-align: middle"
                                     >
+                                        <polyline points="16 18 22 12 16 6"></polyline>
+                                        <polyline points="8 6 2 12 8 18"></polyline>
+                                    </svg>
+                                    <span>
+                                        {{ t("forceCodeExecution") }}
+                                        <EnvVarTooltip env-var="FORCE_CODE_EXECUTION" doc-section="other-config" />
+                                    </span>
+                                </span>
+                                <span
+                                    class="value status-text-bold"
+                                    :class="state.forceCodeExecutionEnabled ? 'status-ok' : 'status-error'"
+                                    >{{ state.forceCodeExecutionEnabled ? t("enabled") : t("disabled") }}</span
+                                >
+                            </div>
+                            <div class="status-item">
+                                <span class="label">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="14"
+                                        height="14"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        style="margin-right: 6px; vertical-align: middle"
+                                    >
                                         <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path>
                                         <path d="M21 3v5h-5"></path>
                                     </svg>
@@ -1492,6 +1520,31 @@
                                     v-model="state.forceUrlContextEnabled"
                                     :width="50"
                                     :before-change="handleForceUrlContextBeforeChange"
+                                />
+                            </div>
+                            <div class="switch-container">
+                                <span class="label">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="14"
+                                        height="14"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        style="margin-right: 6px; vertical-align: middle"
+                                    >
+                                        <polyline points="16 18 22 12 16 6"></polyline>
+                                        <polyline points="8 6 2 12 8 18"></polyline>
+                                    </svg>
+                                    {{ t("forceCodeExecution") }}
+                                </span>
+                                <el-switch
+                                    v-model="state.forceCodeExecutionEnabled"
+                                    :width="50"
+                                    :before-change="handleForceCodeExecutionBeforeChange"
                                 />
                             </div>
                             <div class="switch-container">
@@ -3654,6 +3707,7 @@ const state = reactive({
     enableAuthUpdateEnabled: true,
     failureCount: 0,
     floatingActionsExpanded: false,
+    forceCodeExecutionEnabled: false,
     forceThinkingEnabled: false,
     forceUrlContextEnabled: false,
     forceWebSearchEnabled: false,
@@ -4141,6 +4195,9 @@ const handleForceThinkingBeforeChange = () => handleSettingChange("/api/settings
 const handleForceUrlContextBeforeChange = () =>
     handleSettingChange("/api/settings/force-url-context", "forceUrlContext");
 
+const handleForceCodeExecutionBeforeChange = () =>
+    handleSettingChange("/api/settings/force-code-execution", "forceCodeExecution");
+
 const handleForceWebSearchBeforeChange = () => handleSettingChange("/api/settings/force-web-search", "forceWebSearch");
 const handleCheckUpdateBeforeChange = () => handleSettingChange("/api/settings/check-update", "checkUpdate");
 const handleEnableAuthUpdateBeforeChange = () =>
@@ -4382,6 +4439,7 @@ const updateStatus = data => {
     state.streamingModeReal = data.status.streamingMode === "real";
     state.enableAuthUpdateEnabled = isEnabled(data.status.enableAuthUpdate);
     state.forceThinkingEnabled = isEnabled(data.status.forceThinking);
+    state.forceCodeExecutionEnabled = isEnabled(data.status.forceCodeExecution);
     state.forceWebSearchEnabled = isEnabled(data.status.forceWebSearch);
     state.forceUrlContextEnabled = isEnabled(data.status.forceUrlContext);
     state.debugModeEnabled = isEnabled(data.status.debugMode);

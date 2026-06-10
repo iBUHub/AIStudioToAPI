@@ -28,6 +28,7 @@ class ConfigLoader {
             enableUsageStats: true,
             failureThreshold: 3,
             fakeStreamTimeoutMs: 300000,
+            forceCodeExecution: false,
             forceThinking: false,
             forceUrlContext: false,
             forceWebSearch: false,
@@ -97,6 +98,8 @@ class ConfigLoader {
         }
         if (process.env.CHECK_UPDATE) config.checkUpdate = process.env.CHECK_UPDATE.toLowerCase() !== "false";
         if (process.env.FORCE_THINKING) config.forceThinking = process.env.FORCE_THINKING.toLowerCase() === "true";
+        if (process.env.FORCE_CODE_EXECUTION)
+            config.forceCodeExecution = process.env.FORCE_CODE_EXECUTION.toLowerCase() === "true";
         if (process.env.FORCE_WEB_SEARCH) config.forceWebSearch = process.env.FORCE_WEB_SEARCH.toLowerCase() === "true";
         if (process.env.FORCE_URL_CONTEXT)
             config.forceUrlContext = process.env.FORCE_URL_CONTEXT.toLowerCase() === "true";
@@ -198,6 +201,7 @@ class ConfigLoader {
         this.logger.info(`  Stream Timeout: ${config.streamTimeoutMs}ms`);
         this.logger.info(`  Fake/Non-Stream Timeout: ${config.fakeStreamTimeoutMs}ms`);
         this.logger.info(`  Force Thinking: ${config.forceThinking}`);
+        this.logger.info(`  Force Code Execution: ${config.forceCodeExecution}`);
         this.logger.info(`  Force Web Search: ${config.forceWebSearch}`);
         this.logger.info(`  Force URL Context: ${config.forceUrlContext}`);
         this.logger.info(`  Check Update: ${config.checkUpdate}`);

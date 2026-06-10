@@ -1139,7 +1139,7 @@ class RequestHandler {
             apiFormat: "openai",
             isStreaming: req.body.stream === true,
             requestCategory: "generation",
-            streamMode: req.body.stream === true ? this.serverSystem.streamingMode : null,
+            streamMode: req.body.stream === true ? this.config.streamingMode : null,
         });
         this._setResponseApiFormat(res, "openai");
         res.__proxyResponseStreamMode = null;
@@ -1150,7 +1150,7 @@ class RequestHandler {
             }
 
             const isOpenAIStream = req.body.stream === true;
-            const systemStreamMode = this.serverSystem.streamingMode;
+            const systemStreamMode = this.config.streamingMode;
 
             // Handle usage counting
             const usageCount = this.authSwitcher.incrementUsageCount();
@@ -1487,7 +1487,7 @@ class RequestHandler {
             apiFormat: "response_api",
             isStreaming: req.body.stream === true,
             requestCategory: "generation",
-            streamMode: req.body.stream === true ? this.serverSystem.streamingMode : null,
+            streamMode: req.body.stream === true ? this.config.streamingMode : null,
         });
         this._setResponseApiFormat(res, "response_api");
         res.__proxyResponseStreamMode = null;
@@ -1547,7 +1547,7 @@ class RequestHandler {
             const responseDefaults = Object.fromEntries(
                 Object.entries(responseDefaultsRaw).filter(([, v]) => v !== undefined)
             );
-            const systemStreamMode = this.serverSystem.streamingMode;
+            const systemStreamMode = this.config.streamingMode;
 
             // Handle usage counting
             const usageCount = this.authSwitcher.incrementUsageCount();
@@ -1913,7 +1913,7 @@ class RequestHandler {
             apiFormat: "claude",
             isStreaming: req.body.stream === true,
             requestCategory: "generation",
-            streamMode: req.body.stream === true ? this.serverSystem.streamingMode : null,
+            streamMode: req.body.stream === true ? this.config.streamingMode : null,
         });
         this._setResponseApiFormat(res, "claude");
         res.__proxyResponseStreamMode = null;
@@ -1924,7 +1924,7 @@ class RequestHandler {
             }
 
             const isClaudeStream = req.body.stream === true;
-            const systemStreamMode = this.serverSystem.streamingMode;
+            const systemStreamMode = this.config.streamingMode;
 
             // Handle usage counting
             const usageCount = this.authSwitcher.incrementUsageCount();
@@ -3745,9 +3745,8 @@ class RequestHandler {
                     if (req && req.headers && req.headers.host) {
                         newAuthority = req.headers.host;
                     } else {
-                        const host =
-                            this.serverSystem.config.host === "0.0.0.0" ? "127.0.0.1" : this.serverSystem.config.host;
-                        newAuthority = `${host}:${this.serverSystem.config.httpPort}`;
+                        const host = this.config.host === "0.0.0.0" ? "127.0.0.1" : this.config.host;
+                        newAuthority = `${host}:${this.config.httpPort}`;
                     }
 
                     const protocol =
@@ -4154,6 +4153,7 @@ class RequestHandler {
         );
         let modelThinkingLevel = null;
         let modelStreamingMode = null;
+        let modelForceCodeExecution = false;
         let modelForceWebSearch = false;
 
         if (modelPathMatch) {
@@ -4161,25 +4161,32 @@ class RequestHandler {
             const rawModelName = modelPathMatch[2];
             const pathSuffix = modelPathMatch[3];
 
-            const { cleanModelName: searchStrippedModel, forceWebSearch: parsedForceWebSearch } =
-                FormatConverter.parseModelWebSearchSuffix(rawModelName);
+            const {
+                cleanModelName: toolStrippedModel,
+                forceCodeExecution: parsedForceCodeExecution,
+                forceWebSearch: parsedForceWebSearch,
+            } = FormatConverter.parseModelBuiltInToolSuffixes(rawModelName);
             const { cleanModelName: streamStrippedModel, streamingMode: parsedStreamingMode } =
-                FormatConverter.parseModelStreamingModeSuffix(searchStrippedModel);
+                FormatConverter.parseModelStreamingModeSuffix(toolStrippedModel);
             const { cleanModelName, thinkingLevel: parsedThinkingLevel } =
                 FormatConverter.parseModelThinkingLevel(streamStrippedModel);
+            modelForceCodeExecution = parsedForceCodeExecution;
             modelForceWebSearch = parsedForceWebSearch;
             modelStreamingMode = parsedStreamingMode;
             modelThinkingLevel = parsedThinkingLevel;
 
-            if (modelForceWebSearch) {
+            const modelForceToolFlags = [];
+            if (modelForceWebSearch) modelForceToolFlags.push("forceWebSearch=true");
+            if (modelForceCodeExecution) modelForceToolFlags.push("forceCodeExecution=true");
+            if (modelForceToolFlags.length > 0) {
                 this.logger.info(
-                    `[Proxy] Detected webSearch suffix in model path: "${rawModelName}" -> model="${searchStrippedModel}", forceWebSearch=true`
+                    `[Proxy] Detected built-in tool suffixes in model path: "${rawModelName}" -> model="${toolStrippedModel}", ${modelForceToolFlags.join(", ")}`
                 );
             }
 
             if (modelStreamingMode) {
                 this.logger.info(
-                    `[Proxy] Detected streamingMode suffix in model path: "${searchStrippedModel}" -> model="${streamStrippedModel}", streamingMode="${modelStreamingMode}"`
+                    `[Proxy] Detected streamingMode suffix in model path: "${toolStrippedModel}" -> model="${streamStrippedModel}", streamingMode="${modelStreamingMode}"`
                 );
             }
 
@@ -4196,7 +4203,7 @@ class RequestHandler {
         }
 
         // Force thinking for native Google requests (processed first)
-        if (this.serverSystem.forceThinking && req.method === "POST" && bodyObj && bodyObj.contents) {
+        if (this.config.forceThinking && req.method === "POST" && bodyObj && bodyObj.contents) {
             if (!bodyObj.generationConfig) {
                 bodyObj.generationConfig = {};
             }
@@ -4248,9 +4255,13 @@ class RequestHandler {
             this.logger.info(`[Proxy] Rewriting embedContent to batchEmbedContents for model "${modelName}".`);
         }
 
-        // Force web search and URL context for native Google requests
+        // Force built-in tools for native Google requests
         if (
-            (this.serverSystem.forceWebSearch || modelForceWebSearch || this.serverSystem.forceUrlContext) &&
+            (this.config.forceWebSearch ||
+                modelForceWebSearch ||
+                this.config.forceUrlContext ||
+                this.config.forceCodeExecution ||
+                modelForceCodeExecution) &&
             req.method === "POST" &&
             bodyObj &&
             bodyObj.contents
@@ -4262,7 +4273,7 @@ class RequestHandler {
             const toolsToAdd = [];
 
             // Handle Google Search
-            if (this.serverSystem.forceWebSearch || modelForceWebSearch) {
+            if (this.config.forceWebSearch || modelForceWebSearch) {
                 const hasSearch = FormatConverter.hasGeminiGoogleSearchTool(bodyObj.tools);
                 if (!hasSearch) {
                     bodyObj.tools.push({ googleSearch: {} });
@@ -4275,7 +4286,7 @@ class RequestHandler {
             }
 
             // Handle URL Context
-            if (this.serverSystem.forceUrlContext) {
+            if (this.config.forceUrlContext) {
                 const hasUrlContext = FormatConverter.hasGeminiUrlContextTool(bodyObj.tools);
                 if (!hasUrlContext) {
                     bodyObj.tools.push({ urlContext: {} });
@@ -4283,6 +4294,19 @@ class RequestHandler {
                 } else {
                     this.logger.info(
                         `[Proxy] ✅ Client-provided URL context detected, skipping force injection. (Google Native)`
+                    );
+                }
+            }
+
+            // Handle Code Execution
+            if (this.config.forceCodeExecution || modelForceCodeExecution) {
+                const hasCodeExecution = FormatConverter.hasGeminiCodeExecutionTool(bodyObj.tools);
+                if (!hasCodeExecution) {
+                    bodyObj.tools.push({ codeExecution: {} });
+                    toolsToAdd.push("codeExecution");
+                } else {
+                    this.logger.info(
+                        `[Proxy] ✅ Client-provided code execution detected, skipping force injection. (Google Native)`
                     );
                 }
             }
@@ -4316,7 +4340,7 @@ class RequestHandler {
             query_params: req.query || {},
             request_id: requestId,
             response_transform: responseTransform,
-            streaming_mode: modelStreamingMode || this.serverSystem.streamingMode,
+            streaming_mode: modelStreamingMode || this.config.streamingMode,
         };
     }
 

@@ -138,6 +138,7 @@
     "fileUploadFailed": "上传失败：{error}",
     "fileUploadSuccess": "上传成功",
     "followSystem": "跟随系统",
+    "forceCodeExecution": "强制代码执行",
     "forceThinking": "强制思考",
     "forceUrlContext": "强制网址上下文",
     "forceWebSearch": "强制联网",

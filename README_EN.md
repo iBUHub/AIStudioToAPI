@@ -277,6 +277,7 @@ Usage:
 | `SAFETY_SETTINGS_THRESHOLD` | Safety settings level. Official docs: [Safety settings](https://ai.google.dev/gemini-api/docs/safety-settings)                                                                        | `OFF`         |
 | `FORCE_THINKING`            | Force enable thinking mode for all requests.                                                                                                                                          | `false`       |
 | `FORCE_WEB_SEARCH`          | Force enable web search for all requests.                                                                                                                                             | `false`       |
+| `FORCE_CODE_EXECUTION`      | Force enable code execution for all requests.                                                                                                                                         | `false`       |
 | `FORCE_URL_CONTEXT`         | Force enable URL context for all requests.                                                                                                                                            | `false`       |
 | `CAMOUFOX_EXECUTABLE_PATH`  | Path to the Camoufox browser executable (supports both absolute and relative paths). Only required if manually downloaded.                                                            | Auto-detected |
 
@@ -302,7 +303,7 @@ Edit `configs/models.json` to customize available models and their settings.
 >
 > Streaming mode can also be overridden with `-real` or `-fake`. This override has higher priority than the system streaming mode, but it only takes effect for streaming requests. For example: `gemini-3-flash-preview-fake`. When used together with a thinking suffix, the streaming suffix should come after the thinking suffix, for example: `gemini-3-flash-preview-minimal-fake` or `gemini-3-flash-preview(minimal)-real`.
 >
-> Web search can also be forced on by appending `-search` to the end of the model name. For example: `gemini-3-flash-preview-search`. When combined with other suffixes, `-search` must be the final suffix; the full combined order remains `thinking -> streaming -> search`, for example: `gemini-3-flash-preview-minimal-search`, `gemini-3-flash-preview-real-search`, or `gemini-3-flash-preview(minimal)-fake-search`.
+> Web search and code execution can also be forced on with model suffixes: append `-search` for web search and `-code` for code execution. For example: `gemini-3-flash-preview-search` or `gemini-3-flash-preview-code`. When combined with other suffixes, built-in tool suffixes should come last; the full combined order is `thinking -> streaming -> built-in tools`, for example: `gemini-3-flash-preview-minimal-search`, `gemini-3-flash-preview-real-code`, or `gemini-3-flash-preview(minimal)-fake-search-code`.
 
 ## 📄 License
 

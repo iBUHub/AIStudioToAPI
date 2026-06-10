@@ -702,9 +702,9 @@ class StatusRoutes {
         app.put("/api/settings/streaming-mode", isAuthenticated, (req, res) => {
             const newMode = req.body.mode;
             if (newMode === "fake" || newMode === "real") {
-                this.serverSystem.streamingMode = newMode;
+                this.config.streamingMode = newMode;
                 this.logger.info(
-                    `[WebUI] Streaming mode switched by authenticated user to: ${this.serverSystem.streamingMode}`
+                    `[WebUI] Streaming mode switched by authenticated user to: ${this.config.streamingMode}`
                 );
                 res.status(200).json({ message: "settingUpdateSuccess", setting: "streamingMode", value: newMode });
             } else {
@@ -713,22 +713,33 @@ class StatusRoutes {
         });
 
         app.put("/api/settings/force-thinking", isAuthenticated, (req, res) => {
-            this.serverSystem.forceThinking = !this.serverSystem.forceThinking;
-            const statusText = this.serverSystem.forceThinking;
+            this.config.forceThinking = !this.config.forceThinking;
+            const statusText = this.config.forceThinking;
             this.logger.info(`[WebUI] Force thinking toggle switched to: ${statusText}`);
             res.status(200).json({ message: "settingUpdateSuccess", setting: "forceThinking", value: statusText });
         });
 
         app.put("/api/settings/force-web-search", isAuthenticated, (req, res) => {
-            this.serverSystem.forceWebSearch = !this.serverSystem.forceWebSearch;
-            const statusText = this.serverSystem.forceWebSearch;
+            this.config.forceWebSearch = !this.config.forceWebSearch;
+            const statusText = this.config.forceWebSearch;
             this.logger.info(`[WebUI] Force web search toggle switched to: ${statusText}`);
             res.status(200).json({ message: "settingUpdateSuccess", setting: "forceWebSearch", value: statusText });
         });
 
+        app.put("/api/settings/force-code-execution", isAuthenticated, (req, res) => {
+            this.config.forceCodeExecution = !this.config.forceCodeExecution;
+            const statusText = this.config.forceCodeExecution;
+            this.logger.info(`[WebUI] Force code execution toggle switched to: ${statusText}`);
+            res.status(200).json({
+                message: "settingUpdateSuccess",
+                setting: "forceCodeExecution",
+                value: statusText,
+            });
+        });
+
         app.put("/api/settings/force-url-context", isAuthenticated, (req, res) => {
-            this.serverSystem.forceUrlContext = !this.serverSystem.forceUrlContext;
-            const statusText = this.serverSystem.forceUrlContext;
+            this.config.forceUrlContext = !this.config.forceUrlContext;
+            const statusText = this.config.forceUrlContext;
             this.logger.info(`[WebUI] Force URL context toggle switched to: ${statusText}`);
             res.status(200).json({ message: "settingUpdateSuccess", setting: "forceUrlContext", value: statusText });
         });
@@ -1004,9 +1015,10 @@ class StatusRoutes {
                 enableAuthUpdate: config.enableAuthUpdate,
                 expiredIndicesRaw: expiredIndices,
                 failureCount,
-                forceThinking: this.serverSystem.forceThinking,
-                forceUrlContext: this.serverSystem.forceUrlContext,
-                forceWebSearch: this.serverSystem.forceWebSearch,
+                forceCodeExecution: config.forceCodeExecution,
+                forceThinking: config.forceThinking,
+                forceUrlContext: config.forceUrlContext,
+                forceWebSearch: config.forceWebSearch,
                 immediateSwitchStatusCodes:
                     config.immediateSwitchStatusCodes.length > 0
                         ? `[${config.immediateSwitchStatusCodes.join(", ")}]`
@@ -1019,7 +1031,7 @@ class StatusRoutes {
                 maxRetries: config.maxRetries,
                 rotationIndicesRaw: rotationIndices,
                 safetySettingsThreshold: config.safetySettingsThreshold,
-                streamingMode: this.serverSystem.streamingMode,
+                streamingMode: config.streamingMode,
                 usageCount,
             },
         };

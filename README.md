@@ -279,6 +279,7 @@ services:
 | `SAFETY_SETTINGS_THRESHOLD` | 安全设置的等级。官方说明：[Safety settings](https://ai.google.dev/gemini-api/docs/safety-settings?hl=zh-cn) | `OFF`    |
 | `FORCE_THINKING`            | 强制为所有请求启用思考模式。                                                                                | `false`  |
 | `FORCE_WEB_SEARCH`          | 强制为所有请求启用网络搜索。                                                                                | `false`  |
+| `FORCE_CODE_EXECUTION`      | 强制为所有请求启用代码执行。                                                                                | `false`  |
 | `FORCE_URL_CONTEXT`         | 强制为所有请求启用 URL 上下文。                                                                             | `false`  |
 | `CAMOUFOX_EXECUTABLE_PATH`  | Camoufox 浏览器的可执行文件路径（支持绝对或相对路径）。仅在手动下载浏览器时需配置。                         | 自动检测 |
 
@@ -304,7 +305,7 @@ services:
 >
 > 真假流式也支持通过模型名后缀覆盖，支持追加 `-real` 或 `-fake`。该后缀优先级高于系统的真假流式，但只会在流式请求中生效。例如：`gemini-3-flash-preview-fake`。若和思考后缀同时使用，真假流后缀应放在思考后缀之后，例如：`gemini-3-flash-preview-minimal-fake` 或 `gemini-3-flash-preview(minimal)-real`。
 >
-> 联网搜索也支持通过模型名后缀强制开启，支持在模型名最后追加 `-search`。例如：`gemini-3-flash-preview-search`。若和其他后缀同时使用，`-search` 必须放在最末尾；完整组合顺序仍为“思考 -> 流式 -> 搜索”，例如：`gemini-3-flash-preview-minimal-search`、`gemini-3-flash-preview-real-search` 或 `gemini-3-flash-preview(minimal)-fake-search`。
+> 联网搜索和代码执行也支持通过模型名后缀强制开启：联网搜索追加 `-search`，代码执行追加 `-code`。例如：`gemini-3-flash-preview-search` 或 `gemini-3-flash-preview-code`。若和其他后缀同时使用，内置工具后缀放在最后；完整组合顺序为“思考 -> 流式 -> 内置工具”，例如：`gemini-3-flash-preview-minimal-search`、`gemini-3-flash-preview-real-code` 或 `gemini-3-flash-preview(minimal)-fake-search-code`。
 
 ## 📄 许可证
 

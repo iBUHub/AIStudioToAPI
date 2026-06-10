@@ -138,6 +138,7 @@
     "fileUploadFailed": "Upload failed: {error}",
     "fileUploadSuccess": "Upload successful",
     "followSystem": "Follow System",
+    "forceCodeExecution": "Force Code Execution",
     "forceThinking": "Force Thinking",
     "forceUrlContext": "Force URL Context",
     "forceWebSearch": "Force Web Search",
