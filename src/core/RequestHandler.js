@@ -36,8 +36,6 @@ class RequestHandler {
         this.authSwitcher = new AuthSwitcher(logger, config, authSource, browserManager);
         this.formatConverter = new FormatConverter(logger, serverSystem);
 
-        this.maxRetries = this.config.maxRetries;
-        this.retryDelay = this.config.retryDelay;
         this.needsSwitchingAfterRequest = false;
 
         // Timeout settings
@@ -3244,7 +3242,7 @@ class RequestHandler {
         let retryAttempt = 1;
         const immediateSwitchTracker = this._createImmediateSwitchTracker(currentQueueAuthIndex);
 
-        while (retryAttempt <= this.maxRetries) {
+        while (retryAttempt <= this.config.maxRetries) {
             // Record attempt at the start of each retry, before forwarding.
             // This ensures failed attempts (e.g. 429 before any response) are also counted.
             this._getUsageStatsService()?.recordAttempt(
@@ -3298,7 +3296,7 @@ class RequestHandler {
                     const canRetryOnCurrentAccountCandidate =
                         !isClientDisconnect &&
                         isClosedAccountRetryable &&
-                        retryAttempt < this.maxRetries &&
+                        retryAttempt < this.config.maxRetries &&
                         Number.isInteger(currentQueueAuthIndex) &&
                         currentQueueAuthIndex >= 0 &&
                         Number.isInteger(currentAuthIndex) &&
@@ -3345,7 +3343,7 @@ class RequestHandler {
                         if (Number.isInteger(currentQueueAuthIndex) && currentQueueAuthIndex >= 0) {
                             immediateSwitchTracker.attemptedAuthIndices.add(currentQueueAuthIndex);
                         }
-                        await new Promise(resolve => setTimeout(resolve, this.retryDelay));
+                        await new Promise(resolve => setTimeout(resolve, this.config.retryDelay));
                         retryAttempt++;
                         continue;
                     } else {
@@ -3422,13 +3420,13 @@ class RequestHandler {
 
                 // Log the warning for the current attempt
                 this.logger.warn(
-                    `[Request] Attempt #${retryAttempt}/${this.maxRetries} for request #${proxyRequest.request_id} failed: ${errorPayload.message}`
+                    `[Request] Attempt #${retryAttempt}/${this.config.maxRetries} for request #${proxyRequest.request_id} failed: ${errorPayload.message}`
                 );
 
                 // If it's the last attempt, break the loop to return failure
-                if (retryAttempt >= this.maxRetries) {
+                if (retryAttempt >= this.config.maxRetries) {
                     this.logger.error(
-                        `❌ [Request] All ${this.maxRetries} retries failed for request #${proxyRequest.request_id}. Final error: ${errorPayload.message}`
+                        `❌ [Request] All ${this.config.maxRetries} retries failed for request #${proxyRequest.request_id}. Final error: ${errorPayload.message}`
                     );
                     break;
                 }
@@ -3460,7 +3458,7 @@ class RequestHandler {
                 }
 
                 // Wait before the next retry
-                await new Promise(resolve => setTimeout(resolve, this.retryDelay));
+                await new Promise(resolve => setTimeout(resolve, this.config.retryDelay));
                 if (
                     !(await this._waitForSystemAndConnectionIfBusy(null, {
                         connectionMessage: "Service temporarily unavailable: Connection not ready before retry.",

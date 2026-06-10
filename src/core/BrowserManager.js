@@ -119,28 +119,6 @@ class BrowserManager {
             "toolkit.telemetry.enabled": false, // Disable telemetry
             "toolkit.telemetry.unified": false, // Disable unified telemetry
         };
-
-        if (this.config.browserExecutablePath) {
-            this.browserExecutablePath = this.config.browserExecutablePath;
-        } else {
-            const platform = os.platform();
-            if (platform === "linux") {
-                this.browserExecutablePath = path.join(process.cwd(), "camoufox-linux", "camoufox");
-            } else if (platform === "win32") {
-                this.browserExecutablePath = path.join(process.cwd(), "camoufox", "camoufox.exe");
-            } else if (platform === "darwin") {
-                this.browserExecutablePath = path.join(
-                    process.cwd(),
-                    "camoufox-macos",
-                    "Camoufox.app",
-                    "Contents",
-                    "MacOS",
-                    "camoufox"
-                );
-            } else {
-                throw new Error(`Unsupported operating system: ${platform}`);
-            }
-        }
     }
 
     get currentAuthIndex() {
@@ -149,6 +127,25 @@ class BrowserManager {
 
     set currentAuthIndex(value) {
         this._currentAuthIndex = value;
+    }
+
+    _getBrowserExecutablePath() {
+        if (this.config.browserExecutablePath) {
+            return this.config.browserExecutablePath;
+        }
+
+        const platform = os.platform();
+        if (platform === "linux") {
+            return path.join(process.cwd(), "camoufox-linux", "camoufox");
+        }
+        if (platform === "win32") {
+            return path.join(process.cwd(), "camoufox", "camoufox.exe");
+        }
+        if (platform === "darwin") {
+            return path.join(process.cwd(), "camoufox-macos", "Camoufox.app", "Contents", "MacOS", "camoufox");
+        }
+
+        throw new Error(`Unsupported operating system: ${platform}`);
     }
 
     /**
@@ -1296,8 +1293,9 @@ class BrowserManager {
 
     async launchBrowserForVNC(extraArgs = {}) {
         this.logger.info("🚀 [VNC] Launching a new, separate, headful browser instance for VNC session...");
-        if (!fs.existsSync(this.browserExecutablePath)) {
-            throw new Error(`Browser executable not found at path: ${this.browserExecutablePath}`);
+        const browserExecutablePath = this._getBrowserExecutablePath();
+        if (!fs.existsSync(browserExecutablePath)) {
+            throw new Error(`Browser executable not found at path: ${browserExecutablePath}`);
         }
 
         const proxyConfig = parseProxyFromEnv();
@@ -1312,7 +1310,7 @@ class BrowserManager {
                 ...process.env,
                 ...extraArgs.env,
             },
-            executablePath: this.browserExecutablePath,
+            executablePath: browserExecutablePath,
             firefoxUserPrefs: FIREFOX_DOH_DISABLED_PREFS,
             headless: false,
             ...(proxyConfig ? { proxy: proxyConfig } : {}),
@@ -1457,13 +1455,14 @@ class BrowserManager {
 
         const proxyConfig = parseProxyFromEnv();
         this.logger.info("🚀 [Browser] Launching main browser instance...");
-        if (!fs.existsSync(this.browserExecutablePath)) {
+        const browserExecutablePath = this._getBrowserExecutablePath();
+        if (!fs.existsSync(browserExecutablePath)) {
             this._currentAuthIndex = -1;
-            throw new Error(`Browser executable not found at path: ${this.browserExecutablePath}`);
+            throw new Error(`Browser executable not found at path: ${browserExecutablePath}`);
         }
         this.browser = await firefox.launch({
             args: this.launchArgs,
-            executablePath: this.browserExecutablePath,
+            executablePath: browserExecutablePath,
             firefoxUserPrefs: this.firefoxUserPrefs,
             headless: true,
             ...(proxyConfig ? { proxy: proxyConfig } : {}),
