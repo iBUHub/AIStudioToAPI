@@ -15,7 +15,6 @@ class AuthRoutes {
     constructor(serverSystem) {
         this.serverSystem = serverSystem;
         this.logger = serverSystem.logger;
-        this.config = serverSystem.config;
         this.distIndexPath = serverSystem.distIndexPath;
         this.loginAttempts = new Map(); // Track login attempts for rate limiting
 
@@ -177,7 +176,7 @@ class AuthRoutes {
                     authSuccess = true;
                 }
             } else {
-                if (submittedPassword && this.config.apiKeys.includes(submittedPassword)) {
+                if (submittedPassword && this.serverSystem.config.apiKeys.includes(submittedPassword)) {
                     authSuccess = true;
                 }
             }

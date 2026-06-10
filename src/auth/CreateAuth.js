@@ -18,7 +18,6 @@ class CreateAuth {
     constructor(serverSystem) {
         this.serverSystem = serverSystem;
         this.logger = serverSystem.logger;
-        this.config = serverSystem.config;
         this.vncSession = null;
         this.currentLockToken = null; // Token to identify who holds the lock
         this.currentVncAbortController = null; // Controller to abort ongoing setup

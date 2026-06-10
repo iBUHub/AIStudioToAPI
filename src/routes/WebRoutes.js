@@ -20,7 +20,6 @@ class WebRoutes {
     constructor(serverSystem) {
         this.serverSystem = serverSystem;
         this.logger = serverSystem.logger;
-        this.config = serverSystem.config;
         this.distIndexPath = path.join(__dirname, "..", "..", "ui", "dist", "index.html");
 
         // Pass distIndexPath to serverSystem for other modules to access
