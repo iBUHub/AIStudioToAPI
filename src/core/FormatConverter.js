@@ -931,14 +931,15 @@ class FormatConverter {
         const toolChoice = openaiBody.tool_choice || openaiBody.function_call;
         if (toolChoice) {
             const functionCallingConfig = {};
+            const hasFunctionDeclarations = this.hasGeminiFunctionDeclarations(googleRequest);
 
-            if (toolChoice === "auto") {
+            if (toolChoice === "auto" && hasFunctionDeclarations) {
                 functionCallingConfig.mode = "AUTO";
-            } else if (toolChoice === "none") {
+            } else if (toolChoice === "none" && hasFunctionDeclarations) {
                 functionCallingConfig.mode = "NONE";
-            } else if (toolChoice === "required") {
+            } else if (toolChoice === "required" && hasFunctionDeclarations) {
                 functionCallingConfig.mode = "ANY";
-            } else if (typeof toolChoice === "object") {
+            } else if (typeof toolChoice === "object" && hasFunctionDeclarations) {
                 // Handle { type: "function", function: { name: "xxx" } }
                 // or legacy { name: "xxx" }
                 const funcName = toolChoice.function?.name || toolChoice.name;
@@ -2619,13 +2620,22 @@ class FormatConverter {
         // Convert Claude tool_choice to Gemini toolConfig
         if (claudeBody.tool_choice) {
             const functionCallingConfig = {};
-            if (claudeBody.tool_choice.type === "auto") {
+            const hasClaudeFunctionDeclarations = this.hasGeminiFunctionDeclarations(googleRequest);
+            const isBuiltInToolChoice =
+                claudeBody.tool_choice.type === "tool" &&
+                ["code_execution", "web_fetch", "web_search"].includes(claudeBody.tool_choice.name);
+            if (claudeBody.tool_choice.type === "auto" && hasClaudeFunctionDeclarations) {
                 functionCallingConfig.mode = "AUTO";
-            } else if (claudeBody.tool_choice.type === "none") {
+            } else if (claudeBody.tool_choice.type === "none" && hasClaudeFunctionDeclarations) {
                 functionCallingConfig.mode = "NONE";
-            } else if (claudeBody.tool_choice.type === "any") {
+            } else if (claudeBody.tool_choice.type === "any" && hasClaudeFunctionDeclarations) {
                 functionCallingConfig.mode = "ANY";
-            } else if (claudeBody.tool_choice.type === "tool" && claudeBody.tool_choice.name) {
+            } else if (
+                claudeBody.tool_choice.type === "tool" &&
+                claudeBody.tool_choice.name &&
+                !isBuiltInToolChoice &&
+                hasClaudeFunctionDeclarations
+            ) {
                 functionCallingConfig.mode = "ANY";
                 functionCallingConfig.allowedFunctionNames = [claudeBody.tool_choice.name];
             }
@@ -3324,6 +3334,13 @@ class FormatConverter {
         googleRequest.generationConfig = generationConfig;
 
         const toolChoice = responseBody.tool_choice;
+        const responseHostedToolTypes = new Set([
+            "code_interpreter",
+            "computer_use_preview",
+            "file_search",
+            "web_search",
+            "web_search_preview",
+        ]);
 
         // Convert tools
         // `tool_choice: {type:"allowed_tools", tools:[...]}` can provide the effective tool set.
@@ -3415,14 +3432,23 @@ class FormatConverter {
                 }
             };
 
+            const ensureCodeExecutionTool = () => {
+                if (!googleRequest.tools) googleRequest.tools = [];
+                if (!FormatConverter.hasGeminiCodeExecutionTool(googleRequest.tools)) {
+                    googleRequest.tools.push({ codeExecution: {} });
+                }
+            };
+
+            const hasFunctionDeclarations = () => this.hasGeminiFunctionDeclarations(googleRequest);
+
             // tool_choice can be a mode string ("none"|"auto"|"required"),
             // or an object selector (allowed_tools/custom/function/hosted tools).
             if (typeof toolChoice === "string") {
-                if (toolChoice === "auto") {
+                if (toolChoice === "auto" && hasFunctionDeclarations()) {
                     functionCallingConfig.mode = "AUTO";
-                } else if (toolChoice === "none") {
+                } else if (toolChoice === "none" && hasFunctionDeclarations()) {
                     functionCallingConfig.mode = "NONE";
-                } else if (toolChoice === "required") {
+                } else if (toolChoice === "required" && hasFunctionDeclarations()) {
                     functionCallingConfig.mode = "ANY";
                 } else if (toolChoice === "file_search" || toolChoice === "computer_use_preview") {
                     this.logger.debug(
@@ -3436,20 +3462,22 @@ class FormatConverter {
             } else if (typeof toolChoice === "object") {
                 if (toolChoice.type === "allowed_tools") {
                     // Constrain available tools. We already used toolChoice.tools as effectiveTools above.
-                    if (toolChoice.mode === "auto") {
-                        functionCallingConfig.mode = "AUTO";
-                    } else if (toolChoice.mode === "required") {
-                        functionCallingConfig.mode = "ANY";
-                    }
+                    // Gemini functionCallingConfig only applies to function declarations, not hosted/built-in tools.
+                    const allowedToolsHaveHostedTool =
+                        Array.isArray(tools) && tools.some(t => t && responseHostedToolTypes.has(t.type));
+                    if (hasFunctionDeclarations() && !allowedToolsHaveHostedTool) {
+                        if (toolChoice.mode === "auto") {
+                            functionCallingConfig.mode = "AUTO";
+                        } else if (toolChoice.mode === "required") {
+                            functionCallingConfig.mode = "ANY";
+                        }
 
-                    // If the allowed tool set includes functions, restrict to those names.
-                    if (Array.isArray(tools)) {
-                        const names = tools
-                            .filter(
-                                t => t && typeof t === "object" && t.type === "function" && typeof t.name === "string"
-                            )
-                            .map(t => t.name)
-                            .filter(Boolean);
+                        const names = Array.isArray(tools)
+                            ? tools
+                                  .filter(t => t && typeof t === "object" && t.type === "function")
+                                  .map(t => (t.function && typeof t.function === "object" ? t.function.name : t.name))
+                                  .filter(Boolean)
+                            : [];
                         if (names.length > 0) {
                             functionCallingConfig.allowedFunctionNames = names;
                         }
@@ -3469,6 +3497,8 @@ class FormatConverter {
                     }
                 } else if (toolChoice.type === "web_search_preview" || toolChoice.type === "web_search") {
                     ensureGoogleSearchTool();
+                } else if (toolChoice.type === "code_interpreter") {
+                    ensureCodeExecutionTool();
                 } else if (toolChoice.type === "file_search" || toolChoice.type === "computer_use_preview") {
                     this.logger.debug(
                         `[Adapter] tool_choice forces unsupported hosted tool (${toolChoice.type}); ignoring.`
