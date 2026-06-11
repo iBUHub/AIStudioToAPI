@@ -2535,6 +2535,7 @@ class FormatConverter {
         googleRequest.generationConfig = generationConfig;
 
         // Convert Claude tools to Gemini functionDeclarations
+        const builtInToolChoiceNames = new Set();
         if (claudeBody.tools && Array.isArray(claudeBody.tools) && claudeBody.tools.length > 0) {
             let hasCodeExecutionTool = false;
             let hasWebSearchTool = false;
@@ -2549,6 +2550,7 @@ class FormatConverter {
                     tool.name === "web_search"
                 ) {
                     hasWebSearchTool = true;
+                    if (tool.name) builtInToolChoiceNames.add(tool.name);
                     this.logger.info(
                         `[Adapter] Detected web search tool in Claude request (name: ${tool.name}, type: ${tool.type}), mapping to Gemini googleSearch.`
                     );
@@ -2558,6 +2560,7 @@ class FormatConverter {
                 // Handle specialized web fetch tool type, mapped to urlContext (Gemini 2.0 Feature)
                 if (typeof tool.type === "string" && tool.type.startsWith("web_fetch_") && tool.name === "web_fetch") {
                     hasUrlContextTool = true;
+                    if (tool.name) builtInToolChoiceNames.add(tool.name);
                     this.logger.info(
                         `[Adapter] Detected web fetch tool in Claude request (name: ${tool.name}, type: ${tool.type}), mapping to Gemini urlContext.`
                     );
@@ -2571,6 +2574,7 @@ class FormatConverter {
                     tool.name === "code_execution"
                 ) {
                     hasCodeExecutionTool = true;
+                    if (tool.name) builtInToolChoiceNames.add(tool.name);
                     this.logger.info(
                         `[Adapter] Detected code execution tool in Claude request (name: ${tool.name}, type: ${tool.type}), mapping to Gemini codeExecution.`
                     );
@@ -2622,8 +2626,7 @@ class FormatConverter {
             const functionCallingConfig = {};
             const hasClaudeFunctionDeclarations = this.hasGeminiFunctionDeclarations(googleRequest);
             const isBuiltInToolChoice =
-                claudeBody.tool_choice.type === "tool" &&
-                ["code_execution", "web_fetch", "web_search"].includes(claudeBody.tool_choice.name);
+                claudeBody.tool_choice.type === "tool" && builtInToolChoiceNames.has(claudeBody.tool_choice.name);
             if (claudeBody.tool_choice.type === "auto" && hasClaudeFunctionDeclarations) {
                 functionCallingConfig.mode = "AUTO";
             } else if (claudeBody.tool_choice.type === "none" && hasClaudeFunctionDeclarations) {
