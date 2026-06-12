@@ -405,12 +405,13 @@ class RequestProcessor {
 
                     // --- Module 1: Embedding/TTS Model Filtering ---
                     const isImageModel = requestSpec.path.includes("-image") || requestSpec.path.includes("imagen");
+                    const isGemini25ImageModel = isImageModel && requestSpec.path.includes("2.5");
                     const isEmbeddingModel = requestSpec.path.includes("embedding");
                     const isTtsModel = requestSpec.path.includes("tts");
+                    const toolRelatedKeys = ["tools", "toolConfig", "tool_config", "toolChoice", "tool_choice"];
                     if (isEmbeddingModel || isTtsModel) {
                         // Remove tools
-                        const incompatibleKeys = ["toolConfig", "tool_config", "toolChoice", "tools"];
-                        incompatibleKeys.forEach(key => {
+                        toolRelatedKeys.forEach(key => {
                             if (Object.prototype.hasOwnProperty.call(bodyObj, key)) delete bodyObj[key];
                         });
                         // Remove thinkingConfig
@@ -420,10 +421,6 @@ class RequestProcessor {
                         // Remove systemInstruction
                         if (bodyObj.systemInstruction) {
                             delete bodyObj.systemInstruction;
-                        }
-                        // Remove response_mime_type
-                        if (bodyObj.generationConfig?.response_mime_type) {
-                            delete bodyObj.generationConfig.response_mime_type;
                         }
                         if (bodyObj.generationConfig?.responseMimeType) {
                             delete bodyObj.generationConfig.responseMimeType;
@@ -453,6 +450,14 @@ class RequestProcessor {
                     // --- Module 3: Robotics Model Filtering ---
                     const isComputerUseModel = requestSpec.path.includes("computer-use");
                     const isRoboticsModel = requestSpec.path.includes("robotics");
+                    if (isGemini25ImageModel) {
+                        toolRelatedKeys.forEach(key => {
+                            if (Object.prototype.hasOwnProperty.call(bodyObj, key)) delete bodyObj[key];
+                        });
+                        if (bodyObj.generationConfig?.thinkingConfig) {
+                            delete bodyObj.generationConfig.thinkingConfig;
+                        }
+                    }
                     if (isImageModel || isComputerUseModel || isRoboticsModel) {
                         if (bodyObj.generationConfig?.responseMimeType) {
                             delete bodyObj.generationConfig.responseMimeType;
@@ -471,14 +476,11 @@ class RequestProcessor {
                     // If model starts with gemini-2 and response format is JSON, remove tools/toolConfig
                     // This prevents 400 errors as some Gemini 2 variants don't support combined Tool + Structured Output
                     const isGemini2 = requestSpec.path.match(/\/models\/gemini-2/);
-                    const isJsonMode =
-                        bodyObj.generationConfig?.responseMimeType === "application/json" ||
-                        bodyObj.generationConfig?.response_mime_type === "application/json";
+                    const isJsonMode = bodyObj.generationConfig?.responseMimeType === "application/json";
 
                     if (isGemini2 && isJsonMode) {
-                        const incompatibleKeys = ["toolConfig", "tool_config", "toolChoice", "tools"];
                         let keysRemoved = 0;
-                        incompatibleKeys.forEach(key => {
+                        toolRelatedKeys.forEach(key => {
                             if (Object.prototype.hasOwnProperty.call(bodyObj, key)) {
                                 delete bodyObj[key];
                                 keysRemoved++;
