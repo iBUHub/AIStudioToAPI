@@ -1,0 +1,60 @@
+{
+    "name": "AIStudioToAPI Dev Container",
+    "dockerComposeFile": "docker-compose.yml",
+    "service": "app",
+    "workspaceFolder": "/workspace",
+
+    // 配置选项
+    "customizations": {
+        "vscode": {
+            // 扩展
+            "extensions": [
+                "dbaeumer.vscode-eslint",
+                "esbenp.prettier-vscode",
+                "Vue.volar",
+                "bradlc.vscode-tailwindcss",
+                "christian-kohler.path-intellisense",
+                "eamodio.gitlens"
+            ],
+            // 设置
+            "settings": {
+                "editor.formatOnSave": true,
+                "editor.defaultFormatter": "esbenp.prettier-vscode",
+                "editor.codeActionsOnSave": {
+                    "source.fixAll.eslint": "explicit"
+                },
+                "[javascript]": {
+                    "editor.defaultFormatter": "esbenp.prettier-vscode"
+                },
+                "[vue]": {
+                    "editor.defaultFormatter": "Vue.volar"
+                }
+            }
+        }
+    },
+
+    // 转发端口
+    "forwardPorts": [7860, 5173],
+    "portsAttributes": {
+        "7860": {
+            "label": "API Server",
+            "onAutoForward": "notify"
+        },
+        "5173": {
+            "label": "Vite Dev Server",
+            "onAutoForward": "notify"
+        }
+    },
+
+    // 容器创建后运行的命令
+    "postCreateCommand": "npm install && npm run build:ui",
+
+    // 容器启动后运行的命令
+    "postStartCommand": "echo 'Dev container is ready! Run: npm run dev'",
+
+    // 使用的用户
+    "remoteUser": "root"
+
+    // 注意: 已将 git 直接安装在 Dockerfile 中, 避免从 ghcr.io 下载 features 时网络问题
+    // 如需 GitHub CLI, 可手动在容器中安装: apt-get install gh
+}
