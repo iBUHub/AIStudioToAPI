@@ -12,6 +12,7 @@
         "build:ui": "vite build",
         "preview:ui": "vite preview",
         "start": "cross-env NODE_ENV=production node main.js",
+        "quick-start": "cross-env NODE_ENV=production node main.js",
         "prestart": "npm run build:ui",
         "save-auth": "node scripts/auth/saveAuth.js",
         "setup-auth": "node scripts/auth/setupAuth.js",

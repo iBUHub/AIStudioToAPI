@@ -49,6 +49,12 @@ A tool that wraps the Google AI Studio Build App web interface to provide OpenAI
    npm start
    ```
 
+   If the frontend assets have already been built and you only want to restart the service quickly, use:
+
+   ```bash
+   npm run quick-start
+   ```
+
    The API server will be available at `http://localhost:7860`
 
    After the service starts, you can access `http://localhost:7860` in your browser to open the web console homepage, where you can view account status and service status.
@@ -59,6 +65,7 @@ A tool that wraps the Google AI Studio Build App web interface to provide OpenAI
    ```bash
    git pull
    npm install
+   npm start
    ```
 
 > ⚠ **Note:** Running directly does not support adding accounts via VNC online. You need to use the `npm run setup-auth` script to add accounts. VNC login is only available in Docker deployments.

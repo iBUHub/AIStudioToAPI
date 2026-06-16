@@ -49,6 +49,12 @@
    npm start
    ```
 
+   如果已经构建过前端资源，后续只想快速重启服务，可使用：
+
+   ```bash
+   npm run quick-start
+   ```
+
    API 服务将在 `http://localhost:7860` 上运行。
 
    服务启动后，您可以在浏览器中访问 `http://localhost:7860` 打开 Web 控制台主页，在这里可以查看账号状态和服务状态。
@@ -59,6 +65,7 @@
    ```bash
    git pull
    npm install
+   npm start
    ```
 
 > ⚠ **注意：** 直接运行不支持通过 VNC 在线添加账号，需要使用 `npm run setup-auth` 脚本添加账号。当前 VNC 登录功能仅在 Docker 容器中可用。
