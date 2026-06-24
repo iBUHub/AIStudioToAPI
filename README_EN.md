@@ -288,6 +288,8 @@ http://user:pass@ip:port
 
 When `proxylist.txt` contains at least one valid proxy, the service writes `proxy_mapping.json` and assigns the first free proxy to each active account. Existing account assignments are kept as long as the account still exists and the proxy is still present in `proxylist.txt`. If an account or proxy is removed, its stale mapping is removed automatically. If there are more active accounts than proxies, accounts without an assigned proxy will not start until more proxies are added.
 
+VNC-based account binding also uses sticky proxies. A new VNC login session reserves a free proxy before opening the browser, and after the account is saved that proxy is persisted to the detected account in `proxy_mapping.json`. If sticky proxy mode is enabled and no free proxy is available, the VNC session fails instead of falling back to the server's direct IP.
+
 #### 🗒️ Other Configuration
 
 | Variable                    | Description                                                                                                                                                                           | Default       |

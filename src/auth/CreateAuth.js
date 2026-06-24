@@ -335,7 +335,7 @@ class CreateAuth {
             checkAborted();
 
             this.logger.info("[VNC] Launching browser for VNC session...");
-            const { browser, context } = await this._runWithSignal(
+            const { browser, context, stickyProxy } = await this._runWithSignal(
                 this.serverSystem.browserManager.launchBrowserForVNC({
                     env: { DISPLAY: display },
                     isMobile,
@@ -344,6 +344,7 @@ class CreateAuth {
             );
             sessionResources.browser = browser;
             sessionResources.context = context;
+            sessionResources.stickyProxy = stickyProxy;
 
             browser.once("disconnected", () => {
                 this.logger.warn("[VNC] Browser disconnected. Triggering cleanup.");
@@ -429,7 +430,10 @@ class CreateAuth {
                 this.logger.error(`[VNC] Failed to start VNC session: ${error.message}`);
                 await this._cleanupVncSession("startup_error", sessionResources);
                 if (!res.headersSent) {
-                    res.status(500).json({ message: "errorVncStartFailed" });
+                    const isStickyProxyError = String(error.message || "").includes("Sticky proxy enabled");
+                    res.status(500).json(
+                        isStickyProxyError ? { error: error.message } : { message: "errorVncStartFailed" }
+                    );
                 }
             }
         } finally {
@@ -450,7 +454,7 @@ class CreateAuth {
         }
 
         let { accountName } = req.body;
-        const { context, page } = this.vncSession;
+        const { context, page, stickyProxy } = this.vncSession;
         // Capture session ref to prevent global change affecting us
         const sessionRef = this.vncSession;
 
@@ -510,6 +514,14 @@ class CreateAuth {
             this.logger.info(`[VNC] Saved new auth file: ${newAuthFilePath}`);
 
             this.serverSystem.authSource.reloadAuthSources();
+
+            if (stickyProxy?.proxyLine) {
+                this.serverSystem.browserManager.stickyProxyManager.commitReservedProxyToAccount(
+                    stickyProxy.proxyLine,
+                    accountName,
+                    nextAuthIndex
+                );
+            }
 
             res.json({
                 accountName,

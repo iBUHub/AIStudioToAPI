@@ -19,10 +19,89 @@ class StickyProxyManager {
         this.proxyFilePath = options.proxyFilePath || path.join(process.cwd(), "proxylist.txt");
         this.mappingFilePath = options.mappingFilePath || path.join(process.cwd(), "proxy_mapping.json");
         this._lastEnabledLogState = null;
+        this._lastLoadedProxyCount = null;
     }
 
     isEnabled() {
         return this._loadProxies().length > 0;
+    }
+
+    reserveProxyForNewAccount(label = "pending-vnc-account") {
+        const proxies = this._loadProxies();
+        if (proxies.length === 0) {
+            if (fs.existsSync(this.proxyFilePath)) {
+                throw new Error("Sticky proxy enabled but proxylist.txt does not contain any valid proxies.");
+            }
+            this._logEnabledState(false);
+            return null;
+        }
+
+        this._logEnabledState(true);
+
+        const accounts = this._getActiveAccountIdentities();
+        const mapping = this._getProxyMapping(accounts, proxies);
+        const usedProxies = new Set(Object.values(mapping));
+        const proxyLine = proxies.find(candidate => !usedProxies.has(candidate));
+
+        if (!proxyLine) {
+            throw new Error(
+                `Sticky proxy enabled but no free proxy is available for ${label}. ` +
+                    "Add more entries to proxylist.txt or remove unused accounts."
+            );
+        }
+
+        return {
+            display: this._proxyDisplay(proxyLine),
+            proxy: this.parseProxy(proxyLine),
+            proxyLine,
+        };
+    }
+
+    commitReservedProxyToAccount(proxyLine, accountName, authIndex = null) {
+        const proxies = this._loadProxies();
+        if (proxies.length === 0 || !proxyLine) {
+            return false;
+        }
+
+        const trimmedProxyLine = String(proxyLine).trim();
+        if (!proxies.includes(trimmedProxyLine)) {
+            this.logger.warn(
+                `[StickyProxy] VNC proxy ${this._proxyDisplay(
+                    trimmedProxyLine
+                )} is no longer present in proxylist.txt; mapping was not saved.`
+            );
+            return false;
+        }
+
+        const label = typeof accountName === "string" && accountName.trim() ? accountName.trim() : `auth-${authIndex}`;
+        const accountKey = label.toLowerCase();
+        const accounts = this._getActiveAccountIdentities();
+        if (!accounts.some(account => account.key === accountKey)) {
+            accounts.push({ authIndex, key: accountKey, label });
+        }
+
+        const mapping = this._getProxyMapping(accounts, proxies);
+        const conflictingKey = Object.entries(mapping).find(
+            ([key, value]) => key !== accountKey && value === trimmedProxyLine
+        )?.[0];
+
+        if (conflictingKey) {
+            this.logger.warn(
+                `[StickyProxy] VNC proxy ${this._proxyDisplay(
+                    trimmedProxyLine
+                )} is already assigned to "${conflictingKey}"; keeping existing mapping.`
+            );
+            return false;
+        }
+
+        mapping[accountKey] = trimmedProxyLine;
+        this._saveMapping(mapping);
+        this.logger.info(
+            `[StickyProxy] Saved sticky proxy mapping for account "${label}"${
+                authIndex !== null ? ` (#${authIndex})` : ""
+            }: ${this._proxyDisplay(trimmedProxyLine)}`
+        );
+        return true;
     }
 
     getProxyForAuth(authIndex) {
@@ -222,6 +301,7 @@ class StickyProxyManager {
                 proxies.push(proxyLine);
             }
 
+            this._logLoadedProxyCount(proxies.length);
             return proxies;
         } catch (error) {
             this.logger.warn(`[StickyProxy] Failed to read proxylist.txt: ${error.message}`);
@@ -334,6 +414,14 @@ class StickyProxyManager {
         if (enabled) {
             this.logger.info("[StickyProxy] proxylist.txt detected; per-account sticky proxies are enabled.");
         }
+    }
+
+    _logLoadedProxyCount(count) {
+        if (count <= 0 || this._lastLoadedProxyCount === count) {
+            return;
+        }
+        this._lastLoadedProxyCount = count;
+        this.logger.info(`[StickyProxy] Loaded ${count} proxies from proxylist.txt.`);
     }
 }
 
