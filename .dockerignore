@@ -68,3 +68,5 @@ camoufox*
 
 # Auth setup scripts (not needed in Linux container)
 scripts/auth
+proxylist.txt
+proxy_mapping.json

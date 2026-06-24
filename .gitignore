@@ -38,3 +38,5 @@ ui/dist/
 test/
 debug_*.png
 debug_*.html
+proxylist.txt
+proxy_mapping.json

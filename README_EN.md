@@ -275,6 +275,19 @@ Usage:
 | `HTTPS_PROXY`                   | HTTPS proxy address for accessing Google services.                                                                                                                                                                                                                    | None      |
 | `NO_PROXY`                      | Comma-separated list of addresses to bypass the proxy. The project automatically bypasses local addresses (localhost, 127.0.0.1 and 0.0.0.0), so manual local bypass configuration is usually not required.                                                           | None      |
 
+#### Sticky Per-Account Proxy
+
+Create `proxylist.txt` in the project root to enable sticky per-account proxies. Add one HTTP proxy per line. Supported formats:
+
+```text
+user:pass@ip:port
+ip:port:user:pass
+ip:port
+http://user:pass@ip:port
+```
+
+When `proxylist.txt` contains at least one valid proxy, the service writes `proxy_mapping.json` and assigns the first free proxy to each active account. Existing account assignments are kept as long as the account still exists and the proxy is still present in `proxylist.txt`. If an account or proxy is removed, its stale mapping is removed automatically. If there are more active accounts than proxies, accounts without an assigned proxy will not start until more proxies are added.
+
 #### 🗒️ Other Configuration
 
 | Variable                    | Description                                                                                                                                                                           | Default       |

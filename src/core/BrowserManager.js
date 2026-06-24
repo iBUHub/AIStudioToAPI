@@ -11,6 +11,7 @@ const { firefox } = require("playwright");
 const os = require("os");
 
 const { parseProxyFromEnv } = require("../utils/ProxyUtils");
+const StickyProxyManager = require("../utils/StickyProxyManager");
 const {
     AuthExpiredError,
     isAuthExpiredError,
@@ -33,6 +34,7 @@ class BrowserManager {
         this.logger = logger;
         this.config = config;
         this.authSource = authSource;
+        this.stickyProxyManager = new StickyProxyManager(logger, authSource);
         this.browser = null;
 
         // Multi-context architecture: Store all initialized contexts
@@ -2034,7 +2036,13 @@ class BrowserManager {
             // between concurrent init/reconnect operations on different accounts
             this._wsInitState.set(authIndex, { failed: false, success: false });
 
-            const proxyConfig = parseProxyFromEnv();
+            const stickyProxy = this.stickyProxyManager.getProxyForAuth(authIndex);
+            const proxyConfig = stickyProxy ? stickyProxy.proxy : parseProxyFromEnv();
+            if (stickyProxy) {
+                this.logger.info(
+                    `[Context#${authIndex}] Using sticky proxy for account "${stickyProxy.accountKey}": ${stickyProxy.display}`
+                );
+            }
             const storageStateObject = this.authSource.getAuth(authIndex);
             if (!storageStateObject) {
                 throw new Error(`Failed to get or parse auth source for index ${authIndex}.`);
