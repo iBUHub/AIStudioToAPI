@@ -982,9 +982,10 @@ const autoFillRecoveryEmailIfRequired = async (page, recoveryEmail, randomWait) 
                     `🕵️ Attempting to auto-fill account: ${autoFillEmail}`
                 )
             );
-            await page.waitForSelector('input[type="email"]', { timeout: 30000 });
+            const emailInput = page.locator("#identifierId");
+            await emailInput.waitFor({ timeout: 30000 });
             await randomWait();
-            await page.fill('input[type="email"]', autoFillEmail);
+            await emailInput.fill(autoFillEmail);
             await page.keyboard.press("Enter");
 
             if (autoFillPwd) {
