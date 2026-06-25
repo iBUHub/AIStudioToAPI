@@ -290,6 +290,12 @@ When `proxylist.txt` contains at least one valid proxy, the service writes `prox
 
 VNC-based account binding also uses sticky proxies. A new VNC login session reserves a free proxy before opening the browser, and after the account is saved that proxy is persisted to the detected account in `proxy_mapping.json`. If sticky proxy mode is enabled and no free proxy is available, the VNC session fails instead of falling back to the server's direct IP.
 
+Sticky proxies bypass local addresses by default so the browser can still reach the internal WebSocket server:
+
+```bash
+STICKY_PROXY_BYPASS=127.0.0.1,localhost,0.0.0.0
+```
+
 #### 🗒️ Other Configuration
 
 | Variable                    | Description                                                                                                                                                                           | Default       |

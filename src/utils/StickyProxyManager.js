@@ -12,14 +12,18 @@
 const fs = require("fs");
 const path = require("path");
 
+const DEFAULT_STICKY_PROXY_BYPASS = "127.0.0.1,localhost,0.0.0.0";
+
 class StickyProxyManager {
     constructor(logger, authSource, options = {}) {
         this.logger = logger;
         this.authSource = authSource;
         this.proxyFilePath = options.proxyFilePath || path.join(process.cwd(), "proxylist.txt");
         this.mappingFilePath = options.mappingFilePath || path.join(process.cwd(), "proxy_mapping.json");
+        this.proxyBypass = options.proxyBypass || process.env.STICKY_PROXY_BYPASS || DEFAULT_STICKY_PROXY_BYPASS;
         this._lastEnabledLogState = null;
         this._lastLoadedProxyCount = null;
+        this._loggedBypass = false;
     }
 
     isEnabled() {
@@ -151,7 +155,11 @@ class StickyProxyManager {
         }
 
         const mapping = this._getProxyMapping(accounts, proxies);
-        const usedProxies = new Set(Object.entries(mapping).filter(([key]) => key !== account.key).map(([, v]) => v));
+        const usedProxies = new Set(
+            Object.entries(mapping)
+                .filter(([key]) => key !== account.key)
+                .map(([, v]) => v)
+        );
         const freeProxy = proxies.find(proxyLine => !usedProxies.has(proxyLine) && proxyLine !== mapping[account.key]);
 
         if (!freeProxy) {
@@ -218,31 +226,41 @@ class StickyProxyManager {
             const username = auth.slice(0, colonIndex);
             const password = auth.slice(colonIndex + 1);
             const { host, port } = this._splitHostPort(address, raw);
-            return {
+            return this._withBypass({
                 password,
                 server: `http://${host}:${port}`,
                 username,
-            };
+            });
         }
 
         const parts = raw.split(":");
         if (parts.length === 4) {
             const [host, port, username, password] = parts;
-            return {
+            return this._withBypass({
                 password,
                 server: `http://${host}:${port}`,
                 username,
-            };
+            });
         }
 
         if (parts.length === 2) {
             const [host, port] = parts;
-            return {
+            return this._withBypass({
                 server: `http://${host}:${port}`,
-            };
+            });
         }
 
         throw new Error(`Invalid proxy format: ${raw}`);
+    }
+
+    _withBypass(proxy) {
+        if (!this.proxyBypass) {
+            return proxy;
+        }
+        return {
+            ...proxy,
+            bypass: this.proxyBypass,
+        };
     }
 
     _parseProxyUrl(raw) {
@@ -262,7 +280,7 @@ class StickyProxyManager {
             proxy.password = decodeURIComponent(parsed.password);
         }
 
-        return proxy;
+        return this._withBypass(proxy);
     }
 
     _splitHostPort(address, originalLine) {
@@ -413,6 +431,10 @@ class StickyProxyManager {
         this._lastEnabledLogState = enabled;
         if (enabled) {
             this.logger.info("[StickyProxy] proxylist.txt detected; per-account sticky proxies are enabled.");
+            if (!this._loggedBypass) {
+                this._loggedBypass = true;
+                this.logger.info(`[StickyProxy] Proxy bypass list: ${this.proxyBypass || "(none)"}`);
+            }
         }
     }
 
