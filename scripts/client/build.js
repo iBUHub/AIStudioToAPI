@@ -387,6 +387,49 @@ class RequestProcessor {
         return finalUrl;
     }
 
+    _filterGeminiBuiltInTools(bodyObj, blockedToolKeys) {
+        if (!Array.isArray(bodyObj.tools)) {
+            return 0;
+        }
+
+        let removedCount = 0;
+        const filteredTools = [];
+
+        bodyObj.tools.forEach(tool => {
+            if (!tool || typeof tool !== "object" || Array.isArray(tool)) {
+                filteredTools.push(tool);
+                return;
+            }
+
+            const filteredTool = { ...tool };
+            blockedToolKeys.forEach(key => {
+                if (Object.prototype.hasOwnProperty.call(filteredTool, key)) {
+                    delete filteredTool[key];
+                    removedCount++;
+                }
+            });
+
+            if (Object.keys(filteredTool).length > 0) {
+                filteredTools.push(filteredTool);
+            }
+        });
+
+        if (filteredTools.length > 0) {
+            bodyObj.tools = filteredTools;
+        } else {
+            delete bodyObj.tools;
+        }
+
+        if (removedCount > 0 && bodyObj.toolConfig?.includeServerSideToolInvocations) {
+            delete bodyObj.toolConfig.includeServerSideToolInvocations;
+            if (Object.keys(bodyObj.toolConfig).length === 0) {
+                delete bodyObj.toolConfig;
+            }
+        }
+
+        return removedCount;
+    }
+
     _buildRequestConfig(requestSpec, signal) {
         const config = {
             headers: this._sanitizeHeaders(requestSpec.headers, requestSpec),
@@ -404,10 +447,12 @@ class RequestProcessor {
                     const bodyObj = JSON.parse(requestSpec.body);
 
                     // --- Module 1: Embedding/TTS Model Filtering ---
-                    const isImageModel = requestSpec.path.includes("-image") || requestSpec.path.includes("imagen");
-                    const isGemini25ImageModel = isImageModel && requestSpec.path.includes("2.5");
-                    const isEmbeddingModel = requestSpec.path.includes("embedding");
-                    const isTtsModel = requestSpec.path.includes("tts");
+                    const requestPath = String(requestSpec.path || "");
+                    const isImageModel = requestPath.includes("-image") || requestPath.includes("imagen");
+                    const isGemini25ImageModel = isImageModel && requestPath.includes("2.5");
+                    const isGemini31FlashLiteImageModel = requestPath.includes("gemini-3.1-flash-lite-image");
+                    const isEmbeddingModel = requestPath.includes("embedding");
+                    const isTtsModel = requestPath.includes("tts");
                     const toolRelatedKeys = ["tools", "toolConfig", "tool_config", "toolChoice", "tool_choice"];
                     if (isEmbeddingModel || isTtsModel) {
                         // Remove tools
@@ -456,6 +501,25 @@ class RequestProcessor {
                         });
                         if (bodyObj.generationConfig?.thinkingConfig) {
                             delete bodyObj.generationConfig.thinkingConfig;
+                        }
+                    }
+                    if (isGemini31FlashLiteImageModel) {
+                        const removedBuiltInTools = this._filterGeminiBuiltInTools(bodyObj, [
+                            "codeExecution",
+                            "code_execution",
+                            "googleMaps",
+                            "google_maps",
+                            "googleSearch",
+                            "google_search",
+                            "googleSearchRetrieval",
+                            "google_search_retrieval",
+                            "urlContext",
+                            "url_context",
+                        ]);
+                        if (removedBuiltInTools > 0) {
+                            Logger.debug(
+                                `Gemini 3.1 Flash Lite Image detected, filtered unsupported built-in tools: ${removedBuiltInTools}`
+                            );
                         }
                     }
                     if (isImageModel || isComputerUseModel || isRoboticsModel) {

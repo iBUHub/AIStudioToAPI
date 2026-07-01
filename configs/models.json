@@ -64,20 +64,7 @@
             "topK": 64,
             "maxTemperature": 2.0
         },
-        {
-            "name": "models/gemini-3.1-flash-tts-preview",
-            "version": "3.1-flash-tts-preview",
-            "displayName": "Gemini 3.1 Flash TTS Preview",
-            "description": "Gemini 3.1 Flash TTS Preview",
-            "inputTokenLimit": 8192,
-            "outputTokenLimit": 16384,
-            "supportedGenerationMethods": ["generateContent", "countTokens", "batchGenerateContent"],
-            "temperature": 1,
-            "topP": 0.95,
-            "topK": 64,
-            "maxTemperature": 2,
-            "thinking": true
-        },
+
         {
             "name": "models/gemma-4-26b-a4b-it",
             "version": "001",
@@ -303,6 +290,20 @@
             "thinking": true
         },
         {
+            "name": "models/gemini-3.1-flash-lite-image",
+            "version": "3.0",
+            "displayName": "Nano Banana 2 Lite",
+            "description": "Gemini 3.1 Flash Lite Image.",
+            "inputTokenLimit": 65536,
+            "outputTokenLimit": 65536,
+            "supportedGenerationMethods": ["generateContent", "countTokens", "batchGenerateContent"],
+            "temperature": 1,
+            "topP": 0.95,
+            "topK": 64,
+            "maxTemperature": 1,
+            "thinking": true
+        },
+        {
             "name": "models/gemini-3.5-flash",
             "version": "3.5-flash-05-2026",
             "displayName": "Gemini 3.5 Flash",
@@ -315,6 +316,20 @@
                 "createCachedContent",
                 "batchGenerateContent"
             ],
+            "temperature": 1,
+            "topP": 0.95,
+            "topK": 64,
+            "maxTemperature": 2,
+            "thinking": true
+        },
+        {
+            "name": "models/gemini-3.1-flash-tts-preview",
+            "version": "3.1-flash-tts-preview",
+            "displayName": "Gemini 3.1 Flash TTS Preview",
+            "description": "Gemini 3.1 Flash TTS Preview",
+            "inputTokenLimit": 8192,
+            "outputTokenLimit": 16384,
+            "supportedGenerationMethods": ["generateContent", "countTokens", "batchGenerateContent"],
             "temperature": 1,
             "topP": 0.95,
             "topK": 64,
