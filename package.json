@@ -18,6 +18,7 @@
         "setup-auth": "node scripts/auth/setupAuth.js",
         "setup-auth-batch": "node scripts/auth/setupAuthBatch.js",
         "prepare": "husky install",
+        "postinstall": "node scripts/patchPlaywrightCamoufox.js",
         "lint": "eslint . && stylelint \"ui/**/*.{css,less}\"",
         "lint:fix": "eslint . --fix && stylelint \"ui/**/*.{css,less}\" --fix",
         "lint:js": "eslint .",
@@ -37,7 +38,7 @@
         "express-session": "^1.18.0",
         "jszip": "^3.10.1",
         "mime-types": "^3.0.2",
-        "playwright": "1.59.1",
+        "playwright": "1.61.1",
         "ws": "^8.17.0"
     },
     "devDependencies": {

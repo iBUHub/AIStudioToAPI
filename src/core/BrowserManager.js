@@ -12,6 +12,7 @@ const os = require("os");
 
 const { parseProxyFromEnv } = require("../utils/ProxyUtils");
 const StickyProxyManager = require("../utils/StickyProxyManager");
+const { acquireProfileLock, startFocusGuard } = require("./CamoufoxProfile");
 const {
     AuthExpiredError,
     isAuthExpiredError,
@@ -37,6 +38,11 @@ class BrowserManager {
         this.stickyProxyManager = new StickyProxyManager(logger, authSource);
         this.stickyProxyManager.isEnabled();
         this.browser = null;
+        this.camoufoxProfileDir = process.env.AISTUDIO_CAMOUFOX_PROFILE_DIR?.trim() || null;
+        this.camoufoxExecutablePath = process.env.AISTUDIO_CAMOUFOX_EXECUTABLE_PATH?.trim() || null;
+        this.persistentContext = null;
+        this.releaseCamoufoxLock = null;
+        this.stopFocusGuard = null;
 
         // Multi-context architecture: Store all initialized contexts
         // Map: authIndex -> {context, page, healthMonitorInterval}
@@ -81,7 +87,7 @@ class BrowserManager {
         // Target URL for AI Studio app
         this.targetUrl = "https://ai.studio/apps/cab9ab6c-44f9-4e7a-8972-037f8ae177ab";
 
-        // Firefox/Camoufox does not use Chromium-style command line args.
+        // Camoufox uses its own Firefox launch contract.
         // We keep this empty; Camoufox has its own anti-fingerprinting optimizations built-in.
         this.launchArgs = [];
 
@@ -444,6 +450,8 @@ class BrowserManager {
      * @param {number} authIndex - The auth index to update
      */
     async _updateAuthFile(authIndex) {
+        if (this.camoufoxProfileDir) return;
+
         // Retrieve the target account's context from the multi-context Map to avoid cross-contamination of auth data by using this.context
         const contextData = this.contexts.get(authIndex);
         if (!contextData || !contextData.context) return;
@@ -1155,7 +1163,7 @@ class BrowserManager {
                 const currentPage = this.page; // Capture for this iteration
 
                 // 1. Force page wake-up
-                await currentPage.bringToFront().catch(() => {});
+                if (!this.camoufoxProfileDir) await currentPage.bringToFront().catch(() => {});
 
                 // Micro-movements to trigger rendering frames in headless mode
                 const vp = currentPage.viewportSize() || { height: 1080, width: 1920 };
@@ -1482,6 +1490,37 @@ class BrowserManager {
      */
     async _ensureBrowser() {
         if (this.browser) return;
+
+        if (this.camoufoxProfileDir) {
+            if (!this.camoufoxExecutablePath) throw new Error("AISTUDIO_CAMOUFOX_EXECUTABLE_PATH is required.");
+            this.releaseCamoufoxLock = await acquireProfileLock(
+                this.camoufoxProfileDir,
+                process.env.AISTUDIO_CAMOUFOX_PROFILE_ID || "unknown"
+            );
+            this.stopFocusGuard = await startFocusGuard();
+            try {
+                this.persistentContext = await firefox.launchPersistentContext(this.camoufoxProfileDir, {
+                    executablePath: this.camoufoxExecutablePath,
+                    firefoxUserPrefs: this.firefoxUserPrefs,
+                    headless: false,
+                    ignoreDefaultArgs: process.platform === "darwin" ? ["-foreground"] : undefined,
+                    viewport: null,
+                });
+            } catch (error) {
+                this.stopFocusGuard?.();
+                await this.releaseCamoufoxLock?.();
+                this.stopFocusGuard = null;
+                this.releaseCamoufoxLock = null;
+                throw error;
+            }
+            this.browser = this.persistentContext;
+            this.persistentContext.once("close", () => {
+                if (!this.isClosingIntentionally)
+                    this.logger.error("❌ [Browser] Persistent Camoufox context unexpectedly closed!");
+            });
+            this.logger.info("✅ [Browser] Visible persistent Camoufox profile launched.");
+            return;
+        }
 
         const isStickyProxyEnabled = this.stickyProxyManager.isEnabled();
         const proxyConfig = isStickyProxyEnabled ? null : parseProxyFromEnv();
@@ -2067,25 +2106,48 @@ class BrowserManager {
             // Check abort status before expensive operations
             this._throwIfContextInitAborted(authIndex, isBackgroundTask);
 
-            context = await this.browser.newContext({
-                deviceScaleFactor: 1,
-                storageState: storageStateObject,
-                viewport: { height: randomHeight, width: randomWidth },
-                ...(proxyConfig ? { proxy: proxyConfig } : {}),
-            });
+            if (this.camoufoxProfileDir) {
+                if (authIndex !== 0 || !this.persistentContext)
+                    throw new Error("Persistent Camoufox mode supports only auth index 0.");
+                context = this.persistentContext;
+            } else {
+                context = await this.browser.newContext({
+                    deviceScaleFactor: 1,
+                    storageState: storageStateObject,
+                    viewport: { height: randomHeight, width: randomWidth },
+                    ...(proxyConfig ? { proxy: proxyConfig } : {}),
+                });
+            }
 
             // Check abort status after context creation
             this._throwIfContextInitAborted(authIndex, isBackgroundTask);
 
             // Inject Privacy Script immediately after context creation
-            const privacyScript = this._getPrivacyProtectionScript(authIndex);
-            await context.addInitScript(privacyScript);
+            if (this.camoufoxProfileDir) {
+                await context.addInitScript(`
+                    (() => {
+                        if (window !== window.top || window._camoufoxAuthIndexResponder) return;
+                        window._camoufoxAuthIndexResponder = true;
+                        window.addEventListener('message', event => {
+                            if (event.data && event.data.type === 'requestAuthIndex') {
+                                event.source.postMessage({
+                                    type: 'authIndexResponse',
+                                    authIndex: ${authIndex}
+                                }, '*');
+                            }
+                        });
+                    })();
+                `);
+            } else {
+                const privacyScript = this._getPrivacyProtectionScript(authIndex);
+                await context.addInitScript(privacyScript);
+            }
 
             page = await context.newPage();
 
             // Pure JS Wakeup (Focus & Mouse Movement)
             // Skip focus operations for background tasks to avoid window focus conflicts
-            if (!isBackgroundTask) {
+            if (!isBackgroundTask && !this.camoufoxProfileDir) {
                 try {
                     await page.bringToFront();
                     // eslint-disable-next-line no-undef
@@ -2230,7 +2292,7 @@ class BrowserManager {
             }
 
             // Close context if it was created
-            if (context) {
+            if (context && !this.camoufoxProfileDir) {
                 try {
                     await context.close();
                     if (isAbortError) {
@@ -2242,6 +2304,7 @@ class BrowserManager {
                     this.logger.warn(`[Browser] Failed to close context during cleanup: ${closeError.message}`);
                 }
             }
+            if (this.camoufoxProfileDir) await this.closeBrowser();
             throw error;
         } finally {
             // Ensure cleanup of tracking sets even if error is thrown
@@ -2732,9 +2795,15 @@ class BrowserManager {
             }
 
             this.browser = null;
+            this.persistentContext = null;
             this._cleanupAllContexts();
             this.logger.debug("[Browser] Main browser instance and all contexts closed, currentAuthIndex reset to -1.");
         }
+
+        this.stopFocusGuard?.();
+        this.stopFocusGuard = null;
+        await this.releaseCamoufoxLock?.();
+        this.releaseCamoufoxLock = null;
 
         // Reset flag after close is complete
         this.isClosingIntentionally = false;

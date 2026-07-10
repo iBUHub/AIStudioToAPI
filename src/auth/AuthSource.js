@@ -16,7 +16,8 @@ const path = require("path");
 class AuthSource {
     constructor(logger) {
         this.logger = logger;
-        this.authMode = "file";
+        this.camoufoxProfileDir = process.env.AISTUDIO_CAMOUFOX_PROFILE_DIR?.trim() || null;
+        this.authMode = this.camoufoxProfileDir ? "camoufox-profile" : "file";
         this.availableIndices = [];
         // Indices used for rotation/switching (deduplicated by email, keeping the latest index per account)
         this.rotationIndices = [];
@@ -32,7 +33,11 @@ class AuthSource {
         this.duplicateGroups = [];
         this.lastScannedIndices = "[]"; // Cache to track changes
 
-        this.logger.info('[Auth] Using files in "configs/auth/" directory for authentication.');
+        if (this.camoufoxProfileDir) {
+            this.logger.info("[Auth] Using the signed-in persistent Camoufox profile for authentication.");
+        } else {
+            this.logger.info('[Auth] Using files in "configs/auth/" directory for authentication.');
+        }
 
         this.reloadAuthSources(true); // Initial load
 
@@ -84,6 +89,11 @@ class AuthSource {
     }
 
     _discoverAvailableIndices() {
+        if (this.camoufoxProfileDir) {
+            this.initialIndices = [0];
+            return;
+        }
+
         let indices = [];
         const configDir = path.join(process.cwd(), "configs", "auth");
         if (!fs.existsSync(configDir)) {
@@ -106,6 +116,24 @@ class AuthSource {
     }
 
     _preValidateAndFilter() {
+        if (this.camoufoxProfileDir) {
+            this.availableIndices = [0];
+            this.rotationIndices = [0];
+            this.duplicateIndices = [];
+            this.expiredIndices = [];
+            this.accountNameMap.clear();
+            this.accountNameMap.set(
+                0,
+                process.env.AISTUDIO_CAMOUFOX_ACCOUNT_NAME ||
+                    process.env.AISTUDIO_CAMOUFOX_PROFILE_ID ||
+                    "camoufox-profile"
+            );
+            this.canonicalIndexMap.clear();
+            this.canonicalIndexMap.set(0, 0);
+            this.duplicateGroups = [];
+            return;
+        }
+
         if (this.initialIndices.length === 0) {
             this.availableIndices = [];
             this.rotationIndices = [];
@@ -246,6 +274,14 @@ class AuthSource {
     }
 
     getAuth(index) {
+        if (this.camoufoxProfileDir && index === 0) {
+            return {
+                accountName: process.env.AISTUDIO_CAMOUFOX_ACCOUNT_NAME || "camoufox-profile",
+                cookies: [],
+                origins: [],
+            };
+        }
+
         if (!this.availableIndices.includes(index)) {
             this.logger.error(`[Auth] Requested invalid or non-existent authentication index: ${index}`);
             return null;
