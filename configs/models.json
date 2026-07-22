@@ -323,6 +323,44 @@
             "thinking": true
         },
         {
+            "name": "models/gemini-3.5-flash-lite",
+            "version": "3.5-flash-lite-07-2026",
+            "displayName": "Gemini 3.5 Flash Lite",
+            "description": "Gemini 3.5 Flash Lite",
+            "inputTokenLimit": 1048576,
+            "outputTokenLimit": 65536,
+            "supportedGenerationMethods": [
+                "generateContent",
+                "countTokens",
+                "createCachedContent",
+                "batchGenerateContent"
+            ],
+            "temperature": 1,
+            "topP": 0.95,
+            "topK": 64,
+            "maxTemperature": 2,
+            "thinking": true
+        },
+        {
+            "name": "models/gemini-3.6-flash",
+            "version": "3.6-flash-07-2026",
+            "displayName": "Gemini 3.6 Flash",
+            "description": "Gemini 3.6 Flash",
+            "inputTokenLimit": 1048576,
+            "outputTokenLimit": 65536,
+            "supportedGenerationMethods": [
+                "generateContent",
+                "countTokens",
+                "createCachedContent",
+                "batchGenerateContent"
+            ],
+            "temperature": 1,
+            "topP": 0.95,
+            "topK": 64,
+            "maxTemperature": 2,
+            "thinking": true
+        },
+        {
             "name": "models/gemini-3.1-flash-tts-preview",
             "version": "3.1-flash-tts-preview",
             "displayName": "Gemini 3.1 Flash TTS Preview",
