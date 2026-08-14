@@ -413,6 +413,25 @@
             "thinking": true
         },
         {
+            "name": "models/gemini-robotics-er-2-preview",
+            "version": "2-preview",
+            "displayName": "Gemini Robotics-ER 2 Preview",
+            "description": "Gemini Robotics-ER 2 Preview",
+            "inputTokenLimit": 131072,
+            "outputTokenLimit": 65536,
+            "supportedGenerationMethods": [
+                "generateContent",
+                "countTokens",
+                "createCachedContent",
+                "batchGenerateContent"
+            ],
+            "temperature": 1,
+            "topP": 0.95,
+            "topK": 64,
+            "maxTemperature": 2,
+            "thinking": true
+        },
+        {
             "name": "models/gemini-2.5-computer-use-preview-10-2025",
             "version": "Gemini 2.5 Computer Use Preview 10-2025",
             "displayName": "Gemini 2.5 Computer Use Preview 10-2025",
