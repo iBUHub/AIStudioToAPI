@@ -907,14 +907,44 @@ class BrowserManager {
         }
 
         // 1) Try via AI Studio ListModels RPC (primary, works with Build App auth)
-        // This is the same endpoint the AI Studio app itself uses on page load
-        // Domain/key are discovered dynamically from captured request, fallback to hardcoded if no capture yet
+        // Domain/key are auto-detected: 1) captured ListModels request, 2) page CoJqbf config, 3) hardcoded fallback
         const capturedForManual = this._capturedListModels.get(targetAuthIndex) || [...this._capturedListModels.values()][0];
-        const listModelsUrl =
-            capturedForManual?.url ||
+        let listModelsUrl = capturedForManual?.url || null;
+        let apiKey = capturedForManual?.headers?.["x-goog-api-key"] || null;
+
+        // Auto-detect base URL from page config (CoJqbf) if no captured URL yet
+        if (!listModelsUrl) {
+            try {
+                const base = await targetPage.evaluate(() => {
+                    const html = document.documentElement.innerHTML;
+                    const m = html.match(/"CoJqbf"\s*:\s*"([^"]+)"/);
+                    return m ? m[1] : null;
+                });
+                if (base) {
+                    listModelsUrl = `${base}/$rpc/google.internal.alkali.applications.makersuite.v1.MakerSuiteService/ListModels`;
+                    this.logger.debug(`[Models] Auto-detected ListModels base from CoJqbf: ${base}`);
+                }
+            } catch {}
+        }
+        // Auto-detect API key from page if no captured key
+        if (!apiKey) {
+            try {
+                const pageKey = await targetPage.evaluate(() => {
+                    const html = document.documentElement.innerHTML;
+                    // Try CoJqbf's key is not ListModels key, so search for DdP key in captured requests is better
+                    // Fallback: search scripts for AIza
+                    const scripts = Array.from(document.scripts).map(s => s.textContent).join(" ");
+                    const m = scripts.match(/AIzaSyDdP[0-9A-Za-z_-]+/) || html.match(/AIzaSy[0-9A-Za-z_-]+/);
+                    return m ? m[0] : null;
+                });
+                if (pageKey) apiKey = pageKey;
+            } catch {}
+        }
+
+        listModelsUrl =
+            listModelsUrl ||
             "https://alkalimakersuite-pa.clients6.google.com/$rpc/google.internal.alkali.applications.makersuite.v1.MakerSuiteService/ListModels";
-        const capturedApiKey = capturedForManual?.headers?.["x-goog-api-key"];
-        const apiKey = capturedApiKey || "AIzaSyDdP816MREB3SkjZO04QXbjsigfcI0GWOs";
+        apiKey = apiKey || "AIzaSyDdP816MREB3SkjZO04QXbjsigfcI0GWOs";
 
         try {
             // Get SAPISID from browser, compute hash in Node to avoid Xray TypedArray issues
