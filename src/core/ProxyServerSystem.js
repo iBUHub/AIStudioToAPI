@@ -183,6 +183,18 @@ class ProxyServerSystem extends EventEmitter {
             // Activate first ready context (fast switch since already preloaded)
             await this.browserManager.launchOrSwitchContext(firstReady);
             this.logger.info(`[System] ✅ Successfully activated account #${firstReady}!`);
+
+            // Pre-fetch live models from Google AI Studio if dynamic mode enabled
+            if (this.config.dynamicModels) {
+                this.logger.info("[Models] Dynamic mode enabled, fetching live models...");
+                try {
+                    await this.browserManager.fetchLiveModels(true);
+                } catch (e) {
+                    this.logger.warn(
+                        `[Models] Initial live fetch failed (will retry on next /v1/models request): ${e.message}`
+                    );
+                }
+            }
         } catch (error) {
             this.logger.error(`[System] ❌ Startup failed: ${error.message}`);
         } finally {
@@ -460,10 +472,19 @@ class ProxyServerSystem extends EventEmitter {
         // API authentication middleware
         app.use(this._createAuthMiddleware());
 
-        // API routes
-        app.get(["/v1/models"], (req, res) => {
+        // API routes - dynamic live models from Google AI Studio when DYNAMIC_MODELS=true
+        app.get(["/v1/models"], async (req, res) => {
+            let modelList = this.config.modelList;
+            if (this.config.dynamicModels && this.browserManager) {
+                try {
+                    const live = await this.browserManager.fetchLiveModels();
+                    if (live && live.length > 0) modelList = live;
+                } catch (e) {
+                    this.logger.debug(`[Models] /v1/models live fetch failed, using static: ${e.message}`);
+                }
+            }
             // OpenAI format
-            const models = this.config.modelList.map(model => ({
+            const models = modelList.map(model => ({
                 context_window: model.inputTokenLimit,
                 created: Math.floor(Date.now() / 1000),
                 id: model.name.replace("models/", ""),
@@ -478,8 +499,34 @@ class ProxyServerSystem extends EventEmitter {
             });
         });
 
-        app.get(["/v1beta/models"], (req, res) => {
-            res.status(200).json({ models: this.config.modelList });
+        app.get(["/v1beta/models"], async (req, res) => {
+            let modelList = this.config.modelList;
+            if (this.config.dynamicModels && this.browserManager) {
+                try {
+                    const live = await this.browserManager.fetchLiveModels();
+                    if (live && live.length > 0) modelList = live;
+                } catch (e) {
+                    this.logger.debug(`[Models] /v1beta/models live fetch failed, using static: ${e.message}`);
+                }
+            }
+            res.status(200).json({ models: modelList });
+        });
+
+        // Force refresh live models (admin/debug)
+        app.post("/api/models/refresh", async (req, res) => {
+            if (!this.config.dynamicModels) {
+                return res.status(400).json({ error: "Dynamic models disabled (set DYNAMIC_MODELS=true)" });
+            }
+            if (!this.browserManager) {
+                return res.status(503).json({ error: "Browser not ready" });
+            }
+            try {
+                const persist = req.query.persist === "true" || req.body?.persist === true;
+                const models = await this.browserManager.refreshLiveModels(persist);
+                res.json({ count: models.length, models, persisted: persist });
+            } catch (e) {
+                res.status(500).json({ error: e.message });
+            }
         });
 
         app.post("/v1/chat/completions", (req, res) => {

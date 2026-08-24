@@ -126,6 +126,21 @@ class ConfigLoader {
         if (process.env.ENABLE_USAGE_STATS)
             config.enableUsageStats = process.env.ENABLE_USAGE_STATS.toLowerCase() !== "false";
 
+        // Dynamic models from Google AI Studio (via browser)
+        // When enabled, /v1/models and /v1beta/models will fetch live list from AI Studio
+        // Set DYNAMIC_MODELS=false to use only configs/models.json
+        if (process.env.DYNAMIC_MODELS !== undefined) {
+            config.dynamicModels = process.env.DYNAMIC_MODELS.toLowerCase() === "true";
+        } else {
+            config.dynamicModels = true; // default enabled
+        }
+        if (process.env.DYNAMIC_MODELS_TTL) {
+            const parsed = parseInt(process.env.DYNAMIC_MODELS_TTL, 10);
+            config.dynamicModelsTTL = Number.isFinite(parsed) ? Math.max(60000, parsed) : 3600000;
+        } else {
+            config.dynamicModelsTTL = 3600000; // 1 hour default
+        }
+
         let rawCodes = process.env.IMMEDIATE_SWITCH_STATUS_CODES;
         let codesSource = "environment variable";
 
@@ -227,6 +242,9 @@ class ConfigLoader {
         this.logger.info(`  Max Retries per Request: ${config.maxRetries} times`);
         this.logger.info(`  Retry Delay: ${config.retryDelay}ms`);
         this.logger.info(`  API Key Source: ${config.apiKeySource}`);
+        this.logger.info(
+            `  Dynamic Models: ${config.dynamicModels ? `Enabled (TTL ${config.dynamicModelsTTL / 1000}s)` : "Disabled (static models.json)"}`
+        );
 
         const proxySummary = getProxySummaryFromEnv();
         if (!proxySummary.enabled) {

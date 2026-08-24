@@ -78,6 +78,14 @@ class BrowserManager {
         // Map: authIndex -> { success: boolean, failed: boolean }
         this._wsInitState = new Map();
 
+        // Dynamic live models cache (fetched from Google AI Studio via browser)
+        this._liveModelsCache = { models: null, timestamp: 0 };
+        this._liveModelsPromise = null;
+
+        // Captured ListModels data per authIndex (dynamic discovery, no hardcoded domain)
+        // Map: authIndex -> { data: Array, timestamp: number, url: string }
+        this._capturedListModels = new Map();
+
         // Target URL for AI Studio app
         this.targetUrl = "https://ai.studio/apps/cab9ab6c-44f9-4e7a-8972-037f8ae177ab";
 
@@ -809,6 +817,450 @@ class BrowserManager {
             .catch(() => {
                 // Silently ignore errors - this is a best-effort trigger
             });
+    }
+
+    /**
+     * Fetch live model list directly from Google AI Studio (Generative Language API) via browser
+     * Uses the authenticated browser context so session cookies are included automatically.
+     * Results are cached for config.dynamicModelsTTL (default 1h) and merged into config.modelList.
+     * @param {boolean} forceRefresh - bypass cache
+     * @returns {Promise<Array|null>} array of models or null on failure
+     */
+    async fetchLiveModels(forceRefresh = false) {
+        if (this.config && this.config.dynamicModels === false) {
+            return this.config.modelList || null;
+        }
+
+        const ttl = (this.config && this.config.dynamicModelsTTL) || 3600000;
+        const now = Date.now();
+
+        // Return cached if still fresh
+        if (!forceRefresh && this._liveModelsCache.models && now - this._liveModelsCache.timestamp < ttl) {
+            return this._liveModelsCache.models;
+        }
+
+        // Deduplicate concurrent fetches
+        if (this._liveModelsPromise && !forceRefresh) {
+            try {
+                return await this._liveModelsPromise;
+            } catch {
+                // fall through to retry
+            }
+        }
+
+        this._liveModelsPromise = this._fetchLiveModelsInternal();
+        try {
+            const models = await this._liveModelsPromise;
+            if (models && models.length > 0) {
+                this._liveModelsCache = { models, timestamp: Date.now() };
+                // Keep config.modelList in sync so other code sees live data
+                if (this.config) this.config.modelList = models;
+                this.logger.info(`[Models] ✅ Fetched ${models.length} live models from Google AI Studio`);
+            }
+            return models;
+        } catch (error) {
+            // No browser yet is expected before startup completes - downgrade to debug to avoid spam on every /v1/models poll
+            const isNoPage = error.message.includes("No active browser page");
+            const level = isNoPage ? "debug" : "warn";
+            this.logger[level](`[Models] Live fetch failed: ${error.message}, using cached/static list`);
+            return this._liveModelsCache.models || (this.config ? this.config.modelList : null);
+        } finally {
+            this._liveModelsPromise = null;
+        }
+    }
+
+    async _fetchLiveModelsInternal() {
+        // Pick best page: current page first, then any available context
+        let targetPage = null;
+        let targetAuthIndex = -1;
+
+        if (this.page && !this.page.isClosed()) {
+            targetPage = this.page;
+            targetAuthIndex = this._currentAuthIndex;
+        } else {
+            for (const [idx, ctx] of this.contexts.entries()) {
+                if (ctx.page && !ctx.page.isClosed()) {
+                    targetPage = ctx.page;
+                    targetAuthIndex = idx;
+                    break;
+                }
+            }
+        }
+
+        if (!targetPage) {
+            throw new Error("No active browser page available for live model fetch");
+        }
+
+        this.logger.info(`[Models] Fetching live models via browser context #${targetAuthIndex}...`);
+
+        // 0) Check captured ListModels (dynamic, no hardcoded domain) - most robust, uses app's own request
+        const ttl = (this.config && this.config.dynamicModelsTTL) || 3600000;
+        for (const [idx, entry] of this._capturedListModels.entries()) {
+            if (entry.parsed && entry.parsed.length > 0 && Date.now() - entry.timestamp < ttl) {
+                this.logger.info(`[Models] Using captured ListModels for #${idx}: ${entry.parsed.length} models (no hardcoded domain)`);
+                return this._normalizeLiveModels(entry.parsed);
+            }
+        }
+        const directCaptured = this._capturedListModels.get(targetAuthIndex);
+        if (directCaptured && directCaptured.parsed && directCaptured.parsed.length > 0) {
+            return this._normalizeLiveModels(directCaptured.parsed);
+        }
+
+        // 1) Try via AI Studio ListModels RPC (primary, works with Build App auth)
+        // This is the same endpoint the AI Studio app itself uses on page load
+        // Domain/key are discovered dynamically from captured request, fallback to hardcoded if no capture yet
+        const capturedForManual = this._capturedListModels.get(targetAuthIndex) || [...this._capturedListModels.values()][0];
+        const listModelsUrl =
+            capturedForManual?.url ||
+            "https://alkalimakersuite-pa.clients6.google.com/$rpc/google.internal.alkali.applications.makersuite.v1.MakerSuiteService/ListModels";
+        const capturedApiKey = capturedForManual?.headers?.["x-goog-api-key"];
+        const apiKey = capturedApiKey || "AIzaSyDdP816MREB3SkjZO04QXbjsigfcI0GWOs";
+
+        try {
+            // Get SAPISID from browser, compute hash in Node to avoid Xray TypedArray issues
+            const sapisid = await targetPage.evaluate(() => {
+                function getCookie(name) {
+                    const m = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
+                    return m ? m[2] : null;
+                }
+                return getCookie("SAPISID") || getCookie("__Secure-1PAPISID") || getCookie("__Secure-3PAPISID") || "";
+            });
+            if (!sapisid) {
+                throw new Error("SAPISID cookie not found");
+            }
+            const crypto = require("crypto");
+            const origin = "https://aistudio.google.com";
+            const ts = Math.floor(Date.now() / 1000);
+            const hashHex = crypto.createHash("sha1").update(`${ts} ${sapisid} ${origin}`).digest("hex");
+            const sapisidhash = `${ts}_${hashHex}`;
+
+            const result = await targetPage.evaluate(
+                async ({ sapisidhashInner, url, apiKeyInner }) => {
+                    const headers = {
+                        authorization: `SAPISIDHASH ${sapisidhashInner} SAPISID1PHASH ${sapisidhashInner} SAPISID3PHASH ${sapisidhashInner}`,
+                        "content-type": "application/json+protobuf",
+                        "x-goog-api-key": apiKeyInner,
+                        "x-goog-authuser": "0",
+                        "x-user-agent": "grpc-web-javascript/0.1",
+                    };
+                    try {
+                        const resp = await fetch(url, {
+                            body: "[]",
+                            credentials: "include",
+                            headers,
+                            method: "POST",
+                        });
+                        const text = await resp.text();
+                        if (!resp.ok) {
+                            return { error: `HTTP ${resp.status}: ${text.slice(0, 800)}`, ok: false, status: resp.status };
+                        }
+                        let data = null;
+                        try {
+                            data = JSON.parse(text);
+                        } catch {
+                            return { error: `Invalid JSON: ${text.slice(0, 500)}`, ok: false, status: resp.status };
+                        }
+                        // data is [[ [model], [model], ... ]]
+                        if (Array.isArray(data) && Array.isArray(data[0]) && data[0].length > 0) {
+                            return { data, ok: true };
+                        }
+                        return { data, error: "Unexpected structure", ok: false };
+                    } catch (e) {
+                        return { error: e.message, ok: false };
+                    }
+                },
+                { sapisidhashInner: sapisidhash, url: listModelsUrl, apiKeyInner: apiKey }
+            );
+
+            if (result && result.ok && result.data) {
+                const parsed = this._parseListModelsResponse(result.data);
+                if (parsed && parsed.length > 0) {
+                    const normalized = this._normalizeLiveModels(parsed);
+                    this.logger.info(`[Models] Live fetch via ListModels RPC succeeded: ${normalized.length} models`);
+                    return normalized;
+                }
+            }
+            this.logger.warn(`[Models] ListModels RPC did not return models: ${JSON.stringify(result).slice(0, 800)}`);
+        } catch (e) {
+            this.logger.warn(`[Models] ListModels RPC failed: ${e.message}`);
+        }
+
+        // 2) Fallback: Try generativelanguage via page.evaluate (may be blocked)
+        try {
+            const result = await targetPage.evaluate(async () => {
+                const endpoints = [
+                    "https://generativelanguage.googleapis.com/v1beta/models",
+                    "https://generativelanguage.googleapis.com/v1/models",
+                ];
+                for (const url of endpoints) {
+                    try {
+                        const resp = await fetch(url, {
+                            credentials: "include",
+                            headers: { "Content-Type": "application/json" },
+                            method: "GET",
+                        });
+                        const text = await resp.text();
+                        let data = null;
+                        try {
+                            data = JSON.parse(text);
+                        } catch {
+                            return {
+                                error: `Invalid JSON: ${text.slice(0, 500)}`,
+                                ok: false,
+                                status: resp.status,
+                                url,
+                            };
+                        }
+                        if (resp.ok && data && Array.isArray(data.models)) {
+                            return { data, ok: true, url };
+                        }
+                        // Non-ok but got JSON - include error for logging, try next endpoint
+                        if (!resp.ok) {
+                            console.log(`[ProxyClient] ${url} -> ${resp.status}: ${text.slice(0, 500)}`);
+                            continue;
+                        }
+                    } catch (e) {
+                        console.log(`[ProxyClient] fetch ${url} error: ${e.message}`);
+                    }
+                }
+                return { error: "All endpoints failed in page context", ok: false };
+            });
+
+            if (result && result.ok && result.data && Array.isArray(result.data.models)) {
+                const normalized = this._normalizeLiveModels(result.data.models);
+                if (normalized.length > 0) {
+                    this.logger.debug(
+                        `[Models] Live fetch via page.evaluate succeeded (${result.url}): ${normalized.length} models`
+                    );
+                    return normalized;
+                }
+            }
+            this.logger.warn(`[Models] page.evaluate did not return models: ${JSON.stringify(result).slice(0, 800)}`);
+        } catch (e) {
+            this.logger.warn(`[Models] page.evaluate fetch failed: ${e.message}`);
+        }
+
+        // 2) Fallback: try via Playwright APIRequestContext using context cookies (Node-side fetch)
+        try {
+            const ctxData = this.contexts.get(targetAuthIndex) || { context: null };
+            const context = ctxData.context || (targetPage.context ? targetPage.context() : null);
+            if (context) {
+                // Use context.request if available (Playwright's APIRequestContext)
+                // Otherwise fallback to server-side fetch with cookies
+                const cookies = await context.cookies();
+                const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join("; ");
+
+                // Try server-side fetch with cookies
+                const https = require("https");
+                const http = require("http");
+                const { URL } = require("url");
+
+                const fetchWithCookies = url =>
+                    new Promise((resolve, reject) => {
+                        const urlObj = new URL(url);
+                        const lib = urlObj.protocol === "https:" ? https : http;
+                        const req = lib.request(
+                            {
+                                headers: {
+                                    "Content-Type": "application/json",
+                                    Cookie: cookieHeader,
+                                    "User-Agent": "Mozilla/5.0",
+                                },
+                                hostname: urlObj.hostname,
+                                method: "GET",
+                                path: urlObj.pathname + urlObj.search,
+                                port: urlObj.port || (urlObj.protocol === "https:" ? 443 : 80),
+                            },
+                            res => {
+                                let data = "";
+                                res.on("data", chunk => (data += chunk));
+                                res.on("end", () => resolve({ data, headers: res.headers, status: res.statusCode }));
+                            }
+                        );
+                        req.on("error", reject);
+                        req.setTimeout(15000, () => {
+                            req.destroy(new Error("timeout"));
+                        });
+                        req.end();
+                    });
+
+                for (const url of [
+                    "https://generativelanguage.googleapis.com/v1beta/models",
+                    "https://generativelanguage.googleapis.com/v1/models",
+                ]) {
+                    try {
+                        const { status, data } = await fetchWithCookies(url);
+                        if (status >= 200 && status < 300) {
+                            const parsed = JSON.parse(data);
+                            if (parsed && Array.isArray(parsed.models) && parsed.models.length > 0) {
+                                const normalized = this._normalizeLiveModels(parsed.models);
+                                this.logger.info(
+                                    `[Models] Live fetch via server-side cookies succeeded (${url}): ${normalized.length} models`
+                                );
+                                return normalized;
+                            }
+                        } else {
+                            this.logger.debug(`[Models] server-side ${url} -> ${status}: ${data.slice(0, 500)}`);
+                        }
+                    } catch (e) {
+                        this.logger.debug(`[Models] server-side fetch ${url} error: ${e.message}`);
+                    }
+                }
+            }
+        } catch (e) {
+            this.logger.debug(`[Models] server-side fallback failed: ${e.message}`);
+        }
+
+        throw new Error("All live model fetch methods failed");
+    }
+
+    _setupListModelsCapture(page, authIndex) {
+        const handler = async response => {
+            try {
+                const url = response.url();
+                if (!url.includes("ListModels")) return;
+                if (response.status() !== 200) return;
+                const text = await response.text();
+                const data = JSON.parse(text);
+                if (!Array.isArray(data) || !Array.isArray(data[0]) || data[0].length === 0) return;
+                const parsed = this._parseListModelsResponse(data);
+                if (parsed.length === 0) return;
+                // Capture request headers for dynamic fallback (no hardcoded domain/key)
+                let reqHeaders = {};
+                try {
+                    reqHeaders = response.request().headers();
+                } catch {}
+                this._capturedListModels.set(authIndex, {
+                    data,
+                    headers: reqHeaders,
+                    parsed,
+                    timestamp: Date.now(),
+                    url,
+                });
+                this.logger.debug(
+                    `[Models] Captured ListModels for #${authIndex}: ${parsed.length} models from ${url} (key=${(reqHeaders["x-goog-api-key"] || "").slice(0, 8)}...)`
+                );
+                // Auto-update live cache if stale
+                const now = Date.now();
+                if (!this._liveModelsCache.models || now - this._liveModelsCache.timestamp > 60000) {
+                    const normalized = this._normalizeLiveModels(parsed);
+                    this._liveModelsCache = { models: normalized, timestamp: now };
+                    if (this.config) this.config.modelList = normalized;
+                    this.logger.info(`[Models] ✅ Auto-captured ${normalized.length} live models from ${url}`);
+                }
+            } catch (e) {
+                this.logger.debug(`[Models] ListModels capture failed for #${authIndex}: ${e.message}`);
+            }
+        };
+        page.on("response", handler);
+        // Keep reference for potential cleanup
+        if (!page._listModelsHandlers) page._listModelsHandlers = [];
+        page._listModelsHandlers.push(handler);
+    }
+
+    _parseListModelsResponse(data) {
+        // data is from ListModels RPC: [[ ["models/...", null, version, displayName, description, inputLimit, outputLimit, [methods], temp, topP, topK, ...], ... ]]
+        try {
+            if (!Array.isArray(data) || !Array.isArray(data[0])) return [];
+            const rawModels = data[0];
+            const parsed = rawModels
+                .filter(m => Array.isArray(m) && typeof m[0] === "string" && m[0].startsWith("models/"))
+                .map(m => {
+                    const name = m[0];
+                    const version = m[2] || "001";
+                    const displayName = m[3] || name.replace("models/", "");
+                    const description = m[4] || displayName;
+                    const inputTokenLimit = typeof m[5] === "number" ? m[5] : 1048576;
+                    const outputTokenLimit = typeof m[6] === "number" ? m[6] : 65536;
+                    const supportedGenerationMethods = Array.isArray(m[7]) ? m[7] : ["generateContent", "countTokens"];
+                    const temperature = typeof m[8] === "number" ? m[8] : 1.0;
+                    const topP = typeof m[9] === "number" ? m[9] : 0.95;
+                    const topK = typeof m[10] === "number" ? m[10] : 64;
+
+                    // Heuristic for thinking: gemini 2.5+, 3.x, not tts/image/embedding/veo/lyria/antigravity? Hardcoded has thinking for most gemini
+                    const lower = name.toLowerCase();
+                    const isTts = lower.includes("tts");
+                    const isImage =
+                        lower.includes("image") ||
+                        lower.includes("imagen") ||
+                        lower.includes("veo") ||
+                        lower.includes("lyria");
+                    const isEmbedding = lower.includes("embedding");
+                    const thinking = !isTts && !isImage && !isEmbedding;
+
+                    return {
+                        description,
+                        displayName,
+                        inputTokenLimit,
+                        maxTemperature: isImage ? 1.0 : 2.0,
+                        name,
+                        outputTokenLimit,
+                        supportedGenerationMethods,
+                        temperature,
+                        topK,
+                        topP,
+                        version: String(version),
+                        ...(thinking ? { thinking: true } : {}),
+                    };
+                });
+            return parsed;
+        } catch (e) {
+            this.logger.warn(`[Models] Failed to parse ListModels response: ${e.message}`);
+            return [];
+        }
+    }
+
+    _normalizeLiveModels(models) {
+        if (!Array.isArray(models)) return [];
+        // Keep Google's structure but ensure required fields for /v1/models compatibility
+        return models
+            .filter(m => m && typeof m.name === "string")
+            .map(m => {
+                // Ensure name has models/ prefix (Google already does)
+                const normalized = { ...m };
+                if (!normalized.name.startsWith("models/")) normalized.name = `models/${normalized.name}`;
+                // Provide sensible defaults if Google omits optional display fields
+                if (!normalized.displayName) normalized.displayName = normalized.name.replace("models/", "");
+                if (!normalized.description) normalized.description = normalized.displayName;
+                if (!normalized.inputTokenLimit) normalized.inputTokenLimit = 1048576;
+                if (!normalized.outputTokenLimit) normalized.outputTokenLimit = 65536;
+                if (!Array.isArray(normalized.supportedGenerationMethods)) {
+                    normalized.supportedGenerationMethods = ["generateContent", "countTokens"];
+                }
+                // Keep temperature/topP/topK if present, otherwise set defaults
+                if (normalized.temperature === undefined) normalized.temperature = 1.0;
+                if (normalized.topP === undefined) normalized.topP = 0.95;
+                if (normalized.topK === undefined) normalized.topK = 64;
+                if (normalized.maxTemperature === undefined) normalized.maxTemperature = 2.0;
+                return normalized;
+            })
+            .sort((a, b) => a.name.localeCompare(b.name));
+    }
+
+    /**
+     * Force refresh and optionally persist to configs/models.json
+     * @param {boolean} persist - write to disk
+     */
+    async refreshLiveModels(persist = false) {
+        // Bypass cache/fallback - we want true live data or throw
+        const models = await this._fetchLiveModelsInternal();
+        if (models && models.length > 0) {
+            this._liveModelsCache = { models, timestamp: Date.now() };
+            if (this.config) this.config.modelList = models;
+            this.logger.info(`[Models] ✅ Force-refreshed ${models.length} live models`);
+        }
+        if (persist && models) {
+            try {
+                const fs = require("fs");
+                const path = require("path");
+                const modelsPath = path.join(process.cwd(), "configs", "models.json");
+                fs.writeFileSync(modelsPath, JSON.stringify({ models }, null, 4), "utf-8");
+                this.logger.info(`[Models] Persisted ${models.length} models to ${modelsPath}`);
+            } catch (e) {
+                this.logger.warn(`[Models] Failed to persist models.json: ${e.message}`);
+            }
+        }
+        return models;
     }
 
     /**
@@ -2082,6 +2534,9 @@ class BrowserManager {
             await context.addInitScript(privacyScript);
 
             page = await context.newPage();
+
+            // Setup dynamic ListModels capture (no hardcoded domain needed)
+            this._setupListModelsCapture(page, authIndex);
 
             // Pure JS Wakeup (Focus & Mouse Movement)
             // Skip focus operations for background tasks to avoid window focus conflicts
