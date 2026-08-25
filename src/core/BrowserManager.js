@@ -78,6 +78,12 @@ class BrowserManager {
         // Map: authIndex -> { success: boolean, failed: boolean }
         this._wsInitState = new Map();
 
+        // Dynamic model list: captured ListModels RPC responses from browser
+        // Map: authIndex -> { data, headers, parsed, timestamp, url }
+        this._capturedListModels = new Map();
+        this._liveModelsCache = null;
+        this._liveModelsPromise = null;
+
         // Target URL for AI Studio app
         this.targetUrl = "https://ai.studio/apps/cab9ab6c-44f9-4e7a-8972-037f8ae177ab";
 
@@ -817,6 +823,291 @@ class BrowserManager {
      * @param {Page} page - The page object to navigate
      * @param {string} logPrefix - Log prefix for messages (e.g., "[Browser]" or "[Reconnect]")
      */
+    _setupListModelsCapture(page, authIndex) {
+        const captureHandler = async response => {
+            try {
+                const url = response.url();
+                if (!url.includes("/ListModels")) return;
+                const request = response.request();
+                if (request.method() !== "POST") return;
+
+                const status = response.status();
+                if (status !== 200) return;
+
+                const body = await response.text();
+                if (!body || body.length < 100) return;
+
+                const reqHeaders = request.headers();
+                const parsed = this._parseListModelsResponse(body);
+
+                if (parsed && parsed.length > 0) {
+                    this._capturedListModels.set(authIndex, {
+                        data: body,
+                        headers: reqHeaders,
+                        parsed,
+                        timestamp: Date.now(),
+                        url,
+                    });
+                    this.logger.info(
+                        `[Models] Captured ListModels for #${authIndex}: ${parsed.length} models from ${url.slice(0, 80)}`
+                    );
+                }
+            } catch (e) {
+                this.logger.debug(`[Models] ListModels capture error: ${e.message}`);
+            }
+        };
+        page.on("response", captureHandler);
+    }
+
+    _parseListModelsResponse(text) {
+        try {
+            const outer = JSON.parse(text);
+            if (!Array.isArray(outer) || outer.length < 1) return null;
+
+            const inner = outer[0];
+            if (!Array.isArray(inner)) return null;
+
+            const models = [];
+            for (const entry of inner) {
+                if (!Array.isArray(entry) || entry.length < 4) continue;
+                const name = entry[0];
+                const displayName = entry[3];
+                if (typeof name !== "string" || !name.startsWith("models/")) continue;
+
+                const model = {
+                    displayName: displayName || name.replace("models/", ""),
+                    name,
+                };
+
+                if (typeof entry[12] === "number") model.inputTokenLimit = entry[12];
+                if (typeof entry[14] === "number") model.outputTokenLimit = entry[14];
+
+                models.push(model);
+            }
+
+            return models.length > 0 ? models : null;
+        } catch {
+            return null;
+        }
+    }
+
+    _normalizeLiveModels(models) {
+        const defaults = {
+            inputTokenLimit: 1048576,
+            outputTokenLimit: 65536,
+        };
+        return models
+            .map(m => ({
+                ...defaults,
+                ...m,
+                name: m.name.startsWith("models/") ? m.name : `models/${m.name}`,
+            }))
+            .sort((a, b) => a.name.localeCompare(b.name));
+    }
+
+    async fetchLiveModels(forceRefresh = false) {
+        const dynamicModels = process.env.DYNAMIC_MODELS !== "false";
+        if (!dynamicModels) return null;
+
+        const ttl = parseInt(process.env.DYNAMIC_MODELS_TTL, 10) || 3600000;
+
+        if (!forceRefresh && this._liveModelsCache) {
+            const age = Date.now() - this._liveModelsCache.timestamp;
+            if (age < ttl) {
+                this.logger.debug(`[Models] Using cached live models (${age}ms old, ttl=${ttl}ms)`);
+                return this._liveModelsCache.models;
+            }
+        }
+
+        if (!forceRefresh && this._liveModelsPromise) {
+            return this._liveModelsPromise;
+        }
+
+        this._liveModelsPromise = this._fetchLiveModelsInternal();
+        try {
+            const models = await this._liveModelsPromise;
+            if (models && models.length > 0) {
+                this._liveModelsCache = { models, timestamp: Date.now() };
+                this.logger.info(`[Models] Fetched ${models.length} live models`);
+                return models;
+            }
+        } finally {
+            this._liveModelsPromise = null;
+        }
+
+        return null;
+    }
+
+    async _fetchLiveModelsInternal() {
+        const targetAuthIndex = this._currentAuthIndex;
+        let targetPage = this.page;
+
+        if (targetAuthIndex >= 0 && this.contexts.has(targetAuthIndex)) {
+            const ctxData = this.contexts.get(targetAuthIndex);
+            if (ctxData && ctxData.page && !ctxData.page.isClosed()) {
+                targetPage = ctxData.page;
+            }
+        }
+
+        if (!targetPage || targetPage.isClosed()) {
+            this.logger.debug("[Models] No available page for ListModels fetch");
+            return null;
+        }
+
+        // Check captured ListModels responses first (TTL-aware)
+        for (const [idx, entry] of this._capturedListModels.entries()) {
+            if (entry.parsed && entry.parsed.length > 0) {
+                const age = Date.now() - entry.timestamp;
+                const ttl = parseInt(process.env.DYNAMIC_MODELS_TTL, 10) || 3600000;
+                if (age < ttl) {
+                    this.logger.info(`[Models] Using captured ListModels for #${idx}: ${entry.parsed.length} models`);
+                    return this._normalizeLiveModels(entry.parsed);
+                }
+            }
+        }
+
+        const directCaptured = this._capturedListModels.get(targetAuthIndex);
+        if (directCaptured && directCaptured.parsed && directCaptured.parsed.length > 0) {
+            return this._normalizeLiveModels(directCaptured.parsed);
+        }
+
+        // Auto-detect base URL from captured request or page config (CoJqbf)
+        const capturedForManual =
+            this._capturedListModels.get(targetAuthIndex) || [...this._capturedListModels.values()][0];
+        let listModelsUrl = capturedForManual?.url || null;
+        let apiKey = capturedForManual?.headers?.["x-goog-api-key"] || null;
+
+        if (!listModelsUrl) {
+            try {
+                const base = await targetPage.evaluate(() => {
+                    /* eslint-disable no-undef */
+                    const html = document.documentElement.innerHTML;
+                    const m = html.match(/"CoJqbf"\s*:\s*"([^"]+)"/);
+                    return m ? m[1] : null;
+                });
+                if (base) {
+                    listModelsUrl = `${base}/$rpc/google.internal.alkali.applications.makersuite.v1.MakerSuiteService/ListModels`;
+                    this.logger.debug(`[Models] Auto-detected ListModels base from CoJqbf: ${base}`);
+                }
+            } catch (e) {
+                this.logger.debug(`[Models] CoJqbf auto-detect failed: ${e.message}`);
+            }
+        }
+        if (!apiKey) {
+            try {
+                const pageKey = await targetPage.evaluate(() => {
+                    /* eslint-disable no-undef */
+                    const scripts = Array.from(document.scripts)
+                        .map(s => s.textContent)
+                        .join(" ");
+                    const m =
+                        scripts.match(/AIzaSyDdP[0-9A-Za-z_-]+/) ||
+                        document.documentElement.innerHTML.match(/AIzaSy[0-9A-Za-z_-]+/);
+                    return m ? m[0] : null;
+                });
+                if (pageKey) apiKey = pageKey;
+            } catch (e) {
+                this.logger.debug(`[Models] API key auto-detect failed: ${e.message}`);
+            }
+        }
+
+        listModelsUrl =
+            listModelsUrl ||
+            "https://alkalimakersuite-pa.clients6.google.com/$rpc/google.internal.alkali.applications.makersuite.v1.MakerSuiteService/ListModels";
+        apiKey = apiKey || "AIzaSyDdP816MREB3SkjZO04QXbjsigfcI0GWOs";
+
+        try {
+            const sapisid = await targetPage.evaluate(() => {
+                /* eslint-disable no-undef */
+                function getCookie(name) {
+                    const m = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
+                    return m ? m[2] : null;
+                }
+                return getCookie("SAPISID") || getCookie("__Secure-1PAPISID") || getCookie("__Secure-3PAPISID") || "";
+            });
+            if (!sapisid) {
+                throw new Error("SAPISID cookie not found");
+            }
+            const crypto = require("crypto");
+            const origin = "https://aistudio.google.com";
+            const ts = Math.floor(Date.now() / 1000);
+            const hashHex = crypto.createHash("sha1").update(`${ts} ${sapisid} ${origin}`).digest("hex");
+            const sapisidhash = `${ts}_${hashHex}`;
+
+            const result = await targetPage.evaluate(
+                async ({ sapisidhashInner, url, apiKeyInner }) => {
+                    const headers = {
+                        authorization: `SAPISIDHASH ${sapisidhashInner} SAPISID1PHASH ${sapisidhashInner} SAPISID3PHASH ${sapisidhashInner}`,
+                        "content-type": "application/json+protobuf",
+                        "x-goog-api-key": apiKeyInner,
+                        "x-goog-authuser": "0",
+                        "x-user-agent": "grpc-web-javascript/0.1",
+                    };
+                    try {
+                        const resp = await fetch(url, {
+                            body: "[]",
+                            credentials: "include",
+                            headers,
+                            method: "POST",
+                        });
+                        const text = await resp.text();
+                        if (!resp.ok) {
+                            return {
+                                error: `HTTP ${resp.status}: ${text.slice(0, 800)}`,
+                                ok: false,
+                                status: resp.status,
+                            };
+                        }
+                        return { body: text, ok: true, url };
+                    } catch (e) {
+                        return { error: e.message, ok: false };
+                    }
+                },
+                { apiKeyInner: apiKey, sapisidhashInner: sapisidhash, url: listModelsUrl }
+            );
+
+            if (!result.ok) {
+                this.logger.warn(`[Models] ListModels RPC failed: ${result.error}`);
+                return null;
+            }
+
+            const parsed = this._parseListModelsResponse(result.body);
+            if (parsed && parsed.length > 0) {
+                this._capturedListModels.set(targetAuthIndex, {
+                    data: result.body,
+                    headers: { "x-goog-api-key": apiKey },
+                    parsed,
+                    timestamp: Date.now(),
+                    url: result.url,
+                });
+                return this._normalizeLiveModels(parsed);
+            }
+
+            this.logger.warn("[Models] ListModels response contained no valid models");
+            return null;
+        } catch (e) {
+            this.logger.warn(`[Models] ListModels fetch failed: ${e.message}`);
+            return null;
+        }
+    }
+
+    async refreshLiveModels(persist = false) {
+        this._liveModelsCache = null;
+        const models = await this.fetchLiveModels(true);
+        if (persist && models && models.length > 0) {
+            const fs = require("fs");
+            const path = require("path");
+            const modelsPath = path.join(process.cwd(), "configs", "models.json");
+            try {
+                fs.writeFileSync(modelsPath, JSON.stringify({ models }, null, 4), "utf8");
+                this.logger.info(`[Models] Persisted ${models.length} live models to ${modelsPath}`);
+            } catch (e) {
+                this.logger.warn(`[Models] Failed to persist models: ${e.message}`);
+            }
+        }
+        return models;
+    }
+
     async _navigateAndWakeUpPage(page, logPrefix = "[Browser]") {
         this.logger.debug(`${logPrefix} Navigating to target page...`);
 
@@ -2152,6 +2443,7 @@ class BrowserManager {
             // Check abort status before navigation (most time-consuming part)
             this._throwIfContextInitAborted(authIndex, isBackgroundTask);
 
+            this._setupListModelsCapture(page, authIndex);
             await this._navigateAndWakeUpPage(page, `[Context#${authIndex}]`);
 
             // Check abort status after navigation
@@ -2504,6 +2796,7 @@ class BrowserManager {
             this.logger.info("[Reconnect] Reset WebSocket initialization state");
 
             // Navigate to target page and wake it up
+            this._setupListModelsCapture(page, targetAuthIndex);
             await this._navigateAndWakeUpPage(page, "[Reconnect]");
 
             // Check for cookie expiration, region restrictions, and other errors

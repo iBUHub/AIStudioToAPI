@@ -189,6 +189,13 @@ class ConfigLoader {
             config.modelList = [{ name: "models/gemini-2.5-flash-lite" }];
         }
 
+        // Dynamic models configuration
+        config.dynamicModels = process.env.DYNAMIC_MODELS !== "false";
+        config.dynamicModelsTtl = parseInt(process.env.DYNAMIC_MODELS_TTL, 10) || 3600000;
+        if (config.dynamicModels) {
+            this.logger.info(`[System] Dynamic model fetching enabled (TTL: ${config.dynamicModelsTtl}ms)`);
+        }
+
         this._printConfiguration(config);
         return config;
     }
