@@ -229,6 +229,106 @@ class RequestHandler {
         this._markTrackedResponseError(res, message, statusCode);
     }
 
+    // ------------------------------------------------------------------
+    // Incompatible-model guard (Interactions-API-only etc.)
+    // ------------------------------------------------------------------
+    _getIncompatibleModelInfo(modelName) {
+        if (!modelName || !this.browserManager) return null;
+        // Respect strict flag – when disabled, do not block
+        if (process.env.DYNAMIC_MODELS_STRICT === "false") return null;
+        // Check BrowserManager's discovered incompatible list first
+        if (typeof this.browserManager.isModelIncompatible === "function") {
+            const info = this.browserManager.isModelIncompatible(modelName);
+            if (info) return info;
+        }
+        // Optional operator-curated patterns only — no hardcoded model-name heuristics.
+        // Primary protection comes from BrowserManager's parsed incompatible list, which is
+        // populated from the ListModels payload (model-class enum + generation methods).
+        const raw = process.env.DYNAMIC_MODELS_EXTRA_BLOCKLIST || "";
+        const short = String(modelName).replace(/^models\//, "");
+        for (const part of raw.split(",").map(s => s.trim()).filter(Boolean)) {
+            try {
+                if (new RegExp(part, "i").test(short) || new RegExp(part, "i").test(String(modelName))) {
+                    return {
+                        name: `models/${short}`,
+                        reason: `matches DYNAMIC_MODELS_EXTRA_BLOCKLIST pattern`,
+                        basis: "blocklist",
+                    };
+                }
+            } catch {
+                // invalid user regex – ignore
+            }
+        }
+        return null;
+    }
+
+    _isInteractionsApiErrorMessage(message) {
+        if (!message || typeof message !== "string") return false;
+        const m = message.toLowerCase();
+        return m.includes("only supports interactions api") || m.includes("interactions api");
+    }
+
+    _sendIncompatibleModelError(res, modelName) {
+        const info = this._getIncompatibleModelInfo(modelName);
+        const short = String(modelName).replace(/^models\//, "");
+        const reason = info?.reason || "model requires Interactions API";
+        const detail =
+            `Model '${short}' is not compatible with the current proxy path (generateContent). ` +
+            `Google reports: This model only supports Interactions API. ` +
+            `The proxy currently routes all generation through generateContent/streamGenerateContent, ` +
+            `so this model was filtered from /v1/models (DYNAMIC_MODELS_STRICT=true). ` +
+            `Reason: ${reason}. ` +
+            `If you need it, wait for Interactions API routing support or set DYNAMIC_MODELS_STRICT=false to expose it (requests will still fail until routing is implemented).`;
+        this.logger.warn(`[Request] Blocked incompatible model '${short}': ${reason}`);
+        this._markTrackedResponseError(res, detail, 400);
+        // Respect apiFormat for error shape: _sendErrorResponse handles gemini/openai/claude branching.
+        // For native gemini callers we want the Google-style error shape with 400 INVALID_ARGUMENT.
+        const format = this._resolveErrorFormat(res);
+        if (format === "gemini") {
+            // Gemini shape
+            if (!res.headersSent) {
+                res.status(400).json({
+                    error: {
+                        code: 400,
+                        message: detail,
+                        status: "INVALID_ARGUMENT",
+                    },
+                });
+            }
+        } else {
+            this._sendErrorResponse(res, 400, detail, "invalid_request_error");
+        }
+        return true;
+    }
+
+    _maybeHandleInteractionsApiUpstreamError(errorDetails) {
+        const msg = errorDetails?.message || errorDetails?.error || "";
+        if (!this._isInteractionsApiErrorMessage(String(msg))) return false;
+        const modelHint = this._extractModelFromPath(errorDetails?.path || "") || errorDetails?.model || "unknown";
+        this.logger.warn(`[Request] Upstream Interactions-API error for model '${modelHint}': ${msg}`);
+        // Remember it as incompatible so future /v1/models filtering and early-block works even if ListModels missed it
+        if (this.browserManager && this.browserManager._incompatibleModels && modelHint !== "unknown") {
+            const key = String(modelHint).replace(/^models\//, "");
+            if (!this.browserManager._incompatibleModels.has(key)) {
+                this.browserManager._incompatibleModels.set(key, {
+                    displayName: key,
+                    name: `models/${key}`,
+                    rawMethods: ["Interactions API only"],
+                    reason: "learned from upstream 400 INVALID_ARGUMENT",
+                    basis: "learned",
+                });
+                this.browserManager._incompatibleModels.set(`models/${key}`, {
+                    displayName: key,
+                    name: `models/${key}`,
+                    rawMethods: ["Interactions API only"],
+                    reason: "learned from upstream 400 INVALID_ARGUMENT",
+                    basis: "learned",
+                });
+            }
+        }
+        return false; // let normal error handling continue, but we have logged/learned
+    }
+
     // Delegate methods to AuthSwitcher
     async _switchToNextAuth() {
         return this.authSwitcher.switchToNextAuth();
@@ -925,6 +1025,15 @@ class RequestHandler {
             proxyRequest.is_generative = isGenerativeRequest;
             this._initializeProxyRequestAttempt(proxyRequest);
 
+            // Compatibility guard: block Interactions-only models early with friendly error
+            if (isGenerativeRequest) {
+                const modelInPath = this._extractModelFromPath(proxyRequest.path);
+                if (modelInPath && this._getIncompatibleModelInfo(modelInPath)) {
+                    this._sendIncompatibleModelError(res, modelInPath);
+                    return;
+                }
+            }
+
             const wantsStream = req.path.includes(":streamGenerateContent");
             res.__proxyResponseStreamMode = wantsStream ? proxyRequest.streaming_mode : null;
 
@@ -1175,6 +1284,11 @@ class RequestHandler {
                     `❌ [Adapter] OpenAI request translation failed: ${error.message}, request ID: ${requestId}`
                 );
                 return this._sendErrorResponse(res, 400, "Invalid OpenAI request format.", "invalid_request_error");
+            }
+
+            // Compatibility guard: block Interactions-only models early
+            if (model && this._getIncompatibleModelInfo(model)) {
+                return this._sendIncompatibleModelError(res, model);
             }
 
             const effectiveStreamMode = modelStreamingMode || systemStreamMode;
@@ -1579,6 +1693,11 @@ class RequestHandler {
                 );
             }
 
+            // Compatibility guard: block Interactions-only models early
+            if (model && this._getIncompatibleModelInfo(model)) {
+                return this._sendIncompatibleModelError(res, model);
+            }
+
             const effectiveStreamMode = modelStreamingMode || systemStreamMode;
             const useRealStream = isOpenAIStream && effectiveStreamMode === "real";
 
@@ -1949,6 +2068,11 @@ class RequestHandler {
                     `❌ [Adapter] Claude request translation failed: ${error.message}, request ID: ${requestId}`
                 );
                 return this._sendErrorResponse(res, 400, "Invalid Claude request format.", "invalid_request_error");
+            }
+
+            // Compatibility guard: block Interactions-only models early
+            if (model && this._getIncompatibleModelInfo(model)) {
+                return this._sendIncompatibleModelError(res, model);
             }
 
             const effectiveStreamMode = modelStreamingMode || systemStreamMode;
@@ -3766,6 +3890,10 @@ class RequestHandler {
         const format = this._resolveErrorFormat(res);
         // Normalize error message to handle non-Error objects and missing/non-string messages
         const errorMsg = String(error?.message ?? error);
+        // If upstream complained about Interactions API, learn it for future early-blocking
+        if (this._isInteractionsApiErrorMessage(errorMsg)) {
+            this._maybeHandleInteractionsApiUpstreamError({ message: errorMsg });
+        }
         const requestIdSuffix = requestId ? `, request ID: ${requestId}` : "";
 
         // Check if this is a client disconnect - if so, just log and return
@@ -3916,10 +4044,31 @@ class RequestHandler {
 
     _sendErrorResponse(res, status, message, errorType = null) {
         if (!res.headersSent) {
-            const statusCode = Number(status) || 500;
+            // Enrich Interactions-only upstream errors with actionable guidance
+            let enrichedMessage = message;
+            let enrichedStatus = status;
+            let enrichedErrorType = errorType;
+            if (this._isInteractionsApiErrorMessage(String(message))) {
+                const hint =
+                    " This model only supports Interactions API and cannot be routed via generateContent." +
+                    " It is filtered from /v1/models when DYNAMIC_MODELS_STRICT=true (default)." +
+                    " Support for Interactions API routing is not yet implemented; please use a generateContent-compatible model.";
+                if (!String(message).includes("Interactions API")) {
+                    enrichedMessage = `${message}${hint}`;
+                } else if (!String(message).includes("DYNAMIC_MODELS_STRICT")) {
+                    enrichedMessage = `${message} —${hint}`;
+                }
+                // Ensure we surface as 400 INVALID_ARGUMENT for consistency with Google
+                if (Number(status) >= 500) enrichedStatus = 400;
+                enrichedErrorType = errorType || "invalid_request_error";
+                this._maybeHandleInteractionsApiUpstreamError({ message });
+            }
+            const statusCode = Number(enrichedStatus) || 500;
             const resolvedFormat = this._resolveErrorFormat(res);
-            const resolvedErrorType = errorType || this._getDefaultErrorType(resolvedFormat, statusCode);
+            const resolvedErrorType = enrichedErrorType || this._getDefaultErrorType(resolvedFormat, statusCode);
             let errorPayload;
+            // Use enrichedMessage from here on
+            message = enrichedMessage;
 
             if (resolvedFormat === "claude") {
                 errorPayload = {

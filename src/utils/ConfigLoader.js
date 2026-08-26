@@ -192,8 +192,18 @@ class ConfigLoader {
         // Dynamic models configuration
         config.dynamicModels = process.env.DYNAMIC_MODELS !== "false";
         config.dynamicModelsTtl = parseInt(process.env.DYNAMIC_MODELS_TTL, 10) || 3600000;
+        // When true (default), filter out models that only support Interactions API (e.g. deep-research-preview)
+        // which would otherwise return 400 INVALID_ARGUMENT via generateContent.
+        config.dynamicModelsStrict = process.env.DYNAMIC_MODELS_STRICT !== "false";
         if (config.dynamicModels) {
-            this.logger.info(`[System] Dynamic model fetching enabled (TTL: ${config.dynamicModelsTtl}ms)`);
+            this.logger.info(
+                `[System] Dynamic model fetching enabled (TTL: ${config.dynamicModelsTtl}ms, strict=${config.dynamicModelsStrict})`
+            );
+            if (!config.dynamicModelsStrict) {
+                this.logger.warn(
+                    "[System] DYNAMIC_MODELS_STRICT=false: incompatible models will be exposed and will fail at request time"
+                );
+            }
         }
 
         this._printConfiguration(config);

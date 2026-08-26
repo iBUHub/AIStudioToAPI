@@ -482,6 +482,20 @@ class ProxyServerSystem extends EventEmitter {
                 owned_by: "google",
             }));
 
+            // Include diagnostic header about filtered incompatible models (e.g. Interactions-only)
+            let incompatibleCount = 0;
+            if (this.browserManager._incompatibleModels) {
+                // Keys are stored both as "id" and "models/id"; count distinct base ids
+                const baseIds = new Set();
+                for (const k of this.browserManager._incompatibleModels.keys()) {
+                    baseIds.add(String(k).replace(/^models\//, ""));
+                }
+                incompatibleCount = baseIds.size;
+            }
+            if (incompatibleCount > 0) {
+                res.setHeader("X-Models-Filtered", String(incompatibleCount));
+            }
+
             res.status(200).json({
                 data: models,
                 object: "list",
@@ -507,9 +521,20 @@ class ProxyServerSystem extends EventEmitter {
             try {
                 const persist = req.query.persist === "true";
                 const models = await this.browserManager.refreshLiveModels(persist);
+                let incompatibleCount = 0;
+                if (this.browserManager._incompatibleModels) {
+                    const baseIds = new Set();
+                    for (const k of this.browserManager._incompatibleModels.keys()) {
+                        baseIds.add(String(k).replace(/^models\//, ""));
+                    }
+                    incompatibleCount = baseIds.size;
+                }
                 res.status(200).json({
                     count: models ? models.length : 0,
-                    message: models ? `Refreshed ${models.length} models` : "Failed to refresh models",
+                    filtered_incompatible: incompatibleCount,
+                    message: models
+                        ? `Refreshed ${models.length} models${incompatibleCount ? ` (${incompatibleCount} incompatible filtered)` : ""}`
+                        : "Failed to refresh models",
                 });
             } catch (e) {
                 res.status(500).json({ error: e.message });
