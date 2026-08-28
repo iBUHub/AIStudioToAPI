@@ -246,13 +246,16 @@ class RequestHandler {
         // populated from the ListModels payload (model-class enum + generation methods).
         const raw = process.env.DYNAMIC_MODELS_EXTRA_BLOCKLIST || "";
         const short = String(modelName).replace(/^models\//, "");
-        for (const part of raw.split(",").map(s => s.trim()).filter(Boolean)) {
+        for (const part of raw
+            .split(",")
+            .map(s => s.trim())
+            .filter(Boolean)) {
             try {
                 if (new RegExp(part, "i").test(short) || new RegExp(part, "i").test(String(modelName))) {
                     return {
+                        basis: "blocklist",
                         name: `models/${short}`,
                         reason: `matches DYNAMIC_MODELS_EXTRA_BLOCKLIST pattern`,
-                        basis: "blocklist",
                     };
                 }
             } catch {
@@ -311,18 +314,18 @@ class RequestHandler {
             const key = String(modelHint).replace(/^models\//, "");
             if (!this.browserManager._incompatibleModels.has(key)) {
                 this.browserManager._incompatibleModels.set(key, {
+                    basis: "learned",
                     displayName: key,
                     name: `models/${key}`,
                     rawMethods: ["Interactions API only"],
                     reason: "learned from upstream 400 INVALID_ARGUMENT",
-                    basis: "learned",
                 });
                 this.browserManager._incompatibleModels.set(`models/${key}`, {
+                    basis: "learned",
                     displayName: key,
                     name: `models/${key}`,
                     rawMethods: ["Interactions API only"],
                     reason: "learned from upstream 400 INVALID_ARGUMENT",
-                    basis: "learned",
                 });
             }
         }

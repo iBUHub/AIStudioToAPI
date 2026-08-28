@@ -920,14 +920,14 @@ class BrowserManager {
 
     // Schema anchors into a ListModels entry (see layer documentation above).
     static ENTRY_FIELD = {
-        NAME: 0,
-        VERSION: 2,
-        DISPLAY_NAME: 3,
         DESCRIPTION: 4,
+        DISPLAY_NAME: 3,
         INPUT_TOKEN_LIMIT: 5,
+        MODEL_CLASS: 74,
+        NAME: 0,
         OUTPUT_TOKEN_LIMIT: 6,
         SUPPORTED_METHODS: 7,
-        MODEL_CLASS: 74,
+        VERSION: 2,
     };
 
     // Model-class enum value observed ONLY on agent entries across live captures.
@@ -986,8 +986,8 @@ class BrowserManager {
         const F = BrowserManager.ENTRY_FIELD;
         const anchored = this._schemaAnchorsValid(entry);
         const fields = {
-            name: typeof entry[F.NAME] === "string" ? entry[F.NAME] : null,
             methods: anchored ? [...entry[F.SUPPORTED_METHODS]] : this._extractSupportedMethods(entry),
+            name: typeof entry[F.NAME] === "string" ? entry[F.NAME] : null,
         };
         if (anchored) {
             if (typeof entry[F.VERSION] === "string") fields.version = entry[F.VERSION];
@@ -1052,10 +1052,7 @@ class BrowserManager {
     // Pass 2 helper: accept a bare string only on an EXACT vocabulary hit.
     _maybeAddMethodString(str, found) {
         const lower = String(str).toLowerCase();
-        if (
-            BrowserManager.COMPATIBLE_METHODS_LOWER.has(lower) ||
-            BrowserManager.INTERACTION_METHOD_TOKENS.has(lower)
-        ) {
+        if (BrowserManager.COMPATIBLE_METHODS_LOWER.has(lower) || BrowserManager.INTERACTION_METHOD_TOKENS.has(lower)) {
             found.add(String(str));
         }
     }
@@ -1093,17 +1090,17 @@ class BrowserManager {
             const lower = [...new Set(methods.map(m => String(m).toLowerCase()))];
             const hasCompatible = lower.some(m => BrowserManager.COMPATIBLE_METHODS_LOWER.has(m));
             if (hasCompatible) {
-                return { compatible: true, basis: "methods" };
+                return { basis: "methods", compatible: true };
             }
             // Methods present but none routable by this proxy (e.g. bidiGenerateContent-only
             // live models, predictLongRunning video models) -> exclude.
             return {
-                compatible: false,
                 basis: "methods",
+                compatible: false,
                 reason: `no method routable via generateContent (${lower.join(", ")})`,
             };
         }
-        return { compatible: true, basis: "none" };
+        return { basis: "none", compatible: true };
     }
 
     _parseListModelsResponse(text) {
@@ -1160,11 +1157,11 @@ class BrowserManager {
                 if (strictFilter && incompatible) {
                     filteredCount++;
                     const record = {
+                        basis: incompatible.basis,
                         displayName,
                         name,
                         rawMethods: info.methods,
                         reason: incompatible.reason,
-                        basis: incompatible.basis,
                     };
                     this._incompatibleModels.set(short, record);
                     // Also store with full name for lookup flexibility
@@ -1194,7 +1191,11 @@ class BrowserManager {
                 }
                 this.logger.info(
                     `[Models] Auto-filtered ${filteredCount} incompatible model(s) from ListModels ` +
-                        `(detection: ${Object.entries(byBasis).map(([k, v]) => `${k}=${v}`).join(", ") || "n/a"})`
+                        `(detection: ${
+                            Object.entries(byBasis)
+                                .map(([k, v]) => `${k}=${v}`)
+                                .join(", ") || "n/a"
+                        })`
                 );
             }
 
