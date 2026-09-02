@@ -11,7 +11,6 @@ const https = require("https");
 const os = require("os");
 const path = require("path");
 const readline = require("readline");
-const { HttpsProxyAgent, SocksProxyAgent } = require("playwright-core/lib/utilsBundle");
 const { getProxySummaryFromEnv, parseProxyFromEnv } = require("../../src/utils/ProxyUtils");
 
 const DEFAULT_CAMOUFOX_VERSION = "135.0.1-beta.24";
@@ -504,6 +503,8 @@ const createProxyAgent = (proxy, targetUrl) => {
     if (!proxy) return undefined;
     if (targetUrl && proxy.bypass && shouldBypassProxy(targetUrl, proxy.bypass)) return undefined;
 
+    // Load this dependency only after ensureNodeModules() has had a chance to install it.
+    const { HttpsProxyAgent, SocksProxyAgent } = require("playwright-core/lib/utilsBundle");
     const proxyUrl = normalizeProxyURL(proxy.server);
     if (proxyUrl.protocol.startsWith("socks")) {
         if (proxyUrl.protocol === "socks5:") proxyUrl.protocol = "socks5h:";
