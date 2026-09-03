@@ -31,6 +31,31 @@ class StatusRoutes {
             "BLOCK_NONE",
             "OFF",
         ]);
+        this.rateLimitCounters = new Map(); // Track request counts per IP for rate limiting
+    }
+
+    /**
+     * Simple in-memory rate limiter to protect public/status endpoints from abuse
+     */
+    _rejectIfRateLimited(req, res) {
+        const ip = req.headers["x-forwarded-for"]?.split(",")[0].trim() || req.ip || req.connection.remoteAddress || "unknown";
+        const now = Date.now();
+        const WINDOW_MS = 60 * 1000; // 1 minute window
+        const MAX_REQUESTS = 60; // Max 60 requests per IP per window
+
+        const entry = this.rateLimitCounters.get(ip) || { count: 0, windowStart: now };
+        if (now - entry.windowStart > WINDOW_MS) {
+            entry.count = 0;
+            entry.windowStart = now;
+        }
+        entry.count++;
+        this.rateLimitCounters.set(ip, entry);
+
+        if (entry.count > MAX_REQUESTS) {
+            res.status(429).json({ error: "Too many requests. Please try again later.", message: "rateLimitExceeded" });
+            return true;
+        }
+        return false;
     }
 
     _rejectIfSystemBusy(res) {
@@ -59,6 +84,7 @@ class StatusRoutes {
 
         // Health check endpoint (public, no authentication required)
         app.get("/health", (req, res) => {
+            if (this._rejectIfRateLimited(req, res)) return;
             const now = new Date();
             const timezone = process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
             let timestamp;
@@ -126,6 +152,7 @@ class StatusRoutes {
         });
 
         app.get("/api/status", isAuthenticated, async (req, res) => {
+            if (this._rejectIfRateLimited(req, res)) return;
             // Force a reload of auth sources on each status check for real-time accuracy
             const hasChanges = this.serverSystem.authSource.reloadAuthSources();
 
@@ -178,6 +205,7 @@ class StatusRoutes {
         });
 
         app.get("/api/usage-stats", isAuthenticated, (req, res) => {
+            if (this._rejectIfRateLimited(req, res)) return;
             const snapshot = this.serverSystem.usageStatsService?.getSnapshot();
             res.json(snapshot || UsageStatsService.createEmptySnapshot());
         });
@@ -215,6 +243,7 @@ class StatusRoutes {
         });
 
         app.post("/api/usage-stats/import", isAuthenticated, async (req, res) => {
+            if (this._rejectIfRateLimited(req, res)) return;
             try {
                 const usageStatsService = this.serverSystem.usageStatsService;
                 if (!usageStatsService?.enabled) {
