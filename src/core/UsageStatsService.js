@@ -192,10 +192,23 @@ class UsageStatsService {
         return record;
     }
 
-    getSnapshot() {
+    getSnapshot(options = {}) {
         if (!this.enabled) {
             return UsageStatsService.createEmptySnapshot();
         }
+
+        const startTime = Number.isFinite(options.startTime) ? options.startTime : null;
+        const endTime = Number.isFinite(options.endTime) ? options.endTime : null;
+        const records =
+            startTime === null && endTime === null
+                ? this.records
+                : this.records.filter(record => {
+                      const recordTime = Date.parse(record.startedAt);
+                      if (!Number.isFinite(recordTime)) return false;
+                      if (startTime !== null && recordTime < startTime) return false;
+                      if (endTime !== null && recordTime > endTime) return false;
+                      return true;
+                  });
 
         const totalRequests = this.summary.totalRequests;
         const avgDurationMs = totalRequests > 0 ? Math.round(this.summary.totalDurationMs / totalRequests) : 0;
@@ -228,8 +241,7 @@ class UsageStatsService {
 
         return {
             accounts,
-            // Return full request history for display and client-side filtering
-            records: this.records.slice().reverse(),
+            records: records.slice().reverse(),
             startedAt: this.startedAt,
             summary: {
                 abortedCount: this.summary.abortedCount,

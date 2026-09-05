@@ -178,7 +178,23 @@ class StatusRoutes {
         });
 
         app.get("/api/usage-stats", isAuthenticated, (req, res) => {
-            const snapshot = this.serverSystem.usageStatsService?.getSnapshot();
+            const parseOptionalTime = value => {
+                if (value === undefined) return null;
+                if (typeof value !== "string" || !value.trim()) return NaN;
+                return Date.parse(value);
+            };
+            const startTime = parseOptionalTime(req.query.startTime);
+            const endTime = parseOptionalTime(req.query.endTime);
+
+            if (
+                Number.isNaN(startTime) ||
+                Number.isNaN(endTime) ||
+                (startTime !== null && endTime !== null && startTime > endTime)
+            ) {
+                return res.status(400).json({ error: "Invalid usage stats time range" });
+            }
+
+            const snapshot = this.serverSystem.usageStatsService?.getSnapshot({ endTime, startTime });
             res.json(snapshot || UsageStatsService.createEmptySnapshot());
         });
 
