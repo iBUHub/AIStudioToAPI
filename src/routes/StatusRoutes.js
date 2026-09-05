@@ -12,6 +12,29 @@ const VersionChecker = require("../utils/VersionChecker");
 const LoggingService = require("../utils/LoggingService");
 const UsageStatsService = require("../core/UsageStatsService");
 
+// Lightweight in-memory rate limiter to protect authenticated endpoints from abuse/resource exhaustion
+function createRateLimiter({ windowMs, max }) {
+    const hits = new Map();
+    return (req, res, next) => {
+        const key = req.session?.id || req.ip;
+        const now = Date.now();
+        const record = hits.get(key);
+        if (!record || now - record.start > windowMs) {
+            hits.set(key, { count: 1, start: now });
+            return next();
+        }
+        record.count += 1;
+        if (record.count > max) {
+            return res.status(429).json({ message: "tooManyRequests" });
+        }
+        return next();
+    };
+}
+
+const statusRateLimiter = createRateLimiter({ max: 60, windowMs: 60 * 1000 });
+const usageStatsRateLimiter = createRateLimiter({ max: 30, windowMs: 60 * 1000 });
+const usageStatsImportRateLimiter = createRateLimiter({ max: 5, windowMs: 60 * 1000 });
+
 /**
  * Status Routes Manager
  * Manages system status, account management, and settings routes
@@ -125,7 +148,7 @@ class StatusRoutes {
             }
         });
 
-        app.get("/api/status", isAuthenticated, async (req, res) => {
+        app.get("/api/status", isAuthenticated, statusRateLimiter, async (req, res) => {
             // Force a reload of auth sources on each status check for real-time accuracy
             const hasChanges = this.serverSystem.authSource.reloadAuthSources();
 
@@ -177,12 +200,12 @@ class StatusRoutes {
             res.json(this._getStatusData());
         });
 
-        app.get("/api/usage-stats", isAuthenticated, (req, res) => {
+        app.get("/api/usage-stats", isAuthenticated, usageStatsRateLimiter, (req, res) => {
             const snapshot = this.serverSystem.usageStatsService?.getSnapshot();
             res.json(snapshot || UsageStatsService.createEmptySnapshot());
         });
 
-        app.get("/api/usage-stats/download", isAuthenticated, async (req, res) => {
+        app.get("/api/usage-stats/download", isAuthenticated, usageStatsRateLimiter, async (req, res) => {
             try {
                 const usageStatsService = this.serverSystem.usageStatsService;
                 if (!usageStatsService?.enabled) {
@@ -214,7 +237,7 @@ class StatusRoutes {
             }
         });
 
-        app.post("/api/usage-stats/import", isAuthenticated, async (req, res) => {
+        app.post("/api/usage-stats/import", isAuthenticated, usageStatsImportRateLimiter, async (req, res) => {
             try {
                 const usageStatsService = this.serverSystem.usageStatsService;
                 if (!usageStatsService?.enabled) {
