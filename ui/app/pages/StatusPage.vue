@@ -4996,8 +4996,7 @@ onMounted(() => {
     syncStatsFiltersViewport(statsFiltersMobileMediaQuery);
     statsFiltersMobileMediaQuery.addEventListener("change", syncStatsFiltersViewport);
 
-    updateContent().finally(scheduleUpdate);
-    fetchUsageStats().finally(scheduleUpdate);
+    Promise.all([updateContent(), fetchUsageStats()]).finally(scheduleUpdate);
 
     // Check for updates once on initial load
     checkForUpdates();
