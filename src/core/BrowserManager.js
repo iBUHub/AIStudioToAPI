@@ -2619,6 +2619,10 @@ class BrowserManager {
 
         const contextData = this.contexts.get(authIndex);
 
+        // NOTE: no in-flight-deferral here. `activeRequests` is not maintained anywhere, so a
+        // deferred-disposal path would be dead code that leaks the context (never actually closed).
+        // Dispose immediately; any in-flight request on this context is already failing over to
+        // the next account via the auth-switcher before closeContext is called.
         // Stop health monitor for this context
         if (contextData.healthMonitorInterval) {
             clearInterval(contextData.healthMonitorInterval);

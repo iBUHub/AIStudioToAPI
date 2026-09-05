@@ -12,6 +12,7 @@ build/
 
 # Camoufox directory
 camoufox/
+camoufox-macos/
 
 # Logs
 *.log
@@ -32,3 +33,8 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
+
+# Local tooling and rejected configs
+.npm-cache/
+.serena/
+*.REJECTED.yaml

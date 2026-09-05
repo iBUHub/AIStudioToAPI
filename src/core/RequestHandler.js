@@ -20,7 +20,7 @@ const WS_CONNECTION_READY_TIMEOUT_MS = 10000;
 // Default timeout constants (in milliseconds)
 const DEFAULT_TIMEOUTS = {
     FAKE_STREAM: 300000, // 300 seconds (5 minutes) - timeout for fake streaming (buffered response)
-    STREAM_CHUNK: 60000, // 60 seconds - timeout between stream chunks
+    STREAM_CHUNK: 0, // 0 = disabled - timeout between stream chunks
 };
 
 class RequestHandler {
@@ -648,14 +648,50 @@ class RequestHandler {
         return { attemptedAuthIndices };
     }
 
+    _withFailureAuthIndex(details, requestId, explicitAuthIndex = null) {
+        if (!details || typeof details !== "object") return details;
+        if (Number.isInteger(details.authIndex)) return details;
+        const requestAuthIndex = Number.isInteger(explicitAuthIndex)
+            ? explicitAuthIndex
+            : this.connectionRegistry?.getAuthIndexForRequest?.(requestId);
+        return Number.isInteger(requestAuthIndex) ? { ...details, authIndex: requestAuthIndex } : details;
+    }
+
+    async _handleAuthFailure(details, requestId, userMessage = null, explicitAuthIndex = null) {
+        return this.authSwitcher?.handleRequestFailureAndSwitch(
+            this._withFailureAuthIndex(details, requestId, explicitAuthIndex),
+            userMessage
+        );
+    }
+
+    /**
+     * Reset failure bookkeeping after a successful request on a given auth index.
+     * Shared by every success site so the consecutive empty-upstream judgment counter is
+     * cleared for the account that actually served the request (in addition to failureCount).
+     * @param {number|null} authIndex - Auth index that served the successful request.
+     */
+    _resetFailureStateOnSuccess(authIndex = null) {
+        const index = Number.isInteger(authIndex) && authIndex >= 0 ? authIndex : this.currentAuthIndex;
+        if (typeof this.authSwitcher?.resetEmptyJudgmentCountForAuth === "function") {
+            this.authSwitcher.resetEmptyJudgmentCountForAuth(index);
+        }
+        if (this.authSwitcher?.failureCount > 0) {
+            this.logger.debug(
+                `✅ [Auth] Request successful - failure count reset from ${this.authSwitcher.failureCount} to 0`
+            );
+            this.authSwitcher.failureCount = 0;
+        }
+    }
     _getImmediateStatusRetryCloseReason(status) {
         return `immediate_status_retry_${status}`;
     }
 
     async _performImmediateSwitchRetry(errorDetails, requestId, tracker) {
-        await this.authSwitcher.handleRequestFailureAndSwitch(
+        await this._handleAuthFailure(
             { message: errorDetails.message, status: Number(errorDetails.status) },
-            null
+            requestId,
+            null,
+            errorDetails.authIndex
         );
 
         const ready = await this._waitForSystemAndConnectionIfBusy(null, {
@@ -1226,6 +1262,38 @@ class RequestHandler {
                         this._forwardRequest(proxyRequest, currentQueueAuthIndex);
                         initialMessage = await currentQueue.dequeue();
 
+                        if (
+                            initialMessage &&
+                            initialMessage.event_type === "chunk" &&
+                            initialMessage.data !== undefined
+                        ) {
+                            // _dumpUpstreamCorrelation records JUDGED-EMPTY responses only (the helper
+                            // itself re-checks _isEmptyUpstreamResponse before any file I/O). It never
+                            // writes for non-empty responses; this call site just feeds it the raw chunk.
+                            this._dumpUpstreamCorrelation(
+                                "processOpenAIRequest:initialMessage",
+                                initialMessage.data,
+                                requestId,
+                                model,
+                                currentQueueAuthIndex
+                            );
+                        }
+                        if (
+                            initialMessage &&
+                            initialMessage.event_type === "chunk" &&
+                            this._isEmptyUpstreamResponse(initialMessage.data)
+                        ) {
+                            this.logger.warn(
+                                `[Request] Detected empty upstream response on account index ${currentQueueAuthIndex}. Preparing retry...`
+                            );
+                            initialMessage = {
+                                event_type: "error",
+                                message: "Empty upstream completion (zero content, zero tool_calls)",
+                                reason: "empty_upstream_response",
+                                status: 502,
+                            };
+                        }
+
                         const initialStatus = Number(initialMessage?.status);
                         if (
                             initialMessage.event_type === "error" &&
@@ -1278,7 +1346,7 @@ class RequestHandler {
 
                         // Avoid switching account if the error is just a connection reset
                         if (!skipFinalFailureSwitch && !this._isConnectionResetError(initialMessage)) {
-                            await this.authSwitcher.handleRequestFailureAndSwitch(initialMessage, null);
+                            await this._handleAuthFailure(initialMessage, requestId, null, initialMessage.authIndex);
                         } else if (skipFinalFailureSwitch) {
                             this.logger.info(
                                 "[Request] Immediate-switch retries exhausted, skipping additional account switch."
@@ -1291,12 +1359,7 @@ class RequestHandler {
                         return;
                     }
 
-                    if (this.authSwitcher.failureCount > 0) {
-                        this.logger.debug(
-                            `✅ [Auth] OpenAI interface request successful - failure count reset from ${this.authSwitcher.failureCount} to 0`
-                        );
-                        this.authSwitcher.failureCount = 0;
-                    }
+                    this._resetFailureStateOnSuccess(currentQueueAuthIndex);
 
                     res.status(200).set({
                         "Cache-Control": "no-cache",
@@ -1345,7 +1408,7 @@ class RequestHandler {
 
                             // Avoid switching account if the error is just a connection reset
                             if (!result.error.skipAccountSwitch && !this._isConnectionResetError(result.error)) {
-                                await this.authSwitcher.handleRequestFailureAndSwitch(result.error, null);
+                                await this._handleAuthFailure(result.error, requestId, null, result.queue?.authIndex);
                             } else if (result.error.skipAccountSwitch) {
                                 this.logger.info(
                                     "[Request] Immediate-switch retries exhausted, skipping additional account switch."
@@ -1358,12 +1421,7 @@ class RequestHandler {
                             return;
                         }
 
-                        if (this.authSwitcher.failureCount > 0) {
-                            this.logger.debug(
-                                `✅ [Auth] OpenAI interface request successful - failure count reset to 0`
-                            );
-                            this.authSwitcher.failureCount = 0;
-                        }
+                        this._resetFailureStateOnSuccess(result.queue?.authIndex);
 
                         // Use the queue that successfully received the initial message
                         const activeQueue = result.queue;
@@ -1418,6 +1476,41 @@ class RequestHandler {
                                     // Backend errored; don't attempt to translate/send a "normal" stream afterwards.
                                     return;
                                 }
+
+                                // Terminal emptiness judgment for the OpenAI chat fake-stream path, mirroring
+                                // the Response API/Claude fake-stream paths: an empty aggregate body must
+                                // enter the existing single auth-failure + SSE error flow, with no duplicate
+                                // switch and no leaked empty completion.
+                                if (this._isEmptyUpstreamResponse(fullBody)) {
+                                    this._dumpUpstreamCorrelation(
+                                        "openai-chat-fake-stream",
+                                        fullBody,
+                                        requestId,
+                                        model,
+                                        this.currentAuthIndex
+                                    );
+                                    this.logger.warn(
+                                        `⚠️ [Request] Upstream fake-stream response judged empty (request ${requestId}); switching account and ending stream.`
+                                    );
+                                    this._handleRequestError(
+                                        {
+                                            message: "Empty upstream response (OpenAI chat fake stream)",
+                                            reason: "empty_upstream_response",
+                                        },
+                                        res,
+                                        requestId
+                                    );
+                                    this._handleAuthFailure(
+                                        {
+                                            message: "Empty upstream response (OpenAI chat fake stream)",
+                                            reason: "empty_upstream_response",
+                                            status: 502,
+                                        },
+                                        requestId
+                                    );
+                                    return;
+                                }
+
                                 const streamState = {};
                                 const translatedChunk = this.formatConverter.translateGoogleToOpenAIStream(
                                     fullBody,
@@ -1629,6 +1722,39 @@ class RequestHandler {
                         this._forwardRequest(proxyRequest, currentQueueAuthIndex);
                         initialMessage = await currentQueue.dequeue();
 
+                        if (
+                            initialMessage &&
+                            initialMessage.event_type === "chunk" &&
+                            initialMessage.data !== undefined
+                        ) {
+                            // _dumpUpstreamCorrelation records JUDGED-EMPTY responses only.
+                            this._dumpUpstreamCorrelation(
+                                "processOpenAIResponseRequest:initialMessage",
+                                initialMessage.data,
+                                requestId,
+                                model,
+                                currentQueueAuthIndex
+                            );
+                        }
+                        // A complete initial chunk that is already terminal-empty must be converted into
+                        // the existing error/retry flow BEFORE the translator can set responseSent — one
+                        // switch only, exactly like the OpenAI chat real-stream path.
+                        if (
+                            initialMessage &&
+                            initialMessage.event_type === "chunk" &&
+                            this._isEmptyUpstreamResponse(initialMessage.data)
+                        ) {
+                            this.logger.warn(
+                                `[Request] Detected empty upstream response on account index ${currentQueueAuthIndex}. Preparing retry...`
+                            );
+                            initialMessage = {
+                                event_type: "error",
+                                message: "Empty upstream completion (zero content, zero tool_calls)",
+                                reason: "empty_upstream_response",
+                                status: 502,
+                            };
+                        }
+
                         const initialStatus = Number(initialMessage?.status);
                         if (
                             initialMessage.event_type === "error" &&
@@ -1681,7 +1807,7 @@ class RequestHandler {
 
                         // Avoid switching account if the error is just a connection reset
                         if (!skipFinalFailureSwitch && !this._isConnectionResetError(initialMessage)) {
-                            await this.authSwitcher.handleRequestFailureAndSwitch(initialMessage, null);
+                            await this._handleAuthFailure(initialMessage, requestId, null, initialMessage.authIndex);
                         } else if (skipFinalFailureSwitch) {
                             this.logger.info(
                                 "[Request] Immediate-switch retries exhausted, skipping additional account switch."
@@ -1694,12 +1820,7 @@ class RequestHandler {
                         return;
                     }
 
-                    if (this.authSwitcher.failureCount > 0) {
-                        this.logger.debug(
-                            `✅ [Auth] OpenAI Response API request successful - failure count reset from ${this.authSwitcher.failureCount} to 0`
-                        );
-                        this.authSwitcher.failureCount = 0;
-                    }
+                    this._resetFailureStateOnSuccess(currentQueueAuthIndex);
 
                     res.status(200).set({
                         "Cache-Control": "no-cache",
@@ -1755,7 +1876,7 @@ class RequestHandler {
 
                             // Avoid switching account if the error is just a connection reset
                             if (!result.error.skipAccountSwitch && !this._isConnectionResetError(result.error)) {
-                                await this.authSwitcher.handleRequestFailureAndSwitch(result.error, null);
+                                await this._handleAuthFailure(result.error, requestId, null, result.queue?.authIndex);
                             } else if (result.error.skipAccountSwitch) {
                                 this.logger.info(
                                     "[Request] Immediate-switch retries exhausted, skipping additional account switch."
@@ -1768,12 +1889,7 @@ class RequestHandler {
                             return;
                         }
 
-                        if (this.authSwitcher.failureCount > 0) {
-                            this.logger.debug(
-                                `✅ [Auth] OpenAI Response API request successful - failure count reset to 0`
-                            );
-                            this.authSwitcher.failureCount = 0;
-                        }
+                        this._resetFailureStateOnSuccess(result.queue?.authIndex);
 
                         // Use the queue that successfully received the initial message
                         const activeQueue = result.queue;
@@ -1835,6 +1951,39 @@ class RequestHandler {
 
                                 // If backend errored, don't attempt to translate/send a "normal" Responses stream afterwards.
                                 if (hadStreamError) {
+                                    return;
+                                }
+
+                                // Terminal emptiness judgment for the OpenAI Response API fake stream path.
+                                // _isEmptyUpstreamResponse handles an empty or parseable-but-empty body and treats a
+                                // fragmented unparseable tail as not-conclusively-empty, so translation proceeds unchanged.
+                                if (this._isEmptyUpstreamResponse(fullBody)) {
+                                    this._dumpUpstreamCorrelation(
+                                        "openai-response-api-fake-stream",
+                                        fullBody,
+                                        requestId,
+                                        model,
+                                        this.currentAuthIndex
+                                    );
+                                    this.logger.warn(
+                                        `⚠️ [Request] Upstream fake-stream response judged empty (request ${requestId}); switching account and ending stream.`
+                                    );
+                                    this._handleRequestError(
+                                        {
+                                            message: "Empty upstream response (Response API fake stream)",
+                                            reason: "empty_upstream_response",
+                                        },
+                                        res,
+                                        requestId
+                                    );
+                                    this._handleAuthFailure(
+                                        {
+                                            message: "Empty upstream response (Response API fake stream)",
+                                            reason: "empty_upstream_response",
+                                            status: 502,
+                                        },
+                                        requestId
+                                    );
                                     return;
                                 }
 
@@ -2049,7 +2198,7 @@ class RequestHandler {
                         });
                         this._sendErrorResponse(res, initialMessage.status || 500, initialMessage.message, "api_error");
                         if (!skipFinalFailureSwitch && !this._isConnectionResetError(initialMessage)) {
-                            await this.authSwitcher.handleRequestFailureAndSwitch(initialMessage, null);
+                            await this._handleAuthFailure(initialMessage, requestId, null, initialMessage.authIndex);
                         } else if (skipFinalFailureSwitch) {
                             this.logger.info(
                                 "[Request] Immediate-switch retries exhausted, skipping additional account switch."
@@ -2058,10 +2207,7 @@ class RequestHandler {
                         return;
                     }
 
-                    if (this.authSwitcher.failureCount > 0) {
-                        this.logger.debug(`✅ [Auth] Claude request successful - failure count reset to 0`);
-                        this.authSwitcher.failureCount = 0;
-                    }
+                    this._resetFailureStateOnSuccess(currentQueueAuthIndex);
 
                     res.status(200).set({
                         "Cache-Control": "no-cache",
@@ -2111,7 +2257,7 @@ class RequestHandler {
                                 );
                             }
                             if (!result.error.skipAccountSwitch && !this._isConnectionResetError(result.error)) {
-                                await this.authSwitcher.handleRequestFailureAndSwitch(result.error, null);
+                                await this._handleAuthFailure(result.error, requestId, null, result.queue?.authIndex);
                             } else if (result.error.skipAccountSwitch) {
                                 this.logger.info(
                                     "[Request] Immediate-switch retries exhausted, skipping additional account switch."
@@ -2120,10 +2266,7 @@ class RequestHandler {
                             return;
                         }
 
-                        if (this.authSwitcher.failureCount > 0) {
-                            this.logger.debug(`✅ [Auth] Claude request successful - failure count reset to 0`);
-                            this.authSwitcher.failureCount = 0;
-                        }
+                        this._resetFailureStateOnSuccess(result.queue?.authIndex);
 
                         // Use the queue that successfully received the initial message
                         const activeQueue = result.queue;
@@ -2183,6 +2326,40 @@ class RequestHandler {
                                     // Backend errored; don't attempt to translate/send a "normal" stream afterwards.
                                     return;
                                 }
+
+                                // Terminal emptiness judgment for the Claude fake-stream path, mirroring the
+                                // OpenAI Response API fake-stream path: an empty aggregate body must enter the
+                                // existing single auth-failure + SSE error flow, with no duplicate switch.
+                                if (this._isEmptyUpstreamResponse(fullBody)) {
+                                    this._dumpUpstreamCorrelation(
+                                        "claude-fake-stream",
+                                        fullBody,
+                                        requestId,
+                                        model,
+                                        this.currentAuthIndex
+                                    );
+                                    this.logger.warn(
+                                        `⚠️ [Request] Upstream fake-stream response judged empty (request ${requestId}); switching account and ending stream.`
+                                    );
+                                    this._handleRequestError(
+                                        {
+                                            message: "Empty upstream response (Claude fake stream)",
+                                            reason: "empty_upstream_response",
+                                        },
+                                        res,
+                                        requestId
+                                    );
+                                    this._handleAuthFailure(
+                                        {
+                                            message: "Empty upstream response (Claude fake stream)",
+                                            reason: "empty_upstream_response",
+                                            status: 502,
+                                        },
+                                        requestId
+                                    );
+                                    return;
+                                }
+
                                 const streamState = {};
                                 const translatedChunk = this.formatConverter.translateGoogleToClaudeStream(
                                     fullBody,
@@ -2324,7 +2501,7 @@ class RequestHandler {
                     );
                     this._sendErrorResponse(res, response.status || 500, response.message, "api_error");
                     if (!this._isConnectionResetError(response)) {
-                        await this.authSwitcher.handleRequestFailureAndSwitch(response, null);
+                        await this._handleAuthFailure(response, requestId, null, response.authIndex);
                     }
                     return;
                 }
@@ -2352,13 +2529,7 @@ class RequestHandler {
                 const geminiResponse = JSON.parse(fullBody || response.body);
                 const totalTokens = geminiResponse.totalTokens || 0;
 
-                // Reset failure count on success
-                if (this.authSwitcher.failureCount > 0) {
-                    this.logger.debug(
-                        `✅ [Auth] Count tokens request successful - failure count reset from ${this.authSwitcher.failureCount} to 0`
-                    );
-                    this.authSwitcher.failureCount = 0;
-                }
+                this._resetFailureStateOnSuccess();
 
                 // Return Claude-compatible response
                 res.status(200).json({
@@ -2468,7 +2639,7 @@ class RequestHandler {
 
                     // Avoid switching account if the error is just a connection reset
                     if (!this._isConnectionResetError(response)) {
-                        await this.authSwitcher.handleRequestFailureAndSwitch(response, null);
+                        await this._handleAuthFailure(response, requestId, null, response.authIndex);
                     } else {
                         this.logger.info(
                             "[Request] Failure due to connection reset (input_tokens), skipping account switch."
@@ -2511,13 +2682,7 @@ class RequestHandler {
 
                 const totalTokens = geminiResponse.totalTokens || 0;
 
-                // Reset failure count on success
-                if (this.authSwitcher.failureCount > 0) {
-                    this.logger.debug(
-                        `✅ [Auth] input_tokens request successful - failure count reset from ${this.authSwitcher.failureCount} to 0`
-                    );
-                    this.authSwitcher.failureCount = 0;
-                }
+                this._resetFailureStateOnSuccess();
 
                 res.status(200).json({
                     input_tokens: totalTokens,
@@ -2541,6 +2706,7 @@ class RequestHandler {
 
     async _streamClaudeResponse(messageQueue, res, model, requestId) {
         const streamState = {};
+        let sseBuffer = "";
 
         try {
             // eslint-disable-next-line no-constant-condition
@@ -2548,6 +2714,54 @@ class RequestHandler {
                 const message = await messageQueue.dequeue(this.timeouts.STREAM_CHUNK);
 
                 if (message.type === "STREAM_END") {
+                    // Flush any trailing partial SSE payload before classifying the stream as empty:
+                    // a fragmented final event split across browser network chunks reassembles here and
+                    // may be the only real content the upstream produced.
+                    let flushEmittedOutput = false;
+                    if (sseBuffer.trim() !== "") {
+                        const claudeChunk = this._translateCompleteSseEvent(
+                            sseBuffer,
+                            model,
+                            streamState,
+                            "translateGoogleToClaudeStream"
+                        );
+                        if (claudeChunk && this._isResponseWritable(res)) {
+                            try {
+                                res.write(claudeChunk);
+                                flushEmittedOutput = true;
+                            } catch (writeError) {
+                                this.logger.debug(
+                                    `[Request] Failed to flush Claude stream chunk: ${writeError.message}`
+                                );
+                            }
+                        }
+                    }
+                    // Terminal empty detection: if the upstream produced no content block (and the
+                    // trailing flush did not emit output either), treat it as empty. Any output —
+                    // including a flush that advanced contentBlockIndex — means the stream is non-empty.
+                    if (!streamState.contentBlockIndex && !flushEmittedOutput) {
+                        this.logger.warn(
+                            `⚠️ [Request] Upstream stream judged empty at STREAM_END (request ${requestId}); switching account and sending SSE error.`
+                        );
+                        this._handleAuthFailure(
+                            {
+                                message: "Empty upstream response (stream)",
+                                reason: "empty_upstream_response",
+                                status: 502,
+                            },
+                            requestId,
+                            null,
+                            message.authIndex
+                        );
+                        // Headers are already sent once we reach STREAM_END mid-stream, so the JSON
+                        // _sendErrorResponse would be a silent no-op. Emit a protocol-safe SSE error.
+                        if (res.headersSent) {
+                            this._sendErrorChunkToClient(res, "Empty upstream response", 502);
+                        } else {
+                            this._sendErrorResponse(res, 502, "Empty upstream response");
+                        }
+                        break;
+                    }
                     this.logger.info(`✅ [Request] Response completed (Claude real stream), request ID: ${requestId}`);
                     break;
                 }
@@ -2578,30 +2792,36 @@ class RequestHandler {
                 }
 
                 if (message.data) {
-                    const claudeChunk = this.formatConverter.translateGoogleToClaudeStream(
-                        message.data,
-                        model,
-                        streamState
-                    );
-                    if (claudeChunk) {
-                        // Before writing, ensure the response is still writable to avoid
-                        // throwing if the client disconnected mid-stream.
-                        if (!this._isResponseWritable(res)) {
-                            this.logger.debug(
-                                "[Request] Response no longer writable during Claude stream; stopping stream."
-                            );
-                            break;
-                        }
-                        try {
-                            res.write(claudeChunk);
-                        } catch (writeError) {
-                            this.logger.debug(
-                                `[Request] Failed to write Claude chunk to stream: ${writeError.message}`
-                            );
-                            // Stop streaming on write failure to avoid misclassifying as a timeout.
-                            break;
+                    sseBuffer += message.data;
+                    const events = this._extractSseEvents(sseBuffer);
+                    for (const eventPayload of events.complete) {
+                        const claudeChunk = this._translateCompleteSseEvent(
+                            eventPayload,
+                            model,
+                            streamState,
+                            "translateGoogleToClaudeStream"
+                        );
+                        if (claudeChunk) {
+                            // Before writing, ensure the response is still writable to avoid
+                            // throwing if the client disconnected mid-stream.
+                            if (!this._isResponseWritable(res)) {
+                                this.logger.debug(
+                                    "[Request] Response no longer writable during Claude stream; stopping stream."
+                                );
+                                break;
+                            }
+                            try {
+                                res.write(claudeChunk);
+                            } catch (writeError) {
+                                this.logger.debug(
+                                    `[Request] Failed to write Claude chunk to stream: ${writeError.message}`
+                                );
+                                // Stop streaming on write failure to avoid misclassifying as a timeout.
+                                break;
+                            }
                         }
                     }
+                    sseBuffer = events.remainder;
                 }
             }
         } catch (error) {
@@ -2641,6 +2861,14 @@ class RequestHandler {
 
         try {
             const googleResponse = JSON.parse(fullBody);
+            // Write a judged-empty-only correlation dump (the helper early-returns on non-empty),
+            // gated by DUMP_EMPTY_UPSTREAM. Non-empty upstream responses are not recorded here.
+            this._dumpUpstreamCorrelation("non-stream", fullBody, requestId, model, this.currentAuthIndex);
+            // Terminal emptiness judgment for the Claude non-stream path.
+            if (this._isEmptyUpstreamResponse(googleResponse)) {
+                this._handleEmptyNonStreamResponse(res, requestId);
+                return;
+            }
             const claudeResponse = this.formatConverter.convertGoogleToClaudeNonStream(googleResponse, model);
             res.type("application/json").send(JSON.stringify(claudeResponse));
             this.logger.info(`✅ [Request] Response completed (Claude non-stream), request ID: ${requestId}`);
@@ -2695,7 +2923,12 @@ class RequestHandler {
 
                     // Avoid switching account if the error is just a connection reset
                     if (!result.error.skipAccountSwitch && !this._isConnectionResetError(result.error)) {
-                        await this.authSwitcher.handleRequestFailureAndSwitch(result.error, null);
+                        await this._handleAuthFailure(
+                            result.error,
+                            proxyRequest.request_id,
+                            null,
+                            result.queue?.authIndex
+                        );
                     } else if (result.error.skipAccountSwitch) {
                         this.logger.info(
                             "[Request] Immediate-switch retries exhausted, skipping additional account switch."
@@ -2709,11 +2942,8 @@ class RequestHandler {
                 return;
             }
 
-            if (proxyRequest.is_generative && this.authSwitcher.failureCount > 0) {
-                this.logger.debug(
-                    `✅ [Auth] Generation request successful - failure count reset from ${this.authSwitcher.failureCount} to 0`
-                );
-                this.authSwitcher.failureCount = 0;
+            if (proxyRequest.is_generative) {
+                this._resetFailureStateOnSuccess(result.queue?.authIndex);
             }
 
             // Use the queue that successfully received the initial message
@@ -2775,6 +3005,37 @@ class RequestHandler {
             try {
                 const googleResponse = JSON.parse(fullData);
                 this._logGeminiNativeResponseDebug(googleResponse, "pseudo-stream");
+
+                if (this._isEmptyUpstreamResponse(googleResponse)) {
+                    this._dumpUpstreamCorrelation(
+                        "gemini-native-pseudo-stream",
+                        googleResponse,
+                        proxyRequest.request_id,
+                        proxyRequest.model,
+                        this.currentAuthIndex
+                    );
+                    this.logger.warn(
+                        `⚠️ [Request] Upstream pseudo-stream response judged empty (request ${proxyRequest.request_id}); switching account and ending stream.`
+                    );
+                    this._handleRequestError(
+                        {
+                            message: "Empty upstream response (pseudo-stream)",
+                            reason: "empty_upstream_response",
+                        },
+                        res,
+                        proxyRequest.request_id
+                    );
+                    this._handleAuthFailure(
+                        {
+                            message: "Empty upstream response (pseudo-stream)",
+                            reason: "empty_upstream_response",
+                            status: 502,
+                        },
+                        proxyRequest.request_id
+                    );
+                    return;
+                }
+
                 const candidate = googleResponse.candidates?.[0];
 
                 if (candidate && candidate.content && Array.isArray(candidate.content.parts)) {
@@ -2948,6 +3209,26 @@ class RequestHandler {
             );
             this._forwardRequest(proxyRequest, currentQueueAuthIndex);
             headerMessage = await currentQueue.dequeue();
+            if (headerMessage?.event_type === "chunk" && headerMessage.data !== undefined) {
+                this._dumpUpstreamCorrelation(
+                    "gemini-native-real-stream:header",
+                    headerMessage?.data,
+                    proxyRequest.request_id,
+                    proxyRequest.model,
+                    currentQueueAuthIndex
+                );
+            }
+            if (headerMessage?.event_type === "chunk" && this._isEmptyUpstreamResponse(headerMessage?.data)) {
+                this.logger.warn(
+                    `[Request] Gemini real stream detected empty upstream response on account index ${currentQueueAuthIndex}. Preparing retry...`
+                );
+                headerMessage = {
+                    event_type: "error",
+                    message: "Empty upstream completion (zero content, zero function calls)",
+                    reason: "empty_upstream_response",
+                    status: 502,
+                };
+            }
 
             const headerStatus = Number(headerMessage?.status);
             if (
@@ -3002,7 +3283,7 @@ class RequestHandler {
                 });
                 // Avoid switching account if the error is just a connection reset
                 if (!skipFinalFailureSwitch && !this._isConnectionResetError(headerMessage)) {
-                    await this.authSwitcher.handleRequestFailureAndSwitch(headerMessage, null);
+                    await this._handleAuthFailure(headerMessage, proxyRequest.request_id, null, currentQueueAuthIndex);
                 } else if (skipFinalFailureSwitch) {
                     this.logger.info(
                         "[Request] Immediate-switch retries exhausted, skipping additional account switch."
@@ -3018,11 +3299,8 @@ class RequestHandler {
             return;
         }
 
-        if (proxyRequest.is_generative && this.authSwitcher.failureCount > 0) {
-            this.logger.debug(
-                `✅ [Auth] Generation request successful - failure count reset from ${this.authSwitcher.failureCount} to 0`
-            );
-            this.authSwitcher.failureCount = 0;
+        if (proxyRequest.is_generative) {
+            this._resetFailureStateOnSuccess(currentQueueAuthIndex);
         }
 
         this._setResponseHeaders(res, headerMessage, req);
@@ -3109,7 +3387,12 @@ class RequestHandler {
                     this._logFinalRequestFailure(result.error, "Gemini non-stream", proxyRequest.request_id);
                     // Avoid switching account if the error is just a connection reset
                     if (!result.error.skipAccountSwitch && !this._isConnectionResetError(result.error)) {
-                        await this.authSwitcher.handleRequestFailureAndSwitch(result.error, null);
+                        await this._handleAuthFailure(
+                            result.error,
+                            proxyRequest.request_id,
+                            null,
+                            result.queue?.authIndex
+                        );
                     } else if (result.error.skipAccountSwitch) {
                         this.logger.info(
                             "[Request] Immediate-switch retries exhausted, skipping additional account switch."
@@ -3124,11 +3407,8 @@ class RequestHandler {
             }
 
             // On success, reset failure count if needed
-            if (proxyRequest.is_generative && this.authSwitcher.failureCount > 0) {
-                this.logger.debug(
-                    `✅ [Auth] Non-stream generation request successful - failure count reset from ${this.authSwitcher.failureCount} to 0`
-                );
-                this.authSwitcher.failureCount = 0;
+            if (proxyRequest.is_generative) {
+                this._resetFailureStateOnSuccess(result.queue?.authIndex);
             }
 
             // Use the queue that successfully received the initial message
@@ -3160,11 +3440,23 @@ class RequestHandler {
             const fullBodyBuffer = Buffer.concat(chunks);
             let responseBodyBuffer = fullBodyBuffer;
 
+            let fullResponse = null;
             try {
-                const fullResponse = JSON.parse(responseBodyBuffer.toString());
+                fullResponse = JSON.parse(responseBodyBuffer.toString());
                 this._logGeminiNativeResponseDebug(fullResponse, "non-stream");
             } catch (e) {
                 // Ignore JSON parsing errors for finish reason
+            }
+            if (fullResponse && this._isEmptyUpstreamResponse(fullResponse)) {
+                this._dumpUpstreamCorrelation(
+                    "gemini-native-non-stream",
+                    responseBodyBuffer,
+                    proxyRequest.request_id,
+                    proxyRequest.model,
+                    this.currentAuthIndex
+                );
+                this._handleEmptyNonStreamResponse(res, proxyRequest.request_id);
+                return;
             }
 
             if (proxyRequest.response_transform === "batchEmbedToEmbedContent") {
@@ -3228,6 +3520,155 @@ class RequestHandler {
             );
         }
         return fullBody;
+    }
+
+    _isEmptyUpstreamResponse(data) {
+        if (!data) return true;
+        let obj = typeof data === "object" ? data : null;
+        if (typeof data === "string") {
+            try {
+                obj = JSON.parse(data);
+            } catch (e) {
+                const match = data.match(/data:\s*(\{.*\})/);
+                if (match) {
+                    try {
+                        obj = JSON.parse(match[1]);
+                    } catch (e2) {
+                        /* empty */
+                    }
+                }
+            }
+            // The raw chunk may be a fragmented SSE stream: multiple `data:` events in one chunk,
+            // or a partial event split across browser network chunks. If we can't cleanly parse it
+            // as a single complete event, do NOT conclude it is empty — more content may be coming.
+            // Split on `\n\n` and judge based on the parsed events instead.
+            if (!obj) {
+                const events = String(data).split("\n\n");
+                for (const evt of events) {
+                    const line = evt.trim();
+                    if (!line) continue;
+                    const dIdx = line.startsWith("data:") ? 5 : line.indexOf("data:");
+                    if (dIdx < 0) continue;
+                    const payload = line.slice(dIdx > 0 ? dIdx + 5 : 5).trim();
+                    if (!payload || payload === "[DONE]") continue;
+                    let evtObj = null;
+                    try {
+                        evtObj = JSON.parse(payload);
+                    } catch (e3) {
+                        continue;
+                    }
+                    // If ANY event carries content or is non-terminal, the stream is not empty.
+                    if (!this._isEmptyUpstreamResponse(evtObj)) return false;
+                }
+                // Fell through: every parseable event was empty. Still, an unparseable partial
+                // event means we cannot be certain — treat as not-conclusively-empty.
+                return false;
+            }
+        }
+        if (!obj) return true;
+
+        if (Array.isArray(obj.content)) {
+            const hasAnthropicContent = obj.content.some(block => {
+                if (!block || typeof block !== "object") return false;
+                if (block.type === "text" || block.type === "thinking" || block.type === "redacted_thinking") {
+                    return typeof block.text === "string" && block.text.trim().length > 0;
+                }
+                if (block.type === "tool_use") {
+                    return typeof block.name === "string" && block.name.trim().length > 0;
+                }
+                return typeof block.type === "string" && block.type.length > 0;
+            });
+            if (hasAnthropicContent) return false;
+            if (!obj.stop_reason) return false;
+            return (obj.usage?.output_tokens ?? 0) === 0;
+        }
+
+        if (obj.candidates && Array.isArray(obj.candidates)) {
+            if (obj.promptFeedback && obj.promptFeedback.blockReason) return false;
+            const cand = obj.candidates[0];
+            if (!cand) return false;
+            const parts = cand.content?.parts || [];
+            const hasToolCalls = parts.some(p => p.functionCall && p.functionCall.name);
+            const hasNonWhitespaceText = parts.some(p => typeof p.text === "string" && p.text.trim().length > 0);
+            const completionTokens =
+                (obj.usageMetadata?.candidatesTokenCount ?? 0) + (obj.usageMetadata?.thoughtsTokenCount ?? 0);
+            const isTerminal = !!cand.finishReason;
+
+            // Control finish reasons (safety/blocklist/recitation/prohibited-content/image-safety) are
+            // VALID terminal results even with zero completion tokens — the upstream answered by
+            // refusing/blocking the request. Never judge them empty, otherwise the client sees a
+            // spurious 502 + account switch for a legitimate safety refusal. Do NOT exempt arbitrary
+            // OTHER/unknown reasons — only the known Gemini control reasons.
+            const CONTROL_FINISH_REASONS = new Set([
+                "SAFETY",
+                "RECITATION",
+                "BLOCKLIST",
+                "PROHIBITED_CONTENT",
+                "IMAGE_SAFETY",
+            ]);
+            if (isTerminal && CONTROL_FINISH_REASONS.has(String(cand.finishReason).toUpperCase())) {
+                return false;
+            }
+
+            // Real content (tool call or non-whitespace text) → not empty.
+            if (hasToolCalls || hasNonWhitespaceText) return false;
+            // A non-terminal chunk is an in-progress stream (incl. thinking-only chunks) — more content
+            // is coming. Never abort on it; judgment happens at the terminal/aggregate point.
+            if (!isTerminal) return false;
+            // Terminal response: EMPTY iff no real content AND zero completion tokens. Whitespace-only
+            // text (e.g. parts:[{"text":" "}] or {"text":"\n"}) with stop is empty. Reasoning/thinking
+            // is NOT final content — it is only a mid-stream signal handled by the !isTerminal guard.
+            // A whitespace-only-text-with-thoughtSignature terminal response is therefore EMPTY.
+            // Nonzero completion tokens means a real (oddly-formatted) answer → not empty.
+            return completionTokens === 0;
+        }
+
+        if (obj.choices && Array.isArray(obj.choices)) {
+            const choice = obj.choices[0];
+            if (!choice) return false;
+            const msg = choice.message || choice.delta || {};
+            const hasToolCalls = Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0;
+            const hasNonWhitespaceContent = typeof msg.content === "string" && msg.content.trim().length > 0;
+            const completionTokens = obj.usage?.completion_tokens ?? 0;
+            const isTerminal = !!choice.finish_reason;
+
+            // OpenAI safety/content-filter controls are valid terminal results with zero tokens.
+            if (isTerminal && ["content_filter", "safety"].includes(String(choice.finish_reason).toLowerCase())) {
+                return false;
+            }
+
+            if (hasToolCalls || hasNonWhitespaceContent) return false;
+            if (!isTerminal) return false;
+            return completionTokens === 0;
+        }
+
+        return false;
+    }
+
+    _dumpUpstreamCorrelation(siteTag, rawData, requestId, model = "unknown", authIndex = null) {
+        const dumpPath = process.env.DUMP_EMPTY_UPSTREAM;
+        if (!dumpPath) return; // keep out of the hot path when unset
+        try {
+            if (!this._isEmptyUpstreamResponse(rawData)) return; // diagnostic is for judged-empty only
+            const rawText = typeof rawData === "string" ? rawData : JSON.stringify(rawData);
+            require("fs").appendFileSync(
+                dumpPath,
+                JSON.stringify({
+                    account_index: authIndex,
+                    judged_empty: true,
+                    model,
+                    raw_response: rawText.slice(0, 200000),
+                    raw_response_length: rawText.length,
+                    request_id: requestId,
+                    site: siteTag,
+                    timestamp: new Date().toISOString(),
+                }) + "\n"
+            );
+        } catch (e) {
+            this.logger.error(
+                `❌ [Dump] Failed to write DUMP_EMPTY_UPSTREAM record to "${dumpPath}": ${e?.message || e}. Check the path is writable and exists.`
+            );
+        }
     }
 
     async _executeRequestWithRetries(proxyRequest, messageQueue) {
@@ -3486,12 +3927,63 @@ class RequestHandler {
         // Keep Response API sequence numbers consistent across helpers that might write to the same SSE response.
         if (res.__responseApiSeq == null) res.__responseApiSeq = 0;
         streamState.sequenceNumber = res.__responseApiSeq;
+        // SSE reassembly buffer: browser network chunks do not align with SSE `\n\n` event boundaries.
+        let sseBuffer = "";
 
         try {
             // eslint-disable-next-line no-constant-condition
             while (true) {
                 const message = await messageQueue.dequeue(this.timeouts.STREAM_CHUNK);
                 if (message.type === "STREAM_END") {
+                    // Flush any trailing partial SSE payload before classifying the stream as empty.
+                    let flushEmittedOutput = false;
+                    if (sseBuffer.trim() !== "") {
+                        const responseAPIChunk = this._translateCompleteSseEvent(
+                            sseBuffer,
+                            model,
+                            streamState,
+                            "translateGoogleToResponseAPIStream"
+                        );
+                        if (typeof streamState.sequenceNumber === "number") {
+                            res.__responseApiSeq = streamState.sequenceNumber;
+                        }
+                        if (responseAPIChunk && this._isResponseWritable(res)) {
+                            try {
+                                res.write(responseAPIChunk);
+                                flushEmittedOutput = true;
+                            } catch (writeError) {
+                                this.logger.debug(
+                                    `[Request] Failed to flush Response API stream chunk: ${writeError.message}`
+                                );
+                            }
+                        }
+                    }
+                    // Terminal empty detection: if the upstream produced no response object (and the
+                    // trailing flush did not emit output either), treat it as empty. A flush that set
+                    // responseSent means the stream is non-empty.
+                    if (!streamState.responseSent && !flushEmittedOutput) {
+                        this.logger.warn(
+                            `⚠️ [Request] Upstream stream judged empty at STREAM_END (request ${requestId}); switching account and sending SSE error.`
+                        );
+                        this._handleAuthFailure(
+                            {
+                                message: "Empty upstream response (stream)",
+                                reason: "empty_upstream_response",
+                                status: 502,
+                            },
+                            requestId,
+                            null,
+                            message.authIndex
+                        );
+                        // Headers are already sent once we reach STREAM_END mid-stream, so the JSON
+                        // _sendErrorResponse would be a silent no-op. Emit a protocol-safe SSE error.
+                        if (res.headersSent) {
+                            this._sendErrorChunkToClient(res, "Empty upstream response", 502);
+                        } else {
+                            this._sendErrorResponse(res, 502, "Empty upstream response");
+                        }
+                        break;
+                    }
                     this.logger.info(
                         `✅ [Request] Response completed (OpenAI Response API real stream), request ID: ${requestId}`
                     );
@@ -3525,30 +4017,36 @@ class RequestHandler {
                 }
 
                 if (message.data) {
-                    const responseAPIChunk = this.formatConverter.translateGoogleToResponseAPIStream(
-                        message.data,
-                        model,
-                        streamState
-                    );
-                    if (typeof streamState.sequenceNumber === "number") {
-                        res.__responseApiSeq = streamState.sequenceNumber;
-                    }
-                    if (responseAPIChunk) {
-                        if (!this._isResponseWritable(res)) {
-                            this.logger.debug(
-                                "[Request] Response no longer writable during Response API stream; stopping stream."
-                            );
-                            break;
+                    sseBuffer += message.data;
+                    const events = this._extractSseEvents(sseBuffer);
+                    for (const eventPayload of events.complete) {
+                        const responseAPIChunk = this._translateCompleteSseEvent(
+                            eventPayload,
+                            model,
+                            streamState,
+                            "translateGoogleToResponseAPIStream"
+                        );
+                        if (typeof streamState.sequenceNumber === "number") {
+                            res.__responseApiSeq = streamState.sequenceNumber;
                         }
-                        try {
-                            res.write(responseAPIChunk);
-                        } catch (writeError) {
-                            this.logger.debug(
-                                `[Request] Failed to write Response API chunk (connection likely closed): ${writeError.message}`
-                            );
-                            break;
+                        if (responseAPIChunk) {
+                            if (!this._isResponseWritable(res)) {
+                                this.logger.debug(
+                                    "[Request] Response no longer writable during Response API stream; stopping stream."
+                                );
+                                break;
+                            }
+                            try {
+                                res.write(responseAPIChunk);
+                            } catch (writeError) {
+                                this.logger.debug(
+                                    `[Request] Failed to write Response API chunk (connection likely closed): ${writeError.message}`
+                                );
+                                break;
+                            }
                         }
                     }
+                    sseBuffer = events.remainder;
                 }
             }
         } catch (error) {
@@ -3566,11 +4064,62 @@ class RequestHandler {
     async _streamOpenAIResponse(messageQueue, res, model, requestId) {
         const streamState = {};
 
+        // SSE reassembly buffer: browser network chunks from the page (build.js stream loop) do not
+        // align with SSE `\n\n` event boundaries. A raw chunk may carry multiple `data:` events or a
+        // partial event split across chunks. Accumulate here and split on `\n\n` so each complete
+        // event is parsed independently — mirroring the non-stream path's `fullBody` accumulation.
+        let sseBuffer = "";
+
         try {
             // eslint-disable-next-line no-constant-condition
             while (true) {
                 const message = await messageQueue.dequeue(this.timeouts.STREAM_CHUNK);
                 if (message.type === "STREAM_END") {
+                    // Flush any trailing partial SSE payload before classifying the stream as empty:
+                    // a fragmented final event split across browser network chunks reassembles here and
+                    // may be the only real content the upstream produced.
+                    let flushEmittedOutput = false;
+                    if (sseBuffer.trim() !== "") {
+                        const flushed = this._translateCompleteSseEvent(sseBuffer, model, streamState);
+                        if (flushed && this._isResponseWritable(res)) {
+                            try {
+                                res.write(flushed);
+                                flushEmittedOutput = true;
+                            } catch (writeError) {
+                                this.logger.debug(
+                                    `[Request] Failed to write flushed SSE event to OpenAI stream: ${writeError.message}`
+                                );
+                            }
+                        }
+                    }
+                    // Terminal emptiness judgment, consistent with the non-stream path. The first-chunk
+                    // check above only catches a complete empty first payload; a fragmented empty response
+                    // (empty body split across chunks) reassembles here with no content ever emitted. If
+                    // roleSent is still false (and the trailing flush emitted nothing), no text/thought/
+                    // image/tool_call was produced — treat as an empty upstream response, switch account,
+                    // and send an SSE error. Thinking-only streams keep roleSent=true, so they are NOT
+                    // aborted (mid-stream false-positive protection).
+                    if (!streamState.roleSent && !flushEmittedOutput) {
+                        this.logger.warn(
+                            `⚠️ [Request] Upstream stream judged empty at STREAM_END (request ${requestId}); switching account and sending SSE error.`
+                        );
+                        this._handleAuthFailure(
+                            {
+                                message: "Empty upstream response (stream)",
+                                reason: "empty_upstream_response",
+                                status: 502,
+                            },
+                            requestId,
+                            null,
+                            message.authIndex
+                        );
+                        if (res.headersSent) {
+                            this._sendErrorChunkToClient(res, "Empty upstream response", 502);
+                        } else {
+                            this._sendErrorResponse(res, 502, "Empty upstream response");
+                        }
+                        break;
+                    }
                     if (this._isResponseWritable(res)) {
                         try {
                             res.write("data: [DONE]\n\n");
@@ -3604,25 +4153,27 @@ class RequestHandler {
                 }
 
                 if (message.data) {
-                    const openAIChunk = this.formatConverter.translateGoogleToOpenAIStream(
-                        message.data,
-                        model,
-                        streamState
-                    );
-                    if (openAIChunk) {
-                        if (!this._isResponseWritable(res)) {
-                            this.logger.debug(
-                                "[Request] Response no longer writable during OpenAI stream; stopping stream."
-                            );
-                            break;
-                        }
-                        try {
-                            res.write(openAIChunk);
-                        } catch (writeError) {
-                            this.logger.debug(
-                                `[Request] Failed to write OpenAI chunk to stream: ${writeError.message}`
-                            );
-                            break;
+                    // Reassemble SSE events from raw network chunks before parsing.
+                    sseBuffer += message.data;
+                    const events = this._extractSseEvents(sseBuffer);
+                    sseBuffer = events.remainder;
+                    for (const eventPayload of events.complete) {
+                        const openAIChunk = this._translateCompleteSseEvent(eventPayload, model, streamState);
+                        if (openAIChunk) {
+                            if (!this._isResponseWritable(res)) {
+                                this.logger.debug(
+                                    "[Request] Response no longer writable during OpenAI stream; stopping stream."
+                                );
+                                return;
+                            }
+                            try {
+                                res.write(openAIChunk);
+                            } catch (writeError) {
+                                this.logger.debug(
+                                    `[Request] Failed to write OpenAI chunk to stream: ${writeError.message}`
+                                );
+                                return;
+                            }
                         }
                     }
                 }
@@ -3638,6 +4189,39 @@ class RequestHandler {
             // Re-throw all other errors to be handled by outer catch block
             throw error;
         }
+    }
+
+    /**
+     * Split a raw SSE accumulation into complete events and the trailing partial.
+     * Accepts both LF (`\n\n`) and CRLF (`\r\n\r\n`) framed events.
+     * @param {string} buffer accumulated raw SSE text
+     * @returns {{complete: string[], remainder: string}} complete event payloads (with `data:` lines) and leftover partial
+     */
+    _extractSseEvents(buffer) {
+        const parts = buffer.split(/\r?\n\r?\n/);
+        const remainder = parts.pop();
+        return { complete: parts, remainder };
+    }
+
+    /**
+     * Parse a single complete SSE event (may contain `data:` lines) and translate it via the given
+     * Google->target stream translator.
+     * @param {string} eventPayload raw SSE event text
+     * @param {string} [translatorName="translateGoogleToOpenAIStream"] FormatConverter stream translator to call
+     * @returns {string|null} target SSE chunk(s) or null if nothing to emit
+     */
+    _translateCompleteSseEvent(eventPayload, model, streamState, translatorName = "translateGoogleToOpenAIStream") {
+        const trimmed = (eventPayload || "").trim();
+        if (trimmed === "") return null;
+        // Extract the `data:` payload lines (SSE events may include `event:`/`id:`/`retry:` lines).
+        const dataLines = trimmed
+            .split("\n")
+            .filter(line => line.startsWith("data:"))
+            .map(line => line.slice(5).trim());
+        if (dataLines.length === 0) return null;
+        // A single event may carry multiple `data:` lines (SSE spec: concatenated with \n).
+        const payload = dataLines.join("\n");
+        return this.formatConverter[translatorName](payload, model, streamState);
     }
 
     async _sendOpenAIResponseAPINonStreamResponse(messageQueue, res, model, requestId, responseDefaults = {}) {
@@ -3667,6 +4251,14 @@ class RequestHandler {
         // Parse and convert to OpenAI Response API format
         try {
             const googleResponse = JSON.parse(fullBody);
+            // Write a judged-empty-only correlation dump (the helper early-returns on non-empty),
+            // gated by DUMP_EMPTY_UPSTREAM. Non-empty upstream responses are not recorded here.
+            this._dumpUpstreamCorrelation("non-stream", fullBody, requestId, model, this.currentAuthIndex);
+            // Terminal emptiness judgment for the OpenAI Response API non-stream path.
+            if (this._isEmptyUpstreamResponse(googleResponse)) {
+                this._handleEmptyNonStreamResponse(res, requestId);
+                return;
+            }
             const responseAPIResponse = this.formatConverter.convertGoogleToResponseAPINonStream(
                 googleResponse,
                 model,
@@ -3707,6 +4299,16 @@ class RequestHandler {
         // Parse and convert to OpenAI format
         try {
             const googleResponse = JSON.parse(fullBody);
+            // Write a judged-empty-only correlation dump (the helper early-returns on non-empty),
+            // gated by DUMP_EMPTY_UPSTREAM. Non-empty upstream responses are not recorded here.
+            this._dumpUpstreamCorrelation("non-stream", fullBody, requestId, model, this.currentAuthIndex);
+            // Terminal emptiness judgment for the non-stream path. The full upstream body is a single
+            // completed response — judge it now (whitespace-only/empty text with stop and ct=0 is
+            // empty, exactly as the stream path judges). Never leak an empty completion to the client.
+            if (this._isEmptyUpstreamResponse(googleResponse)) {
+                this._handleEmptyNonStreamResponse(res, requestId);
+                return;
+            }
             const openAIResponse = this.formatConverter.convertGoogleToOpenAINonStream(googleResponse, model);
             res.type("application/json").send(JSON.stringify(openAIResponse));
             this.logger.info(`✅ [Request] Response completed (OpenAI non-stream), request ID: ${requestId}`);
@@ -3714,6 +4316,21 @@ class RequestHandler {
             this.logger.error(`❌ [Adapter] Failed to parse response for OpenAI: ${e.message}`);
             this._sendErrorResponse(res, 500, "Failed to parse backend response");
         }
+    }
+
+    _handleEmptyNonStreamResponse(res, requestId) {
+        this.logger.warn(
+            `⚠️ [Request] Upstream non-stream response judged empty (request ${requestId}); switching account and returning 502.`
+        );
+        this._handleAuthFailure(
+            {
+                message: "Empty upstream response (non-stream)",
+                reason: "empty_upstream_response",
+                status: 502,
+            },
+            requestId
+        );
+        this._sendErrorResponse(res, 502, "Empty upstream response");
     }
 
     _setResponseHeaders(res, headerMessage, req) {

@@ -25,7 +25,8 @@
         "lint:js:fix": "eslint . --fix",
         "lint:css:fix": "stylelint \"ui/**/*.{css,less}\" --fix",
         "format": "prettier --write .",
-        "format:check": "prettier --check ."
+        "format:check": "prettier --check .",
+        "test": "node --test"
     },
     "dependencies": {
         "archiver": "^7.0.1",

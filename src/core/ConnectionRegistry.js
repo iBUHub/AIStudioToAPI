@@ -270,7 +270,7 @@ class ConnectionRegistry extends EventEmitter {
                     );
                     return;
                 }
-                this._routeMessage(parsedMessage, entry.queue);
+                this._routeMessage(parsedMessage, entry.queue, entry.authIndex);
             } else {
                 this.logger.warn(`[Server] Received message for unknown or outdated request ID: ${requestId}`);
             }
@@ -279,16 +279,16 @@ class ConnectionRegistry extends EventEmitter {
         }
     }
 
-    _routeMessage(message, queue) {
+    _routeMessage(message, queue, authIndex = null) {
         const { event_type } = message;
         switch (event_type) {
             case "response_headers":
             case "chunk":
             case "error":
-                queue.enqueue(message);
+                queue.enqueue(Number.isInteger(authIndex) ? { ...message, authIndex } : message);
                 break;
             case "stream_close":
-                queue.enqueue({ type: "STREAM_END" });
+                queue.enqueue(Number.isInteger(authIndex) ? { authIndex, type: "STREAM_END" } : { type: "STREAM_END" });
                 break;
             default:
                 this.logger.warn(`[Server] Unknown internal event type: ${event_type}`);

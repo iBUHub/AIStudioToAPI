@@ -39,7 +39,8 @@ class MessageQueue extends EventEmitter {
         super();
         this.messages = [];
         this.waitingResolvers = [];
-        this.defaultTimeout = timeoutMs;
+        this.defaultTimeout =
+            typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0 ? Math.floor(timeoutMs) : 0;
         this.closed = false;
         this.closeReason = null;
     }
@@ -49,8 +50,11 @@ class MessageQueue extends EventEmitter {
         if (this.waitingResolvers.length > 0) {
             const resolver = this.waitingResolvers.shift();
             // Check if resolver is still valid (not timed out)
-            if (resolver && resolver.timeoutId) {
-                clearTimeout(resolver.timeoutId);
+            if (resolver && !resolver.timedOut) {
+                if (resolver.timeoutId) {
+                    clearTimeout(resolver.timeoutId);
+                    resolver.timeoutId = null;
+                }
                 resolver.resolve(message);
             } else {
                 // Resolver already timed out, push message to queue instead
@@ -66,6 +70,10 @@ class MessageQueue extends EventEmitter {
             const reason = this.closeReason || "unknown";
             throw new QueueClosedError(`Queue is closed (reason: ${reason})`, reason);
         }
+
+        const effectiveTimeout =
+            typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0 ? Math.floor(timeoutMs) : 0;
+
         return new Promise((resolve, reject) => {
             // Check if there are already queued messages
             if (this.messages.length > 0) {
@@ -73,31 +81,29 @@ class MessageQueue extends EventEmitter {
                 return;
             }
 
-            // Create resolver with timeout BEFORE pushing to waitingResolvers
-            // This prevents race condition where enqueue() sees timeoutId=null
-            const resolver = { reject, resolve, timeoutId: null };
+            const resolver = { reject, resolve, timedOut: false, timeoutId: null };
 
-            // Set timeout first to ensure resolver is fully initialized
-            resolver.timeoutId = setTimeout(() => {
-                const index = this.waitingResolvers.indexOf(resolver);
-                if (index !== -1) {
-                    this.waitingResolvers.splice(index, 1);
-                }
-                // Clear timeoutId to mark resolver as invalid
-                resolver.timeoutId = null;
-                reject(new QueueTimeoutError());
-            }, timeoutMs);
+            if (effectiveTimeout > 0) {
+                resolver.timeoutId = setTimeout(() => {
+                    resolver.timedOut = true;
+                    const index = this.waitingResolvers.indexOf(resolver);
+                    if (index !== -1) {
+                        this.waitingResolvers.splice(index, 1);
+                    }
+                    resolver.timeoutId = null;
+                    reject(new QueueTimeoutError());
+                }, effectiveTimeout);
+            }
 
-            // Now push to waitingResolvers - resolver is fully initialized
             this.waitingResolvers.push(resolver);
 
-            // CRITICAL: Check again if messages arrived during initialization
-            // This handles the race where enqueue() was called between the initial
-            // check (line 70) and push (line 89)
+            // Check again if messages arrived during initialization
             if (this.messages.length > 0 && this.waitingResolvers[0] === resolver) {
-                // We're still the first waiter, consume the message
                 this.waitingResolvers.shift();
-                clearTimeout(resolver.timeoutId);
+                if (resolver.timeoutId) {
+                    clearTimeout(resolver.timeoutId);
+                    resolver.timeoutId = null;
+                }
                 resolve(this.messages.shift());
             }
         });
@@ -107,7 +113,10 @@ class MessageQueue extends EventEmitter {
         this.closed = true;
         this.closeReason = reason;
         this.waitingResolvers.forEach(resolver => {
-            clearTimeout(resolver.timeoutId);
+            if (resolver.timeoutId) {
+                clearTimeout(resolver.timeoutId);
+                resolver.timeoutId = null;
+            }
             resolver.reject(new QueueClosedError(`Queue is closed (reason: ${reason})`, reason));
         });
         this.waitingResolvers = [];

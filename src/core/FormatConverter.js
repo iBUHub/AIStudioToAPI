@@ -592,6 +592,18 @@ class FormatConverter {
         // Convert conversation messages
         const conversationMessages = openaiBody.messages.filter(msg => msg.role !== "system");
 
+        // Build tool_call_id to tool name mapping from assistant messages
+        const toolIdToNameMap = new Map();
+        for (const msg of conversationMessages) {
+            if (msg.role === "assistant" && Array.isArray(msg.tool_calls)) {
+                for (const tc of msg.tool_calls) {
+                    if (tc.id && tc.function && tc.function.name) {
+                        toolIdToNameMap.set(tc.id, tc.function.name);
+                    }
+                }
+            }
+        }
+
         // Buffer for accumulating consecutive tool message parts
         // Gemini requires alternating roles, so consecutive tool messages must be merged
         let pendingToolParts = [];
@@ -674,8 +686,11 @@ class FormatConverter {
                     responseContent = { result: message.content };
                 }
 
-                // Use function name from tool message (OpenAI format always includes name)
-                const functionName = message.name || "unknown_function";
+                // Resolve function name from tool message, or from tool_call_id map
+                const functionName =
+                    message.name ||
+                    (message.tool_call_id && toolIdToNameMap.get(message.tool_call_id)) ||
+                    "unknown_function";
 
                 // Add to buffer instead of pushing directly
                 // This allows merging consecutive tool messages into one user message
@@ -816,9 +831,12 @@ class FormatConverter {
         // Flush any remaining tool parts after the loop
         flushToolParts();
 
+        // Merge consecutive contents with the same role (Gemini API requires strict role alternation)
+        const mergedContents = FormatConverter.mergeConsecutiveSameRoleContents(googleContents);
+
         // Build Google request
         const googleRequest = {
-            contents: googleContents,
+            contents: mergedContents,
             ...(systemInstruction && {
                 systemInstruction: { parts: systemInstruction.parts, role: "user" },
             }),
@@ -854,19 +872,47 @@ class FormatConverter {
                 thinkingConfig.includeThoughts = rawThinkingConfig.includeThoughts;
             }
 
+            const rawLevel = rawThinkingConfig.thinking_level ?? rawThinkingConfig.thinkingLevel;
+            if (rawLevel != null) {
+                const normalizedLevel = String(rawLevel).trim().toLowerCase();
+                const mappedLevel = FormatConverter.THINKING_LEVEL_MAP[normalizedLevel];
+                if (mappedLevel) {
+                    thinkingConfig.thinkingLevel = mappedLevel;
+                }
+            }
+
+            const rawBudget = rawThinkingConfig.thinking_budget ?? rawThinkingConfig.thinkingBudget;
+            if (rawBudget != null && typeof rawBudget === "number" && !isNaN(rawBudget)) {
+                thinkingConfig.thinkingBudget = rawBudget;
+            }
+
             this.logger.info(
                 `[Adapter] Successfully extracted and converted thinking config: ${JSON.stringify(thinkingConfig)}`
             );
         }
 
         // Handle OpenAI reasoning_effort parameter
-        if (!thinkingConfig) {
+        if (!thinkingConfig || thinkingConfig.thinkingLevel === undefined) {
             const effort = openaiBody.reasoning_effort || extraBody.reasoning_effort;
-            if (effort) {
-                this.logger.debug(
-                    `[Adapter] Detected OpenAI standard reasoning parameter (reasoning_effort: ${effort}), auto-converting to Google format.`
-                );
-                thinkingConfig = { includeThoughts: true };
+            if (effort != null) {
+                const normalizedEffort = String(effort).trim().toLowerCase();
+                const mappedLevel = FormatConverter.THINKING_LEVEL_MAP[normalizedEffort];
+                if (!thinkingConfig) {
+                    thinkingConfig = { includeThoughts: true };
+                } else if (thinkingConfig.includeThoughts === undefined) {
+                    thinkingConfig.includeThoughts = true;
+                }
+
+                if (mappedLevel) {
+                    thinkingConfig.thinkingLevel = mappedLevel;
+                    this.logger.debug(
+                        `[Adapter] Detected OpenAI reasoning_effort (${normalizedEffort}), mapped thinkingLevel to ${mappedLevel}.`
+                    );
+                } else {
+                    this.logger.debug(
+                        "[Adapter] Detected OpenAI standard reasoning parameter (reasoning_effort), auto-converting to Google format."
+                    );
+                }
             }
         }
 
@@ -1184,20 +1230,7 @@ class FormatConverter {
                 const delta = {};
                 let hasContent = false;
 
-                if (part.thought === true) {
-                    if (part.text) {
-                        delta.reasoning_content = part.text;
-                        hasContent = true;
-                    }
-                } else if (part.text) {
-                    delta.content = part.text;
-                    hasContent = true;
-                } else if (part.inlineData) {
-                    const image = part.inlineData;
-                    delta.content = `![Generated Image](data:${image.mimeType};base64,${image.data})`;
-                    this.logger.info("[Adapter] Successfully parsed image from streaming response chunk.");
-                    hasContent = true;
-                } else if (part.functionCall) {
+                if (part.functionCall) {
                     // Convert Gemini functionCall to OpenAI tool_calls format
                     const funcCall = part.functionCall;
                     const toolCallId = `call_${this._generateRequestId()}`;
@@ -1224,6 +1257,19 @@ class FormatConverter {
                     this.logger.info(
                         `[Adapter] Converted Gemini functionCall to OpenAI tool_calls: ${funcCall.name} (index: ${toolCallIndex})`
                     );
+                    hasContent = true;
+                } else if (part.thought === true) {
+                    if (part.text) {
+                        delta.reasoning_content = part.text;
+                        hasContent = true;
+                    }
+                } else if (part.text) {
+                    delta.content = part.text;
+                    hasContent = true;
+                } else if (part.inlineData) {
+                    const image = part.inlineData;
+                    delta.content = `![Generated Image](data:${image.mimeType};base64,${image.data})`;
+                    this.logger.info("[Adapter] Successfully parsed image from streaming response chunk.");
                     hasContent = true;
                 }
 
@@ -1601,65 +1647,9 @@ class FormatConverter {
             // Parts -> SSE events
             if (candidate.content && Array.isArray(candidate.content.parts)) {
                 for (const part of candidate.content.parts) {
-                    // The Responses API exposes reasoning summaries via `summary` + `response.reasoning_summary_text.*`.
-                    // Map Gemini "thought" parts to reasoning *summary* to match official expectations.
-                    if (part?.thought === true) {
-                        if (part?.text) {
-                            const reasoningItem = ensureReasoningItem();
-                            streamState.reasoningSummaryText += part.text;
-
-                            if (!streamState.reasoningSummaryPartAdded) {
-                                streamState.reasoningSummaryPartAdded = true;
-                                pushEvent("response.reasoning_summary_part.added", {
-                                    item_id: reasoningItem.id,
-                                    output_index: reasoningItem.output_index,
-                                    part: {
-                                        text: "",
-                                        type: "summary_text",
-                                    },
-                                    summary_index: reasoningItem.summary_index ?? 0,
-                                });
-                            }
-
-                            pushEvent("response.reasoning_summary_text.delta", {
-                                delta: part.text,
-                                item_id: reasoningItem.id,
-                                output_index: reasoningItem.output_index,
-                                summary_index: reasoningItem.summary_index ?? 0,
-                            });
-                        }
-                        continue;
-                    }
-
-                    if (part?.text) {
-                        const messageItem = ensureMessageItem();
-                        streamState.messageText += part.text;
-
-                        pushEvent("response.output_text.delta", {
-                            content_index: messageItem.content_index,
-                            delta: part.text,
-                            item_id: messageItem.id,
-                            output_index: messageItem.output_index,
-                        });
-                    } else if (part?.inlineData) {
-                        // This proxy intentionally does not expose image outputs in Responses API because many
-                        // clients treat `image_generation_call` as a hosted tool call and may initiate a second
-                        // tool-execution roundtrip that Gemini image models cannot support (function calling).
-                        // Emit a one-time text note so clients don't get an empty response.
-                        if (!streamState.imageOutputSuppressedNoticeSent) {
-                            streamState.imageOutputSuppressedNoticeSent = true;
-                            const messageItem = ensureMessageItem();
-                            const note =
-                                "[Image output omitted: Responses API image outputs are disabled by this proxy.]";
-                            streamState.messageText += note;
-                            pushEvent("response.output_text.delta", {
-                                content_index: messageItem.content_index,
-                                delta: note,
-                                item_id: messageItem.id,
-                                output_index: messageItem.output_index,
-                            });
-                        }
-                    } else if (part?.functionCall) {
+                    // Check functionCall FIRST so a part annotated with `thought: true` alongside a
+                    // tool call is not dropped by the reasoning branch below.
+                    if (part?.functionCall) {
                         const funcCall = part.functionCall;
                         const itemId = `fc_${this._generateRequestId()}`;
                         const callId = `call_${this._generateRequestId()}`;
@@ -1703,6 +1693,61 @@ class FormatConverter {
                         this.logger.info(
                             `[Adapter] Converted Gemini functionCall to Response API function_call: ${funcCall.name}`
                         );
+                    } else if (part?.thought === true) {
+                        // The Responses API exposes reasoning summaries via `summary` + `response.reasoning_summary_text.*`.
+                        // Map Gemini "thought" parts to reasoning *summary* to match official expectations.
+                        if (part?.text) {
+                            const reasoningItem = ensureReasoningItem();
+                            streamState.reasoningSummaryText += part.text;
+
+                            if (!streamState.reasoningSummaryPartAdded) {
+                                streamState.reasoningSummaryPartAdded = true;
+                                pushEvent("response.reasoning_summary_part.added", {
+                                    item_id: reasoningItem.id,
+                                    output_index: reasoningItem.output_index,
+                                    part: {
+                                        text: "",
+                                        type: "summary_text",
+                                    },
+                                    summary_index: reasoningItem.summary_index ?? 0,
+                                });
+                            }
+
+                            pushEvent("response.reasoning_summary_text.delta", {
+                                delta: part.text,
+                                item_id: reasoningItem.id,
+                                output_index: reasoningItem.output_index,
+                                summary_index: reasoningItem.summary_index ?? 0,
+                            });
+                        }
+                    } else if (part?.text) {
+                        const messageItem = ensureMessageItem();
+                        streamState.messageText += part.text;
+
+                        pushEvent("response.output_text.delta", {
+                            content_index: messageItem.content_index,
+                            delta: part.text,
+                            item_id: messageItem.id,
+                            output_index: messageItem.output_index,
+                        });
+                    } else if (part?.inlineData) {
+                        // This proxy intentionally does not expose image outputs in Responses API because many
+                        // clients treat `image_generation_call` as a hosted tool call and may initiate a second
+                        // tool-execution roundtrip that Gemini image models cannot support (function calling).
+                        // Emit a one-time text note so clients don't get an empty response.
+                        if (!streamState.imageOutputSuppressedNoticeSent) {
+                            streamState.imageOutputSuppressedNoticeSent = true;
+                            const messageItem = ensureMessageItem();
+                            const note =
+                                "[Image output omitted: Responses API image outputs are disabled by this proxy.]";
+                            streamState.messageText += note;
+                            pushEvent("response.output_text.delta", {
+                                content_index: messageItem.content_index,
+                                delta: note,
+                                item_id: messageItem.id,
+                                output_index: messageItem.output_index,
+                            });
+                        }
                     }
                 }
             }
@@ -1721,7 +1766,7 @@ class FormatConverter {
                 const responseUsage = {
                     input_tokens: usage.prompt_tokens,
                     input_tokens_details: {
-                        cached_tokens: 0,
+                        cached_tokens: usage.prompt_tokens_details?.cached_tokens || 0,
                     },
                     output_tokens: usage.completion_tokens,
                     output_tokens_details: {
@@ -1819,14 +1864,7 @@ class FormatConverter {
 
         if (candidate.content && Array.isArray(candidate.content.parts)) {
             for (const part of candidate.content.parts) {
-                if (part.thought === true) {
-                    reasoning_content += part.text || "";
-                } else if (part.text) {
-                    content += part.text;
-                } else if (part.inlineData) {
-                    const image = part.inlineData;
-                    content += `![Generated Image](data:${image.mimeType};base64,${image.data})`;
-                } else if (part.functionCall) {
+                if (part.functionCall) {
                     // Convert Gemini functionCall to OpenAI tool_calls format
                     const funcCall = part.functionCall;
                     const toolCallId = `call_${this._generateRequestId()}`;
@@ -1842,6 +1880,13 @@ class FormatConverter {
                     };
                     tool_calls.push(toolCallObj);
                     this.logger.info(`[Adapter] Converted Gemini functionCall to OpenAI tool_calls: ${funcCall.name}`);
+                } else if (part.thought === true) {
+                    reasoning_content += part.text || "";
+                } else if (part.text) {
+                    content += part.text;
+                } else if (part.inlineData) {
+                    const image = part.inlineData;
+                    content += `![Generated Image](data:${image.mimeType};base64,${image.data})`;
                 }
             }
         }
@@ -1952,20 +1997,9 @@ class FormatConverter {
         let reasoningContent = "";
         if (candidate.content && Array.isArray(candidate.content.parts)) {
             for (const part of candidate.content.parts) {
-                // Responses API supports reasoning output items; map Gemini "thought" parts into a reasoning *summary*.
-                if (part?.thought === true) {
-                    if (part?.text) reasoningContent += part.text;
-                    continue;
-                } else if (part.text) {
-                    // Regular text content
-                    messageContent += part.text;
-                } else if (part.inlineData) {
-                    // Responses API image outputs are intentionally suppressed by this proxy; preserve a text note.
-                    if (!messageContent) {
-                        messageContent =
-                            "[Image output omitted: Responses API image outputs are disabled by this proxy.]";
-                    }
-                } else if (part.functionCall) {
+                // Check functionCall FIRST so a part annotated with `thought: true` alongside a
+                // tool call is not dropped by the reasoning branch below.
+                if (part?.functionCall) {
                     // Function call
                     const funcCall = part.functionCall;
                     const callId = `call_${this._generateRequestId()}`;
@@ -1980,6 +2014,17 @@ class FormatConverter {
                     this.logger.info(
                         `[Adapter] Converted Gemini functionCall to Response API function_call: ${funcCall.name}`
                     );
+                } else if (part?.thought === true) {
+                    if (part?.text) reasoningContent += part.text;
+                } else if (part.text) {
+                    // Regular text content
+                    messageContent += part.text;
+                } else if (part.inlineData) {
+                    // Responses API image outputs are intentionally suppressed by this proxy; preserve a text note.
+                    if (!messageContent) {
+                        messageContent =
+                            "[Image output omitted: Responses API image outputs are disabled by this proxy.]";
+                    }
                 }
             }
         }
@@ -2051,7 +2096,7 @@ class FormatConverter {
             usage: {
                 input_tokens: usage.prompt_tokens,
                 input_tokens_details: {
-                    cached_tokens: 0,
+                    cached_tokens: usage.prompt_tokens_details?.cached_tokens || 0,
                 },
                 output_tokens: usage.completion_tokens,
                 output_tokens_details: {
@@ -2086,7 +2131,16 @@ class FormatConverter {
     }
 
     _parseUsage(googleResponse) {
-        const usage = googleResponse.usageMetadata || {};
+        const usage = googleResponse?.usageMetadata || {};
+
+        let cachedTokens = 0;
+        const rawCached = usage.cachedContentTokenCount;
+        if (typeof rawCached === "number" || typeof rawCached === "string") {
+            const parsed = Number(rawCached);
+            if (Number.isFinite(parsed) && parsed > 0) {
+                cachedTokens = Math.floor(parsed);
+            }
+        }
 
         const inputTokens = usage.promptTokenCount || 0;
         const toolPromptTokens = usage.toolUsePromptTokenCount || 0;
@@ -2105,7 +2159,7 @@ class FormatConverter {
 
         const promptTokens = inputTokens + toolPromptTokens;
         const totalCompletionTokens = completionTextTokens + reasoningTokens;
-        const totalTokens = googleResponse.usageMetadata?.totalTokenCount || 0;
+        const totalTokens = googleResponse?.usageMetadata?.totalTokenCount || 0;
 
         return {
             completion_tokens: totalCompletionTokens,
@@ -2116,6 +2170,7 @@ class FormatConverter {
             },
             prompt_tokens: promptTokens,
             prompt_tokens_details: {
+                cached_tokens: cachedTokens,
                 text_tokens: inputTokens,
                 tool_tokens: toolPromptTokens,
             },
@@ -2428,9 +2483,12 @@ class FormatConverter {
         // Flush remaining tool parts
         flushToolParts();
 
+        // Merge consecutive contents with the same role (Gemini API requires strict role alternation).
+        const mergedContents = FormatConverter.mergeConsecutiveSameRoleContents(googleContents);
+
         // Build Google request
         const googleRequest = {
-            contents: googleContents,
+            contents: mergedContents,
             ...(systemInstruction && {
                 systemInstruction: { parts: systemInstruction.parts, role: "user" },
             }),
@@ -3290,9 +3348,12 @@ class FormatConverter {
             }
         }
 
+        // Merge consecutive contents with the same role (Gemini API requires strict role alternation).
+        const mergedContents = FormatConverter.mergeConsecutiveSameRoleContents(googleContents);
+
         // Build Google request
         const googleRequest = {
-            contents: googleContents,
+            contents: mergedContents,
             ...(systemInstruction && {
                 systemInstruction,
             }),
@@ -3311,8 +3372,39 @@ class FormatConverter {
 
         if (reasoning) {
             thinkingConfig = { includeThoughts: true };
+            // Map Responses reasoning.effort (and the compatible top-level reasoning_effort alias)
+            // through THINKING_LEVEL_MAP, exactly like the chat path maps reasoning_effort.
+            const effort = reasoning.effort ?? reasoning.reasoning_effort;
+            if (effort != null) {
+                const normalizedEffort = String(effort).trim().toLowerCase();
+                const mappedLevel = FormatConverter.THINKING_LEVEL_MAP[normalizedEffort];
+                if (mappedLevel) {
+                    thinkingConfig.thinkingLevel = mappedLevel;
+                    this.logger.debug(
+                        `[Adapter] Detected OpenAI Response reasoning.effort (${normalizedEffort}), mapped thinkingLevel to ${mappedLevel}.`
+                    );
+                } else {
+                    this.logger.debug(
+                        "[Adapter] Detected OpenAI Response reasoning parameter (reasoning.effort), auto-converting to Google format."
+                    );
+                }
+            }
+        } else if (responseBody.reasoning_effort != null) {
+            // Compatible top-level alias (chat-style reasoning_effort) without a reasoning object.
+            const normalizedEffort = String(responseBody.reasoning_effort).trim().toLowerCase();
+            const mappedLevel = FormatConverter.THINKING_LEVEL_MAP[normalizedEffort];
+            thinkingConfig = { includeThoughts: true };
+            if (mappedLevel) {
+                thinkingConfig.thinkingLevel = mappedLevel;
+                this.logger.debug(
+                    `[Adapter] Detected OpenAI Response reasoning_effort (${normalizedEffort}), mapped thinkingLevel to ${mappedLevel}.`
+                );
+            } else {
+                this.logger.debug(
+                    "[Adapter] Detected OpenAI Response reasoning_effort, auto-converting to Google format."
+                );
+            }
         }
-
         // Force thinking mode (only set includeThoughts=true when missing)
         if (
             this.serverSystem.config.forceThinking &&
@@ -3564,6 +3656,18 @@ class FormatConverter {
         });
         this.logger.info("[Adapter] OpenAI Response API to Google translation complete.");
         return { cleanModelName, googleRequest, modelStreamingMode };
+    }
+    static mergeConsecutiveSameRoleContents(contents) {
+        if (!Array.isArray(contents)) return contents;
+        const mergedContents = [];
+        for (const c of contents) {
+            if (mergedContents.length > 0 && mergedContents[mergedContents.length - 1].role === c.role) {
+                mergedContents[mergedContents.length - 1].parts.push(...c.parts);
+            } else {
+                mergedContents.push(c);
+            }
+        }
+        return mergedContents;
     }
 }
 
