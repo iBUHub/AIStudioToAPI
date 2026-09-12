@@ -7,6 +7,7 @@
 
 const axios = require("axios");
 const mime = require("mime-types");
+const { convertGeminiAudioResponse } = require("../utils/AudioUtils");
 
 /**
  * Format Converter Module
@@ -1034,6 +1035,84 @@ class FormatConverter {
         this.logger.debug("[Adapter] OpenAI embeddings to Google OpenAI-compatible translation complete.");
 
         return { cleanModelName, googleRequest, path };
+    }
+
+    /**
+     * Convert an OpenAI speech request into Gemini native TTS format.
+     * Only WAV and raw PCM responses are supported because Gemini returns PCM and this
+     * project does not include a lossy audio encoder.
+     *
+     * @param {object} openaiBody - OpenAI speech request body
+     * @returns {{ cleanModelName: string, googleRequest: object, responseFormat: "wav"|"pcm" }}
+     */
+    translateOpenAISpeechToGoogle(openaiBody) {
+        if (!openaiBody || typeof openaiBody !== "object" || Array.isArray(openaiBody)) {
+            throw new Error("Request body must be a JSON object.");
+        }
+
+        const requiredStringFields = ["model", "input", "voice"];
+        for (const field of requiredStringFields) {
+            if (typeof openaiBody[field] !== "string" || openaiBody[field].trim().length === 0) {
+                throw new Error(`Missing required parameter: '${field}'.`);
+            }
+        }
+
+        const supportedFields = new Set(["input", "model", "response_format", "voice"]);
+        const unsupportedFields = Object.keys(openaiBody).filter(field => !supportedFields.has(field));
+        if (unsupportedFields.length > 0) {
+            const fieldList = unsupportedFields.map(field => `'${field}'`).join(", ");
+            throw new Error(`Unsupported parameter${unsupportedFields.length === 1 ? "" : "s"}: ${fieldList}.`);
+        }
+
+        const responseFormat = openaiBody.response_format === undefined ? "wav" : openaiBody.response_format;
+        if (typeof responseFormat !== "string" || !["pcm", "wav"].includes(responseFormat.toLowerCase())) {
+            const requestedFormat = typeof responseFormat === "string" ? responseFormat : typeof responseFormat;
+            throw new Error(
+                `Unsupported response_format '${requestedFormat}'. Supported response formats are 'wav' and 'pcm'.`
+            );
+        }
+
+        const cleanModelName = openaiBody.model.trim().replace(/^models\//, "");
+        if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(cleanModelName)) {
+            throw new Error("Invalid 'model': expected a Gemini model name without path or query parameters.");
+        }
+
+        const googleRequest = {
+            contents: [
+                {
+                    parts: [{ text: openaiBody.input }],
+                    role: "user",
+                },
+            ],
+            generationConfig: {
+                responseModalities: ["AUDIO"],
+                speechConfig: {
+                    voiceConfig: {
+                        prebuiltVoiceConfig: {
+                            voiceName: openaiBody.voice.trim(),
+                        },
+                    },
+                },
+            },
+        };
+
+        this.logger.info(`[Adapter] OpenAI speech request translated for model "${cleanModelName}".`);
+        return {
+            cleanModelName,
+            googleRequest,
+            responseFormat: responseFormat.toLowerCase(),
+        };
+    }
+
+    /**
+     * Decode Gemini inline audio and convert it to the requested OpenAI speech format.
+     *
+     * @param {object} googleResponse - Gemini generateContent response
+     * @param {"wav"|"pcm"} responseFormat - Validated output format
+     * @returns {{ audioBuffer: Buffer, contentType: string }}
+     */
+    convertGoogleToOpenAISpeech(googleResponse, responseFormat) {
+        return convertGeminiAudioResponse(googleResponse, responseFormat);
     }
 
     /**
