@@ -78,6 +78,15 @@ class BrowserManager {
         // Map: authIndex -> { success: boolean, failed: boolean }
         this._wsInitState = new Map();
 
+        // Dynamic model list: captured ListModels RPC responses from browser
+        // Map: authIndex -> { data, headers, parsed, timestamp, url }
+        this._capturedListModels = new Map();
+        this._liveModelsCache = null;
+        this._liveModelsPromise = null;
+        // Incompatible models filtered from ListModels (e.g. deep-research-preview requires Interactions API)
+        // Map: modelName (without prefix) -> { reason, displayName, rawMethods }
+        this._incompatibleModels = new Map();
+
         // Target URL for AI Studio app
         this.targetUrl = config.aiStudioAppUrl;
 
@@ -817,6 +826,613 @@ class BrowserManager {
      * @param {Page} page - The page object to navigate
      * @param {string} logPrefix - Log prefix for messages (e.g., "[Browser]" or "[Reconnect]")
      */
+    _setupListModelsCapture(page, authIndex) {
+        const captureHandler = async response => {
+            try {
+                const url = response.url();
+                if (!url.includes("/ListModels")) return;
+                const request = response.request();
+                if (request.method() !== "POST") return;
+
+                const status = response.status();
+                if (status !== 200) return;
+
+                const body = await response.text();
+                if (!body || body.length < 100) return;
+
+                const reqHeaders = request.headers();
+                const parsed = this._parseListModelsResponse(body);
+
+                if (parsed && parsed.length > 0) {
+                    this._capturedListModels.set(authIndex, {
+                        data: body,
+                        headers: reqHeaders,
+                        parsed,
+                        timestamp: Date.now(),
+                        url,
+                    });
+                    this.logger.info(
+                        `[Models] Captured ListModels for #${authIndex}: ${parsed.length} models from ${url.slice(0, 80)}`
+                    );
+                }
+            } catch (e) {
+                this.logger.debug(`[Models] ListModels capture error: ${e.message}`);
+            }
+        };
+        page.on("response", captureHandler);
+    }
+
+    // ------------------------------------------------------------------
+    // Dynamic model compatibility layer
+    // ------------------------------------------------------------------
+
+    // ------------------------------------------------------------------
+    // Dynamic model compatibility layer
+    //
+    // Grounded in the REAL ListModels RPC schema (verified against a live capture,
+    // 2026-08; indices 0-7 corroborated by the community doc M1noa/how "AIStudio-API.md"):
+    //   entry[0]  name ("models/...")          entry[5]  inputTokenLimit
+    //   entry[2]  version                      entry[6]  outputTokenLimit
+    //   entry[3]  displayName                  entry[7]  supportedGenerationMethods
+    //   entry[4]  description                  entry[74] model-class enum
+    //
+    // Model-class enum observed values: 10=text, 14=video, 17=image, 18=live, 3=gemma…
+    // and 19=AGENT. Agents (antigravity, deep-research*) are Interactions-API-only, yet
+    // they ADVERTISE "generateContent" in entry[7] while every actual call 400s with
+    // "This model only supports Interactions API" — so methods alone CANNOT detect them;
+    // the class enum is the reliable signal.
+    // ------------------------------------------------------------------
+
+    // Known generation methods that the current proxy can route via generateContent/streamGenerateContent/predict/embedContent
+    static COMPATIBLE_METHODS = new Set([
+        "generateContent",
+        "streamGenerateContent",
+        "countTokens",
+        "embedContent",
+        "batchEmbedContents",
+        "predict",
+        "generateAnswer",
+        "createCachedContent",
+        "batchGenerateContent",
+    ]);
+
+    // Lowercased mirror for case-insensitive matching against RPC payloads.
+    static COMPATIBLE_METHODS_LOWER = new Set([...BrowserManager.COMPATIBLE_METHODS].map(m => m.toLowerCase()));
+
+    // Exact standalone tokens that indicate Interactions-API / agent-only capability.
+    // Matched EXACTLY during flat scans so prose (e.g. descriptions mentioning the word
+    // "interaction") can never trigger a false positive.
+    static INTERACTION_METHOD_TOKENS = new Set([
+        "interact",
+        "interaction",
+        "interactions",
+        "startinteraction",
+        "getinteraction",
+        "listinteractions",
+        "cancelinteraction",
+        "deleteinteraction",
+        "streaminteraction",
+    ]);
+
+    // Loose substring hints used ONLY inside structured all-string arrays (i.e. genuine
+    // method lists), where every element being a method-like token makes context safe.
+    static METHOD_HINT_PATTERN = /(generatecontent|predict|embed|interact|counttokens|cachedcontent|generateanswer)/i;
+
+    // Schema anchors into a ListModels entry (see layer documentation above).
+    static ENTRY_FIELD = {
+        DESCRIPTION: 4,
+        DISPLAY_NAME: 3,
+        INPUT_TOKEN_LIMIT: 5,
+        MODEL_CLASS: 74,
+        NAME: 0,
+        OUTPUT_TOKEN_LIMIT: 6,
+        SUPPORTED_METHODS: 7,
+        VERSION: 2,
+    };
+
+    // Model-class enum value observed ONLY on agent entries across live captures.
+    static MODEL_CLASS_AGENT = 19;
+
+    // Verify the fixed-index schema anchors hold for this entry before trusting them.
+    // If Google shifts the protobuf layout, we degrade to structural scanning instead of
+    // misreading neighbouring fields.
+    _schemaAnchorsValid(entry) {
+        const F = BrowserManager.ENTRY_FIELD;
+        return (
+            entry.length > F.MODEL_CLASS &&
+            typeof entry[F.NAME] === "string" &&
+            entry[F.NAME].startsWith("models/") &&
+            Array.isArray(entry[F.SUPPORTED_METHODS]) &&
+            entry[F.SUPPORTED_METHODS].every(v => typeof v === "string")
+        );
+    }
+
+    // Agent detection via the model-class enum (entry[74]). When the verified layout
+    // holds we read the exact field; otherwise fall back to a constrained scan for
+    // enum-like int arrays containing the agent flag. Element-count and range bounds
+    // keep pricing figures / coordinate pairs from false-positiveing.
+    _isAgentTypeEntry(entry) {
+        const AGENT = BrowserManager.MODEL_CLASS_AGENT;
+        if (this._schemaAnchorsValid(entry)) {
+            const cls = entry[BrowserManager.ENTRY_FIELD.MODEL_CLASS];
+            return Array.isArray(cls) && cls.includes(AGENT);
+        }
+        const stack = [entry];
+        const seen = new Set();
+        while (stack.length) {
+            const cur = stack.pop();
+            if (!cur || typeof cur !== "object" || seen.has(cur)) continue;
+            seen.add(cur);
+            if (Array.isArray(cur)) {
+                if (
+                    cur.length > 0 &&
+                    cur.length <= 10 &&
+                    cur.every(v => Number.isInteger(v) && v >= 0 && v < 128) &&
+                    cur.includes(AGENT)
+                ) {
+                    return true;
+                }
+                for (const v of cur) if (v && typeof v === "object") stack.push(v);
+            } else {
+                for (const v of Object.values(cur)) if (v && typeof v === "object") stack.push(v);
+            }
+        }
+        return false;
+    }
+
+    // Read known fields from an entry using anchored indices (with sanity verification)
+    // and fall back to scanning when the layout does not match.
+    _readEntryFields(entry) {
+        const F = BrowserManager.ENTRY_FIELD;
+        const anchored = this._schemaAnchorsValid(entry);
+        const fields = {
+            methods: anchored ? [...entry[F.SUPPORTED_METHODS]] : this._extractSupportedMethods(entry),
+            name: typeof entry[F.NAME] === "string" ? entry[F.NAME] : null,
+        };
+        if (anchored) {
+            if (typeof entry[F.VERSION] === "string") fields.version = entry[F.VERSION];
+            if (typeof entry[F.DISPLAY_NAME] === "string") fields.displayName = entry[F.DISPLAY_NAME];
+            if (typeof entry[F.DESCRIPTION] === "string") fields.description = entry[F.DESCRIPTION];
+            if (typeof entry[F.INPUT_TOKEN_LIMIT] === "number") fields.inputTokenLimit = entry[F.INPUT_TOKEN_LIMIT];
+            if (typeof entry[F.OUTPUT_TOKEN_LIMIT] === "number") fields.outputTokenLimit = entry[F.OUTPUT_TOKEN_LIMIT];
+        } else {
+            // Unverified layout – best-effort legacy reads
+            if (typeof entry[3] === "string") fields.displayName = entry[3];
+            if (typeof entry[12] === "number") fields.inputTokenLimit = entry[12];
+            if (typeof entry[14] === "number") fields.outputTokenLimit = entry[14];
+        }
+        return fields;
+    }
+
+    // Optional operator-curated blocklist (comma-separated JS regexes). Empty by default:
+    // detection is fully API-driven, no hardcoded model names anywhere.
+    _extraBlocklistRegexes() {
+        const raw = process.env.DYNAMIC_MODELS_EXTRA_BLOCKLIST || "";
+        if (!raw.trim()) return [];
+        if (!this._blocklistCache || this._blocklistCacheRaw !== raw) {
+            this._blocklistCacheRaw = raw;
+            this._blocklistCache = raw
+                .split(",")
+                .map(s => s.trim())
+                .filter(Boolean)
+                .map(s => {
+                    try {
+                        return new RegExp(s, "i");
+                    } catch {
+                        return null;
+                    }
+                })
+                .filter(Boolean);
+        }
+        return this._blocklistCache;
+    }
+
+    // Pass 1 helper: recursively find structured method lists inside the entry.
+    // An all-string array counts as a method list only when >=50% of its elements match
+    // known method-hint patterns — random string arrays that merely CONTAIN one
+    // "interaction"-ish word are rejected, preventing false positives.
+    _collectMethodLists(node, found, seen) {
+        if (node == null || typeof node !== "object" || seen.has(node)) return;
+        seen.add(node);
+        if (Array.isArray(node)) {
+            const allStrings = node.length > 0 && node.every(v => typeof v === "string");
+            if (allStrings) {
+                const hits = node.filter(s => BrowserManager.METHOD_HINT_PATTERN.test(String(s))).length;
+                if (hits / node.length >= 0.5) {
+                    for (const s of node) found.add(String(s));
+                    return; // method lists contain only primitives; no deeper scan needed
+                }
+            }
+            for (const v of node) this._collectMethodLists(v, found, seen);
+        } else {
+            for (const v of Object.values(node)) this._collectMethodLists(v, found, seen);
+        }
+    }
+
+    // Pass 2 helper: accept a bare string only on an EXACT vocabulary hit.
+    _maybeAddMethodString(str, found) {
+        const lower = String(str).toLowerCase();
+        if (BrowserManager.COMPATIBLE_METHODS_LOWER.has(lower) || BrowserManager.INTERACTION_METHOD_TOKENS.has(lower)) {
+            found.add(String(str));
+        }
+    }
+
+    _extractSupportedMethods(entry) {
+        // Auto-detect a model's advertised capabilities straight from the captured ListModels
+        // entry (protobuf-as-array; field indices may shift between app versions, so we never
+        // rely on a fixed position). Two passes, unioned:
+        //   Pass 1 – structured scan: locate all-string arrays that ARE method lists and take
+        //            every element (loose matching is safe in that tightly-constrained context).
+        //   Pass 2 – flat scan: walk EVERY string reachable in the entry (mixed-type arrays,
+        //            object forms, deeply nested values) keeping only exact vocabulary hits.
+        const found = new Set();
+        this._collectMethodLists(entry, found, new Set());
+
+        const walkPrimitives = (node, seen) => {
+            if (node == null || seen.has(node)) return;
+            if (typeof node === "string") {
+                this._maybeAddMethodString(node, found);
+                return;
+            }
+            if (typeof node !== "object") return;
+            seen.add(node);
+            if (Array.isArray(node)) for (const v of node) walkPrimitives(v, seen);
+            else for (const v of Object.values(node)) walkPrimitives(v, seen);
+        };
+        walkPrimitives(entry, new Set());
+
+        if (found.size === 0) return null;
+        return [...found];
+    }
+
+    _isModelCompatible(methods) {
+        if (methods && methods.length > 0) {
+            const lower = [...new Set(methods.map(m => String(m).toLowerCase()))];
+            const hasCompatible = lower.some(m => BrowserManager.COMPATIBLE_METHODS_LOWER.has(m));
+            if (hasCompatible) {
+                return { basis: "methods", compatible: true };
+            }
+            // Methods present but none routable by this proxy (e.g. bidiGenerateContent-only
+            // live models, predictLongRunning video models) -> exclude.
+            return {
+                basis: "methods",
+                compatible: false,
+                reason: `no method routable via generateContent (${lower.join(", ")})`,
+            };
+        }
+        return { basis: "none", compatible: true };
+    }
+
+    _parseListModelsResponse(text) {
+        try {
+            const outer = JSON.parse(text);
+            if (!Array.isArray(outer) || outer.length < 1) return null;
+
+            const inner = outer[0];
+            if (!Array.isArray(inner)) return null;
+
+            const strictFilter = process.env.DYNAMIC_MODELS_STRICT !== "false";
+            const models = [];
+            let filteredCount = 0;
+
+            for (const entry of inner) {
+                if (!Array.isArray(entry) || entry.length < 4) continue;
+                const info = this._readEntryFields(entry);
+                const name = info.name;
+                if (!name || !name.startsWith("models/")) continue;
+                const short = name.replace(/^models\//, "");
+                const displayName = info.displayName || short;
+
+                // Layer 1 — model-class enum: catches agents even though their
+                // supportedGenerationMethods misleadingly include generateContent.
+                let incompatible = null;
+                if (this._isAgentTypeEntry(entry)) {
+                    incompatible = {
+                        basis: "type",
+                        reason: "model-class enum marks this entry as an agent (Interactions API only)",
+                    };
+                }
+
+                // Layer 2 — advertised generation methods vs what this proxy can route.
+                // Filters bidiGenerateContent-only live models, predictLongRunning video
+                // models, and any future method we cannot translate.
+                if (!incompatible) {
+                    const compat = this._isModelCompatible(info.methods);
+                    if (!compat.compatible) incompatible = compat;
+                }
+
+                // Layer 3 — optional operator-curated blocklist (default: empty).
+                if (!incompatible) {
+                    for (const re of this._extraBlocklistRegexes()) {
+                        if (re.test(short) || re.test(name)) {
+                            incompatible = {
+                                basis: "blocklist",
+                                reason: `matches DYNAMIC_MODELS_EXTRA_BLOCKLIST pattern ${re}`,
+                            };
+                            break;
+                        }
+                    }
+                }
+
+                if (strictFilter && incompatible) {
+                    filteredCount++;
+                    const record = {
+                        basis: incompatible.basis,
+                        displayName,
+                        name,
+                        rawMethods: info.methods,
+                        reason: incompatible.reason,
+                    };
+                    this._incompatibleModels.set(short, record);
+                    // Also store with full name for lookup flexibility
+                    this._incompatibleModels.set(name, { ...record });
+                    this.logger.debug(`[Models] Filtering ${name} [${record.basis}]: ${record.reason}`);
+                    continue;
+                }
+
+                const model = {
+                    displayName,
+                    name,
+                };
+                if (info.version) model.version = info.version;
+                if (info.methods && info.methods.length > 0) {
+                    model.supportedGenerationMethods = info.methods;
+                }
+                if (typeof info.inputTokenLimit === "number") model.inputTokenLimit = info.inputTokenLimit;
+                if (typeof info.outputTokenLimit === "number") model.outputTokenLimit = info.outputTokenLimit;
+
+                models.push(model);
+            }
+
+            if (filteredCount > 0) {
+                const byBasis = {};
+                for (const info of this._incompatibleModels.values()) {
+                    if (info?.basis) byBasis[info.basis] = (byBasis[info.basis] || 0) + 1;
+                }
+                this.logger.info(
+                    `[Models] Auto-filtered ${filteredCount} incompatible model(s) from ListModels ` +
+                        `(detection: ${
+                            Object.entries(byBasis)
+                                .map(([k, v]) => `${k}=${v}`)
+                                .join(", ") || "n/a"
+                        })`
+                );
+            }
+
+            return models.length > 0 ? models : null;
+        } catch {
+            return null;
+        }
+    }
+
+    isModelIncompatible(modelName) {
+        if (!modelName) return null;
+        const key = String(modelName).replace(/^models\//, "");
+        return (
+            this._incompatibleModels.get(key) ||
+            this._incompatibleModels.get(String(modelName)) ||
+            this._incompatibleModels.get(`models/${key}`) ||
+            null
+        );
+    }
+
+    _normalizeLiveModels(models) {
+        const defaults = {
+            inputTokenLimit: 1048576,
+            outputTokenLimit: 65536,
+        };
+        return models
+            .map(m => ({
+                ...defaults,
+                ...m,
+                name: m.name.startsWith("models/") ? m.name : `models/${m.name}`,
+            }))
+            .sort((a, b) => a.name.localeCompare(b.name));
+    }
+
+    async fetchLiveModels(forceRefresh = false) {
+        const dynamicModels = process.env.DYNAMIC_MODELS !== "false";
+        if (!dynamicModels) return null;
+
+        const ttl = parseInt(process.env.DYNAMIC_MODELS_TTL, 10) || 3600000;
+
+        if (!forceRefresh && this._liveModelsCache) {
+            const age = Date.now() - this._liveModelsCache.timestamp;
+            if (age < ttl) {
+                this.logger.debug(`[Models] Using cached live models (${age}ms old, ttl=${ttl}ms)`);
+                return this._liveModelsCache.models;
+            }
+        }
+
+        if (!forceRefresh && this._liveModelsPromise) {
+            return this._liveModelsPromise;
+        }
+
+        this._liveModelsPromise = this._fetchLiveModelsInternal();
+        try {
+            const models = await this._liveModelsPromise;
+            if (models && models.length > 0) {
+                this._liveModelsCache = { models, timestamp: Date.now() };
+                this.logger.info(`[Models] Fetched ${models.length} live models`);
+                return models;
+            }
+        } finally {
+            this._liveModelsPromise = null;
+        }
+
+        return null;
+    }
+
+    async _fetchLiveModelsInternal() {
+        const targetAuthIndex = this._currentAuthIndex;
+        let targetPage = this.page;
+
+        if (targetAuthIndex >= 0 && this.contexts.has(targetAuthIndex)) {
+            const ctxData = this.contexts.get(targetAuthIndex);
+            if (ctxData && ctxData.page && !ctxData.page.isClosed()) {
+                targetPage = ctxData.page;
+            }
+        }
+
+        if (!targetPage || targetPage.isClosed()) {
+            this.logger.debug("[Models] No available page for ListModels fetch");
+            return null;
+        }
+
+        // Check captured ListModels responses first (TTL-aware)
+        for (const [idx, entry] of this._capturedListModels.entries()) {
+            if (entry.parsed && entry.parsed.length > 0) {
+                const age = Date.now() - entry.timestamp;
+                const ttl = parseInt(process.env.DYNAMIC_MODELS_TTL, 10) || 3600000;
+                if (age < ttl) {
+                    this.logger.info(`[Models] Using captured ListModels for #${idx}: ${entry.parsed.length} models`);
+                    return this._normalizeLiveModels(entry.parsed);
+                }
+            }
+        }
+
+        const directCaptured = this._capturedListModels.get(targetAuthIndex);
+        if (directCaptured && directCaptured.parsed && directCaptured.parsed.length > 0) {
+            return this._normalizeLiveModels(directCaptured.parsed);
+        }
+
+        // Auto-detect base URL from captured request or page config (CoJqbf)
+        const capturedForManual =
+            this._capturedListModels.get(targetAuthIndex) || [...this._capturedListModels.values()][0];
+        let listModelsUrl = capturedForManual?.url || null;
+        let apiKey = capturedForManual?.headers?.["x-goog-api-key"] || null;
+
+        if (!listModelsUrl) {
+            try {
+                const base = await targetPage.evaluate(() => {
+                    /* eslint-disable no-undef */
+                    const html = document.documentElement.innerHTML;
+                    const m = html.match(/"CoJqbf"\s*:\s*"([^"]+)"/);
+                    return m ? m[1] : null;
+                });
+                if (base) {
+                    listModelsUrl = `${base}/$rpc/google.internal.alkali.applications.makersuite.v1.MakerSuiteService/ListModels`;
+                    this.logger.debug(`[Models] Auto-detected ListModels base from CoJqbf: ${base}`);
+                }
+            } catch (e) {
+                this.logger.debug(`[Models] CoJqbf auto-detect failed: ${e.message}`);
+            }
+        }
+        if (!apiKey) {
+            try {
+                const pageKey = await targetPage.evaluate(() => {
+                    /* eslint-disable no-undef */
+                    const scripts = Array.from(document.scripts)
+                        .map(s => s.textContent)
+                        .join(" ");
+                    const m =
+                        scripts.match(/AIzaSyDdP[0-9A-Za-z_-]+/) ||
+                        document.documentElement.innerHTML.match(/AIzaSy[0-9A-Za-z_-]+/);
+                    return m ? m[0] : null;
+                });
+                if (pageKey) apiKey = pageKey;
+            } catch (e) {
+                this.logger.debug(`[Models] API key auto-detect failed: ${e.message}`);
+            }
+        }
+
+        listModelsUrl =
+            listModelsUrl ||
+            "https://alkalimakersuite-pa.clients6.google.com/$rpc/google.internal.alkali.applications.makersuite.v1.MakerSuiteService/ListModels";
+        apiKey = apiKey || "AIzaSyDdP816MREB3SkjZO04QXbjsigfcI0GWOs";
+
+        try {
+            const sapisid = await targetPage.evaluate(() => {
+                /* eslint-disable no-undef */
+                function getCookie(name) {
+                    const m = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
+                    return m ? m[2] : null;
+                }
+                return getCookie("SAPISID") || getCookie("__Secure-1PAPISID") || getCookie("__Secure-3PAPISID") || "";
+            });
+            if (!sapisid) {
+                throw new Error("SAPISID cookie not found");
+            }
+            const crypto = require("crypto");
+            const origin = "https://aistudio.google.com";
+            const ts = Math.floor(Date.now() / 1000);
+            const hashHex = crypto.createHash("sha1").update(`${ts} ${sapisid} ${origin}`).digest("hex");
+            const sapisidhash = `${ts}_${hashHex}`;
+
+            const result = await targetPage.evaluate(
+                async ({ sapisidhashInner, url, apiKeyInner }) => {
+                    const headers = {
+                        authorization: `SAPISIDHASH ${sapisidhashInner} SAPISID1PHASH ${sapisidhashInner} SAPISID3PHASH ${sapisidhashInner}`,
+                        "content-type": "application/json+protobuf",
+                        "x-goog-api-key": apiKeyInner,
+                        "x-goog-authuser": "0",
+                        "x-user-agent": "grpc-web-javascript/0.1",
+                    };
+                    try {
+                        const resp = await fetch(url, {
+                            body: "[]",
+                            credentials: "include",
+                            headers,
+                            method: "POST",
+                        });
+                        const text = await resp.text();
+                        if (!resp.ok) {
+                            return {
+                                error: `HTTP ${resp.status}: ${text.slice(0, 800)}`,
+                                ok: false,
+                                status: resp.status,
+                            };
+                        }
+                        return { body: text, ok: true, url };
+                    } catch (e) {
+                        return { error: e.message, ok: false };
+                    }
+                },
+                { apiKeyInner: apiKey, sapisidhashInner: sapisidhash, url: listModelsUrl }
+            );
+
+            if (!result.ok) {
+                this.logger.warn(`[Models] ListModels RPC failed: ${result.error}`);
+                return null;
+            }
+
+            const parsed = this._parseListModelsResponse(result.body);
+            if (parsed && parsed.length > 0) {
+                this._capturedListModels.set(targetAuthIndex, {
+                    data: result.body,
+                    headers: { "x-goog-api-key": apiKey },
+                    parsed,
+                    timestamp: Date.now(),
+                    url: result.url,
+                });
+                return this._normalizeLiveModels(parsed);
+            }
+
+            this.logger.warn("[Models] ListModels response contained no valid models");
+            return null;
+        } catch (e) {
+            this.logger.warn(`[Models] ListModels fetch failed: ${e.message}`);
+            return null;
+        }
+    }
+
+    async refreshLiveModels(persist = false) {
+        this._liveModelsCache = null;
+        const models = await this.fetchLiveModels(true);
+        if (persist && models && models.length > 0) {
+            const fs = require("fs");
+            const path = require("path");
+            const modelsPath = path.join(process.cwd(), "configs", "models.json");
+            try {
+                fs.writeFileSync(modelsPath, JSON.stringify({ models }, null, 4), "utf8");
+                this.logger.info(`[Models] Persisted ${models.length} live models to ${modelsPath}`);
+            } catch (e) {
+                this.logger.warn(`[Models] Failed to persist models: ${e.message}`);
+            }
+        }
+        return models;
+    }
+
     async _navigateAndWakeUpPage(page, logPrefix = "[Browser]") {
         this.logger.debug(`${logPrefix} Navigating to target page...`);
 
@@ -2152,6 +2768,7 @@ class BrowserManager {
             // Check abort status before navigation (most time-consuming part)
             this._throwIfContextInitAborted(authIndex, isBackgroundTask);
 
+            this._setupListModelsCapture(page, authIndex);
             await this._navigateAndWakeUpPage(page, `[Context#${authIndex}]`);
 
             // Check abort status after navigation
@@ -2504,6 +3121,7 @@ class BrowserManager {
             this.logger.info("[Reconnect] Reset WebSocket initialization state");
 
             // Navigate to target page and wake it up
+            this._setupListModelsCapture(page, targetAuthIndex);
             await this._navigateAndWakeUpPage(page, "[Reconnect]");
 
             // Check for cookie expiration, region restrictions, and other errors
