@@ -13,9 +13,204 @@ const AuthSwitcher = require("../auth/AuthSwitcher");
 const FormatConverter = require("./FormatConverter");
 const { isUserAbortedError } = require("../utils/CustomErrors");
 const { QueueClosedError, QueueTimeoutError } = require("../utils/MessageQueue");
+const mime = require("mime-types");
 
 const WS_RECONNECT_WAIT_MS = 130000;
 const WS_CONNECTION_READY_TIMEOUT_MS = 10000;
+
+// Parse multipart/form-data body (Buffer) into { fields: {name: value}, files: [{name, filename, contentType, data}] }
+// Minimal RFC 7578 parser: sufficient for OpenAI SDK clients, avoids a multer dependency
+function parseMultipartFormData(bodyBuffer, contentTypeHeader) {
+    const boundaryMatch = String(contentTypeHeader || "").match(/boundary=(?:"([^"]+)"|([^;]+))/i);
+    if (!boundaryMatch) {
+        throw new Error("Missing multipart boundary in Content-Type header");
+    }
+    const boundary = `--${(boundaryMatch[1] || boundaryMatch[2]).trim()}`;
+    const boundaryBuffer = Buffer.from(boundary);
+
+    const fields = {};
+    const files = [];
+    let cursor = 0;
+
+    while (cursor < bodyBuffer.length) {
+        const boundaryStart = bodyBuffer.indexOf(boundaryBuffer, cursor);
+        if (boundaryStart === -1) break;
+
+        // Part starts after boundary + CRLF
+        let partStart = boundaryStart + boundaryBuffer.length;
+        if (bodyBuffer.slice(partStart, partStart + 2).toString() === "\r\n") {
+            partStart += 2;
+        } else {
+            break; // "--" final boundary or malformed tail
+        }
+
+        const headerEnd = bodyBuffer.indexOf("\r\n\r\n", partStart);
+        if (headerEnd === -1) break;
+
+        const headerText = bodyBuffer.slice(partStart, headerEnd).toString("utf8");
+        const nextBoundary = bodyBuffer.indexOf(boundaryBuffer, headerEnd + 4);
+        if (nextBoundary === -1) break;
+        // Part data ends at CRLF before next boundary
+        let dataEnd = nextBoundary;
+        if (bodyBuffer.slice(dataEnd - 2, dataEnd).toString() === "\r\n") {
+            dataEnd -= 2;
+        }
+
+        const nameMatch = headerText.match(/name="([^"]*)"/i);
+        const fileMatch = headerText.match(/filename="([^"]*)"/i);
+        const typeMatch = headerText.match(/content-type:\s*([^\r\n]+)/i);
+        const data = bodyBuffer.slice(headerEnd + 4, dataEnd);
+
+        if (fileMatch) {
+            files.push({
+                contentType: typeMatch ? typeMatch[1].trim() : "application/octet-stream",
+                data,
+                filename: fileMatch[1],
+                name: nameMatch ? nameMatch[1] : "",
+            });
+        } else if (nameMatch) {
+            fields[nameMatch[1]] = data.toString("utf8");
+        }
+
+        cursor = nextBoundary;
+    }
+
+    return { fields, files };
+}
+
+// System prompt for audio transcription via prompting (issue #140)
+const TRANSCRIPTION_SYSTEM_PROMPT =
+    "You are a professional audio transcription tool. Transcribe the attached audio into plain text. " +
+    "Output ONLY the transcribed text, with no explanations, no labels, no quotes, and no markdown formatting. " +
+    "If the audio contains no intelligible speech or sound, transcribe the sound as best as possible (e.g. laughter, sound effects). " +
+    "Do not translate; transcribe in the language actually spoken.";
+
+// Extra instruction appended when the client requests timestamped output (verbose_json / srt / vtt)
+const TRANSCRIPTION_TIMESTAMP_INSTRUCTION =
+    "Format the output as a list of transcribed segments, one per line. " +
+    "Each line MUST start with a timestamp range in exactly this format: [MM:SS.mmm -> MM:SS.mmm] " +
+    "immediately followed by the transcribed text of that segment. " +
+    "Use the timestamps of when each segment is spoken in the audio.";
+
+// Parse model output like "[00:01.230 -> 00:03.450] hello there" into segments
+function parseTimestampedTranscription(rawText) {
+    const segments = [];
+    const plainLines = [];
+    const tsRegex = /^\[(\d{2,}):(\d{2})\.(\d{3})\s*->\s*(\d{2,}):(\d{2})\.(\d{3})\]\s*(.*)$/;
+    for (const line of String(rawText || "").split(/\r?\n/)) {
+        const match = line.trim().match(tsRegex);
+        if (match) {
+            const start = Number(match[1]) * 60 + Number(match[2]) + Number(match[3]) / 1000;
+            const end = Number(match[4]) * 60 + Number(match[5]) + Number(match[6]) / 1000;
+            const text = match[7].trim();
+            if (text) segments.push({ end, start, text });
+        } else if (line.trim()) {
+            plainLines.push(line.trim());
+        }
+    }
+    // Prefer per-segment text when timestamps were returned; otherwise treat the whole output as one blob
+    const text = segments.length > 0 ? segments.map(s => s.text).join(" ") : plainLines.join(" ");
+    return { segments, text };
+}
+
+function _pad(num, width) {
+    return String(num).padStart(width, "0");
+}
+
+function formatSrtTime(seconds) {
+    const ms = Math.floor((seconds % 1) * 1000);
+    return `${_pad(Math.floor(seconds / 3600), 2)}:${_pad(Math.floor(seconds / 60) % 60, 2)}:${_pad(
+        Math.floor(seconds) % 60,
+        2
+    )},${_pad(ms, 3)}`;
+}
+
+function formatVttTime(seconds) {
+    const ms = Math.floor((seconds % 1) * 1000);
+    return `${_pad(Math.floor(seconds / 3600), 2)}:${_pad(Math.floor(seconds / 60) % 60, 2)}:${_pad(
+        Math.floor(seconds) % 60,
+        2
+    )}.${_pad(ms, 3)}`;
+}
+
+// Estimate audio duration in ms from the raw file buffer. Returns 0 when unknown.
+// ponytail: header/frame sniffing only — swap for a real probe (ffprobe / music-metadata) if clients need exact durations
+const MP3_BITRATES_V1_L3 = [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0];
+const MP3_BITRATES_V2_L3 = [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0];
+const MP3_SAMPLERATES = [
+    [44100, 48000, 32000], // MPEG1
+    [22050, 24000, 16000], // MPEG2 / 2.5
+];
+
+function _getAudioDurationMs(data) {
+    try {
+        if (data.length < 32) return 0;
+
+        // WAV: RIFF....WAVE, byteRate at offset 28
+        if (data.toString("ascii", 0, 4) === "RIFF" && data.toString("ascii", 8, 12) === "WAVE") {
+            const byteRate = data.readUInt32LE(28);
+            return byteRate > 0 ? Math.round(((data.length - 44) / byteRate) * 1000) : 0;
+        }
+
+        // Ogg: sum of granule positions in last page header (channel-agnostic approximation)
+        if (data.toString("ascii", 0, 4) === "OggS") {
+            for (let i = data.length - 27; i >= 0; i--) {
+                if (data.toString("ascii", i, i + 4) === "OggS" && data[i + 5] & 0x04) {
+                    // End-of-stream page: granule at i+6, sample rate from first audio packet
+                    const granule = Number(data.readBigUInt64LE(i + 6));
+                    const rateMatch = data.toString("latin1").match(/[\x80-\x8f]\x80\x80\x80(vorbis|OpusHead)/);
+                    const rate = granule > 0 && rateMatch ? 48000 : 0; // Opus granules are always 48k
+                    return rate > 0 ? Math.round((granule / rate) * 1000) : 0;
+                }
+            }
+        }
+
+        // MP3: walk frames, sum durations (handles VBR); tolerates ID3v2 prefix
+        let pos = 0;
+        if (data.toString("ascii", 0, 3) === "ID3") {
+            pos = 10 + ((data[9] & 0x7f) << 21) + ((data[8] & 0x7f) << 14) + ((data[7] & 0x7f) << 7) + (data[6] & 0x7f);
+        }
+        let durationSec = 0;
+        let frames = 0;
+        while (pos + 4 <= data.length && frames < 200000) {
+            if (data[pos] !== 0xff || (data[pos + 1] & 0xe0) !== 0xe0) {
+                pos++; // resync
+                continue;
+            }
+            const versionBits = (data[pos + 1] >> 3) & 0x03; // 3=MPEG1, 2=MPEG2, 0=MPEG2.5
+            if (versionBits === 1) {
+                pos++;
+                continue;
+            }
+            const layerBits = (data[pos + 1] >> 1) & 0x03;
+            if (layerBits === 0) {
+                pos++;
+                continue;
+            }
+            const isMpeg1 = versionBits === 3;
+            const bitrateTable = isMpeg1 ? MP3_BITRATES_V1_L3 : MP3_BITRATES_V2_L3;
+            const bitrate = layerBits === 1 ? bitrateTable[(data[pos + 2] >> 4) & 0x0f] : 0; // layer 3 only
+            const sampleRate =
+                (isMpeg1 ? MP3_SAMPLERATES[0] : MP3_SAMPLERATES[1])[(data[pos + 2] >> 2) & 0x03] /
+                (versionBits === 0 ? 1 : 1); // 2.5 halves handled in table
+            const mpeg25 = versionBits === 0;
+            const effectiveRate = mpeg25 ? sampleRate / 2 : sampleRate;
+            if (!bitrate || !effectiveRate) {
+                pos++;
+                continue;
+            }
+            const padding = (data[pos + 2] >> 1) & 0x01;
+            const frameLen = Math.floor((144000 * bitrate) / effectiveRate) + padding;
+            const samplesPerFrame = 1152;
+            durationSec += samplesPerFrame / effectiveRate;
+            frames++;
+            pos += frameLen;
+        }
+        return frames > 0 ? Math.round(durationSec * 1000) : 0;
+    } catch {
+        return 0;
+    }
+}
 
 // Default timeout constants (in milliseconds)
 const DEFAULT_TIMEOUTS = {
@@ -1030,6 +1225,249 @@ class RequestHandler {
                 this._setupClientDisconnectHandler(res, requestId);
 
                 await this._handleNonStreamResponse(proxyRequest, messageQueue, req, res);
+            } catch (error) {
+                this._handleQueueTimeout(error, requestId);
+                this._handleRequestError(error, res, requestId);
+            } finally {
+                this.connectionRegistry.removeMessageQueue(requestId, "request_complete");
+                if (!res.writableEnded) res.end();
+            }
+        } finally {
+            this._finalizeTrackedRequest(requestId, res);
+        }
+    }
+
+    // Process OpenAI audio transcription requests (issue #140)
+    async processAudioTranscriptionRequest(req, res) {
+        const requestId = this._generateRequestId();
+        this._startTrackedRequest(requestId, req, {
+            apiFormat: "openai",
+            isStreaming: false,
+            requestCategory: "generation",
+            streamMode: null,
+        });
+        this._setResponseApiFormat(res, "openai");
+        res.__proxyResponseStreamMode = null;
+
+        try {
+            // Parse multipart/form-data
+            let parsed;
+            try {
+                parsed = parseMultipartFormData(req.rawBody, req.headers["content-type"]);
+            } catch (error) {
+                this.logger.error(`❌ [Audio] Multipart parsing failed: ${error.message}`);
+                return this._sendErrorResponse(
+                    res,
+                    400,
+                    `Invalid multipart/form-data request: ${error.message}`,
+                    "invalid_request_error"
+                );
+            }
+
+            const audioFile = parsed.files.find(
+                f =>
+                    f.name === "file" ||
+                    f.name === "audio" ||
+                    f.contentType.startsWith("audio/") ||
+                    f.contentType.startsWith("video/")
+            );
+            if (!audioFile || !audioFile.data?.length) {
+                return this._sendErrorResponse(
+                    res,
+                    400,
+                    "Missing required 'file' field in multipart form data.",
+                    "invalid_request_error"
+                );
+            }
+
+            const requestedModel =
+                parsed.fields.model || this.config.modelList[0]?.name?.replace("models/", "") || "gemini-2.5-flash";
+            const { cleanModelName: model } = FormatConverter.parseModelBuiltInToolSuffixes(requestedModel);
+            const responseFormat = parsed.fields.response_format || "json";
+
+            if (!(await this._ensureBrowserBackedRequestReady(res, { waitErrorType: "service_unavailable" }))) {
+                return;
+            }
+
+            // Handle usage counting (same as other generative endpoints)
+            const usageCount = this.authSwitcher.incrementUsageCount();
+            if (usageCount > 0 && this.authSwitcher.shouldSwitchByUsage()) {
+                this.needsSwitchingAfterRequest = true;
+            }
+
+            // Build Gemini request: audio inlineData + transcription prompt
+            let mimeType = audioFile.contentType;
+            if (!mimeType || mimeType === "application/octet-stream" || mimeType === "video/mp4") {
+                mimeType = mime.lookup(audioFile.filename) || (mimeType === "video/mp4" ? "video/mp4" : "audio/mpeg");
+            }
+
+            const promptParts = [{ text: TRANSCRIPTION_SYSTEM_PROMPT }];
+            const wantsTimestamps = ["verbose_json", "srt", "vtt"].includes(responseFormat);
+            if (wantsTimestamps) {
+                promptParts.push({ text: TRANSCRIPTION_TIMESTAMP_INSTRUCTION });
+            }
+            const userPrompt =
+                typeof parsed.fields.prompt === "string" && parsed.fields.prompt.length > 0
+                    ? `Context (use this to guide the transcription, do not add it to output): ${parsed.fields.prompt}`
+                    : "Transcribe this audio.";
+            promptParts.push({ text: userPrompt });
+
+            if (typeof parsed.fields.language === "string" && parsed.fields.language.length > 0) {
+                promptParts.push({ text: `The audio is in this language: ${parsed.fields.language}.` });
+            }
+
+            const googleBody = {
+                contents: [
+                    {
+                        parts: [...promptParts, { inlineData: { data: audioFile.data.toString("base64"), mimeType } }],
+                        role: "user",
+                    },
+                ],
+                systemInstruction: { parts: [{ text: TRANSCRIPTION_SYSTEM_PROMPT }], role: "system" },
+            };
+
+            const proxyRequest = {
+                body: JSON.stringify(googleBody),
+                headers: { "Content-Type": "application/json" },
+                is_generative: true,
+                method: "POST",
+                path: `/v1beta/models/${model}:generateContent`,
+                query_params: {},
+                request_id: requestId,
+                streaming_mode: "fake",
+                tracking_model: model,
+            };
+            this._initializeProxyRequestAttempt(proxyRequest);
+            this._updateTrackedRequest(requestId, {
+                isStreaming: false,
+                model,
+                path: proxyRequest.path,
+                requestCategory: "generation",
+                streamMode: null,
+            });
+
+            try {
+                const messageQueue = this.connectionRegistry.createMessageQueue(
+                    requestId,
+                    this.currentAuthIndex,
+                    proxyRequest.request_attempt_id
+                );
+                this._setupClientDisconnectHandler(res, requestId);
+
+                const result = await this._executeRequestWithRetries(proxyRequest, messageQueue);
+                if (!result.success) {
+                    if (
+                        !isUserAbortedError(result.error) &&
+                        !result.error.skipAccountSwitch &&
+                        !this._isConnectionResetError(result.error)
+                    ) {
+                        await this.authSwitcher.handleRequestFailureAndSwitch(result.error, null);
+                    }
+                    return this._sendErrorResponse(res, result.error.status || 500, result.error.message);
+                }
+                if (this.authSwitcher.failureCount > 0) this.authSwitcher.failureCount = 0;
+
+                // Collect full response body
+                const chunks = [];
+                let receiving = true;
+                while (receiving) {
+                    const message = await result.queue.dequeue(this.timeouts.FAKE_STREAM);
+                    if (message.type === "STREAM_END") {
+                        receiving = false;
+                    } else if (message.event_type === "error") {
+                        this.logger.error(`❌ [Audio] Error during transcription: ${message.message}`);
+                        return this._sendErrorResponse(res, 500, message.message);
+                    } else if (message.event_type === "chunk" && message.data) {
+                        chunks.push(Buffer.from(message.data));
+                    }
+                }
+
+                const fullResponse = JSON.parse(Buffer.concat(chunks).toString());
+                this._logGeminiNativeResponseDebug(fullResponse, "transcription");
+
+                const candidate = fullResponse.candidates?.[0];
+                const finishError = candidate?.finishReason && !["STOP", "MAX_TOKENS"].includes(candidate.finishReason);
+                const rawText = (candidate?.content?.parts || [])
+                    .filter(p => typeof p.text === "string")
+                    .map(p => p.text)
+                    .join("")
+                    .trim();
+
+                const { segments: parsedSegments, text } = wantsTimestamps
+                    ? parseTimestampedTranscription(rawText)
+                    : { segments: [], text: rawText };
+                let segments = parsedSegments;
+                if (!text && !finishError) {
+                    return this._sendErrorResponse(res, 502, "Model returned no transcription text.", "api_error");
+                }
+
+                // ponytail: no-timestamp fallback — if model ignored timestamp instruction, emit one segment covering whole audio
+                if (wantsTimestamps && segments.length === 0 && text) {
+                    this.logger.warn(
+                        `[Audio] Model returned no timestamped segments for response_format=${responseFormat}, falling back to single segment.`
+                    );
+                    segments = [{ end: null, start: 0, text }];
+                }
+
+                const audioDuration = _getAudioDurationMs(audioFile.data) || 0;
+                const language =
+                    typeof parsed.fields.language === "string" && parsed.fields.language.length > 0
+                        ? parsed.fields.language
+                        : null;
+
+                if (responseFormat === "text") {
+                    res.status(200).type("text/plain").send(text);
+                } else if (responseFormat === "srt") {
+                    res.status(200)
+                        .type("application/x-subrip")
+                        .send(
+                            segments
+                                .map(
+                                    (seg, i) =>
+                                        `${i + 1}\n${formatSrtTime(seg.start)} --> ${formatSrtTime(
+                                            seg.end ?? Math.max(audioDuration / 1000, seg.start + 1)
+                                        )}\n${seg.text}\n`
+                                )
+                                .join("\n")
+                        );
+                } else if (responseFormat === "vtt") {
+                    res.status(200)
+                        .type("text/vtt")
+                        .send(
+                            `WEBVTT\n\n${segments
+                                .map(
+                                    seg =>
+                                        `${formatVttTime(seg.start)} --> ${formatVttTime(
+                                            seg.end ?? Math.max(audioDuration / 1000, seg.start + 1)
+                                        )}\n${seg.text}\n`
+                                )
+                                .join("\n")}`
+                        );
+                } else if (responseFormat === "verbose_json") {
+                    res.status(200).json({
+                        duration: audioDuration / 1000,
+                        language: language || "unknown",
+                        segments: segments.map((seg, i) => ({
+                            avg_logprob: 0,
+                            compression_ratio: 1,
+                            end: seg.end ?? Math.max(audioDuration / 1000, seg.start + 1),
+                            id: i,
+                            no_speech_prob: 0,
+                            seek: Math.round(seg.start * 1000),
+                            start: seg.start,
+                            temperature: 0,
+                            text: seg.text,
+                            tokens: [],
+                        })),
+                        task: "transcribe",
+                        text,
+                        words: [],
+                    });
+                } else {
+                    // json (default)
+                    res.status(200).json({ text });
+                }
+                this.logger.info(`✅ [Audio] Transcription completed, request ID: ${requestId}`);
             } catch (error) {
                 this._handleQueueTimeout(error, requestId);
                 this._handleRequestError(error, res, requestId);
