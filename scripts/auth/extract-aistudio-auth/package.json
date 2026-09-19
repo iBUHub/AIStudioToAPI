@@ -1,0 +1,15 @@
+{
+    "name": "extract-aistudio-auth",
+    "version": "1.0.0",
+    "description": "Extract Google AI Studio authentication state from a running Chrome/Edge browser via CDP",
+    "license": "MIT",
+    "bin": {
+        "extract-aistudio-auth": "./index.js"
+    },
+    "dependencies": {
+        "playwright-core": "^1.53.0"
+    },
+    "engines": {
+        "node": ">=18"
+    }
+}
