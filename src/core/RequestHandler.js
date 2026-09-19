@@ -1042,6 +1042,99 @@ class RequestHandler {
         }
     }
 
+    // Process OpenAI speech synthesis requests
+    async processOpenAISpeechRequest(req, res) {
+        const requestId = this._generateRequestId();
+        this._startTrackedRequest(requestId, req, {
+            apiFormat: "openai",
+            isStreaming: false,
+            requestCategory: "generation",
+            streamMode: null,
+        });
+        this._setResponseApiFormat(res, "openai");
+        res.__proxyResponseStreamMode = null;
+
+        try {
+            let cleanModelName, googleRequest, responseFormat;
+            try {
+                const translatedRequest = this.formatConverter.translateOpenAISpeechToGoogle(req.body);
+                cleanModelName = translatedRequest.cleanModelName;
+                googleRequest = translatedRequest.googleRequest;
+                responseFormat = translatedRequest.responseFormat;
+            } catch (error) {
+                this.logger.warn(
+                    `[Adapter] OpenAI speech request validation failed: ${error.message}, request ID: ${requestId}`
+                );
+                return this._sendErrorResponse(res, 400, error.message, "invalid_request_error");
+            }
+
+            if (!(await this._ensureBrowserBackedRequestReady(res, { waitErrorType: "service_unavailable" }))) {
+                return;
+            }
+
+            const usageCount = this.authSwitcher.incrementUsageCount();
+            if (usageCount > 0) {
+                const rotationCountText =
+                    this.config.switchOnUses > 0 ? `${usageCount}/${this.config.switchOnUses}` : `${usageCount}`;
+                this.logger.info(
+                    `[Request] OpenAI speech generation request - account rotation count: ${rotationCountText} (Current account: ${this.currentAuthIndex}), request ID: ${requestId}`
+                );
+                if (this.authSwitcher.shouldSwitchByUsage()) {
+                    this.needsSwitchingAfterRequest = true;
+                }
+            }
+
+            const proxyRequest = {
+                body: JSON.stringify(googleRequest),
+                headers: { "Content-Type": "application/json" },
+                is_generative: true,
+                method: "POST",
+                path: `/v1beta/models/${cleanModelName}:generateContent`,
+                query_params: {},
+                request_id: requestId,
+                response_format: responseFormat,
+                response_transform: "geminiTtsToOpenAIAudio",
+                streaming_mode: "fake",
+                tracking_model: cleanModelName,
+            };
+            this._initializeProxyRequestAttempt(proxyRequest);
+            this._updateTrackedRequest(requestId, {
+                isStreaming: false,
+                model: cleanModelName,
+                path: proxyRequest.path,
+                requestCategory: "generation",
+                streamMode: null,
+            });
+
+            try {
+                const messageQueue = this.connectionRegistry.createMessageQueue(
+                    requestId,
+                    this.currentAuthIndex,
+                    proxyRequest.request_attempt_id
+                );
+                this._setupClientDisconnectHandler(res, requestId);
+                await this._handleNonStreamResponse(proxyRequest, messageQueue, req, res);
+            } catch (error) {
+                this._handleQueueTimeout(error, requestId);
+                this._handleRequestError(error, res, requestId);
+            } finally {
+                this.connectionRegistry.removeMessageQueue(requestId, "request_complete");
+                if (this.needsSwitchingAfterRequest) {
+                    this.logger.info(
+                        `[Auth] Rotation count reached switching threshold (${this.authSwitcher.usageCount}/${this.config.switchOnUses}), will automatically switch account in background...`
+                    );
+                    this.authSwitcher.switchToNextAuth().catch(error => {
+                        this.logger.error(`[Auth] Background account switching task failed: ${error.message}`);
+                    });
+                    this.needsSwitchingAfterRequest = false;
+                }
+                if (!res.writableEnded) res.end();
+            }
+        } finally {
+            this._finalizeTrackedRequest(requestId, res);
+        }
+    }
+
     // Process File Upload requests
     async processUploadRequest(req, res) {
         const requestId = this._generateRequestId();
@@ -3160,11 +3253,17 @@ class RequestHandler {
             const fullBodyBuffer = Buffer.concat(chunks);
             let responseBodyBuffer = fullBodyBuffer;
 
-            try {
-                const fullResponse = JSON.parse(responseBodyBuffer.toString());
-                this._logGeminiNativeResponseDebug(fullResponse, "non-stream");
-            } catch (e) {
-                // Ignore JSON parsing errors for finish reason
+            if (proxyRequest.response_transform === "geminiTtsToOpenAIAudio") {
+                this.logger.debug(
+                    `[Request] Received Gemini TTS response body (${responseBodyBuffer.length} bytes), request ID: ${proxyRequest.request_id}`
+                );
+            } else {
+                try {
+                    const fullResponse = JSON.parse(responseBodyBuffer.toString());
+                    this._logGeminiNativeResponseDebug(fullResponse, "non-stream");
+                } catch (e) {
+                    // Ignore JSON parsing errors for finish reason
+                }
             }
 
             if (proxyRequest.response_transform === "batchEmbedToEmbedContent") {
@@ -3175,6 +3274,46 @@ class RequestHandler {
                     this._sendErrorResponse(res, 500, "Failed to convert backend embedding response");
                     return;
                 }
+            }
+
+            if (proxyRequest.response_transform === "geminiTtsToOpenAIAudio") {
+                try {
+                    const upstreamStatus = Number(headerMessage.status || 200);
+                    if (upstreamStatus < 200 || upstreamStatus >= 300) {
+                        throw new Error(`Gemini returned unexpected status ${upstreamStatus}.`);
+                    }
+
+                    let googleResponse;
+                    try {
+                        googleResponse = JSON.parse(responseBodyBuffer.toString());
+                    } catch {
+                        throw new Error("Gemini response was not valid JSON.");
+                    }
+                    const { audioBuffer, contentType } = this.formatConverter.convertGoogleToOpenAISpeech(
+                        googleResponse,
+                        proxyRequest.response_format
+                    );
+                    res.status(200).set({
+                        "Cache-Control": "no-store",
+                        "Content-Length": String(audioBuffer.length),
+                        "Content-Type": contentType,
+                    });
+                    res.send(audioBuffer);
+                    this.logger.info(
+                        `✅ [Request] Response completed (OpenAI speech, ${proxyRequest.response_format}), request ID: ${proxyRequest.request_id}`
+                    );
+                } catch (error) {
+                    this.logger.error(
+                        `❌ [Adapter] Failed to decode Gemini speech response: ${error.message}, request ID: ${proxyRequest.request_id}`
+                    );
+                    this._sendErrorResponse(
+                        res,
+                        502,
+                        `Failed to decode audio from Gemini response: ${error.message}`,
+                        "api_error"
+                    );
+                }
+                return;
             }
 
             this._setResponseHeaders(res, headerMessage, req);

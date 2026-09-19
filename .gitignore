@@ -35,7 +35,6 @@ tmp/
 temp/
 ui/dist/
 *.css
-test/
 debug_*.png
 debug_*.html
 proxylist.txt

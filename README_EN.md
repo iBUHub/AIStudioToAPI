@@ -199,6 +199,7 @@ This endpoint is processed and then forwarded to the Gemini API format endpoint.
 
 - `GET /v1/models`: List models.
 - `POST /v1/chat/completions`: Chat completion and image generation, supports non-streaming, real streaming, and fake streaming.
+- `POST /v1/audio/speech`: Generate binary speech audio with Gemini TTS. Supports WAV (default) and raw PCM output.
 - `POST /v1/embeddings`: Generate text embedding vectors.
 - `POST /v1/responses`: OpenAI Responses API compatible endpoint for conversation generation, does not support image generation, and supports non-streaming, real streaming, and fake streaming.
 - `POST /v1/responses/input_tokens`: Count input tokens for an OpenAI Responses API request.
