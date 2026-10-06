@@ -461,9 +461,19 @@ class ProxyServerSystem extends EventEmitter {
         app.use(this._createAuthMiddleware());
 
         // API routes
-        app.get(["/v1/models"], (req, res) => {
-            // OpenAI format
-            const models = this.config.modelList.map(model => ({
+        app.get(["/v1/models"], async (req, res) => {
+            // OpenAI format - try live models first, fallback to config
+            let modelList = this.config.modelList;
+            try {
+                const liveModels = await this.browserManager.fetchLiveModels();
+                if (liveModels && liveModels.length > 0) {
+                    modelList = liveModels;
+                }
+            } catch (e) {
+                this.logger.warn(`[System] Failed to fetch live models, using config: ${e.message}`);
+            }
+
+            const models = modelList.map(model => ({
                 context_window: model.inputTokenLimit,
                 created: Math.floor(Date.now() / 1000),
                 id: model.name.replace("models/", ""),
@@ -472,14 +482,63 @@ class ProxyServerSystem extends EventEmitter {
                 owned_by: "google",
             }));
 
+            // Include diagnostic header about filtered incompatible models (e.g. Interactions-only)
+            let incompatibleCount = 0;
+            if (this.browserManager._incompatibleModels) {
+                // Keys are stored both as "id" and "models/id"; count distinct base ids
+                const baseIds = new Set();
+                for (const k of this.browserManager._incompatibleModels.keys()) {
+                    baseIds.add(String(k).replace(/^models\//, ""));
+                }
+                incompatibleCount = baseIds.size;
+            }
+            if (incompatibleCount > 0) {
+                res.setHeader("X-Models-Filtered", String(incompatibleCount));
+            }
+
             res.status(200).json({
                 data: models,
                 object: "list",
             });
         });
 
-        app.get(["/v1beta/models"], (req, res) => {
-            res.status(200).json({ models: this.config.modelList });
+        app.get(["/v1beta/models"], async (req, res) => {
+            // Try live models first, fallback to config
+            let modelList = this.config.modelList;
+            try {
+                const liveModels = await this.browserManager.fetchLiveModels();
+                if (liveModels && liveModels.length > 0) {
+                    modelList = liveModels;
+                }
+            } catch (e) {
+                this.logger.warn(`[System] Failed to fetch live models, using config: ${e.message}`);
+            }
+
+            res.status(200).json({ models: modelList });
+        });
+
+        app.post(["/api/models/refresh"], async (req, res) => {
+            try {
+                const persist = req.query.persist === "true";
+                const models = await this.browserManager.refreshLiveModels(persist);
+                let incompatibleCount = 0;
+                if (this.browserManager._incompatibleModels) {
+                    const baseIds = new Set();
+                    for (const k of this.browserManager._incompatibleModels.keys()) {
+                        baseIds.add(String(k).replace(/^models\//, ""));
+                    }
+                    incompatibleCount = baseIds.size;
+                }
+                res.status(200).json({
+                    count: models ? models.length : 0,
+                    filtered_incompatible: incompatibleCount,
+                    message: models
+                        ? `Refreshed ${models.length} models${incompatibleCount ? ` (${incompatibleCount} incompatible filtered)` : ""}`
+                        : "Failed to refresh models",
+                });
+            } catch (e) {
+                res.status(500).json({ error: e.message });
+            }
         });
 
         app.post("/v1/chat/completions", (req, res) => {
