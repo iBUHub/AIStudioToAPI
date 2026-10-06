@@ -122,6 +122,25 @@ curl -X POST http://localhost:7860/v1/responses \
   }'
 ```
 
+### 🎤 Speech Generation
+
+The OpenAI-compatible speech endpoint returns binary audio directly. Gemini-native PCM is wrapped in a WAV container when `response_format` is `wav` (the default):
+
+```bash
+curl -X POST http://localhost:7860/v1/audio/speech \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your-api-key-1" \
+  -d '{
+    "model": "gemini-3.1-flash-tts-preview",
+    "input": "Hello, this is a text to speech test.",
+    "voice": "Kore",
+    "response_format": "wav"
+  }' \
+  --output speech.wav
+```
+
+Supported response formats are `wav` and `pcm`. The `pcm` option returns Gemini's raw PCM bytes with the sample format declared in the response `Content-Type`. MP3, AAC, FLAC, and Opus are not returned because this project does not include an audio encoder; requesting them returns an OpenAI-style `400` error. Unsupported speech parameters, including `speed`, `instructions`, `stream`, and `stream_format`, also return `400` instead of being silently ignored.
+
 ## ♊ Gemini Native API Format
 
 ```bash

@@ -122,6 +122,25 @@ curl -X POST http://localhost:7860/v1/responses \
   }'
 ```
 
+### 🎤 语音生成
+
+OpenAI 兼容的语音端点会直接返回二进制音频。当 `response_format` 为 `wav`（默认值）时，服务会将 Gemini 原生 PCM 封装为 WAV：
+
+```bash
+curl -X POST http://localhost:7860/v1/audio/speech \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your-api-key-1" \
+  -d '{
+    "model": "gemini-3.1-flash-tts-preview",
+    "input": "你好，这是一个语音合成测试。",
+    "voice": "Kore",
+    "response_format": "wav"
+  }' \
+  --output speech.wav
+```
+
+支持的响应格式为 `wav` 和 `pcm`。选择 `pcm` 时会返回 Gemini 的原始 PCM 字节，并在响应 `Content-Type` 中声明采样格式。本项目未包含音频编码器，因此不会返回 MP3、AAC、FLAC 或 Opus；请求这些格式时会返回 OpenAI 风格的 `400` 错误。不支持的语音参数（包括 `speed`、`instructions`、`stream` 和 `stream_format`）同样会返回 `400`，不会被静默忽略。
+
 ## ♊ Gemini 原生 API 格式
 
 ```bash

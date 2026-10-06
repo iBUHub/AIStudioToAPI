@@ -201,6 +201,7 @@ services:
 
 - `GET /v1/models`: 列出模型。
 - `POST /v1/chat/completions`: 聊天补全和图片生成，支持非流式、真流式和假流式。
+- `POST /v1/audio/speech`: 使用 Gemini TTS 生成二进制语音，支持 WAV（默认）和原始 PCM 输出。
 - `POST /v1/embeddings`: 生成文本嵌入向量。
 - `POST /v1/responses`: OpenAI Responses API 兼容接口，用于对话生成，不支持图像生成，支持非流式、真流式和假流式。
 - `POST /v1/responses/input_tokens`: 计算 OpenAI Responses API 请求的输入 token 数量。

@@ -486,6 +486,10 @@ class ProxyServerSystem extends EventEmitter {
             this.requestHandler.processOpenAIRequest(req, res);
         });
 
+        app.post("/v1/audio/speech", (req, res) => {
+            this.requestHandler.processOpenAISpeechRequest(req, res);
+        });
+
         app.post(["/v1/embeddings", "/v1/openai/embeddings"], (req, res) => {
             this.requestHandler.processOpenAIEmbeddingsRequest(req, res);
         });
