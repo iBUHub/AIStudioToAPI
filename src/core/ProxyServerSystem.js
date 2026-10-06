@@ -490,6 +490,11 @@ class ProxyServerSystem extends EventEmitter {
             this.requestHandler.processOpenAIEmbeddingsRequest(req, res);
         });
 
+        // OpenAI audio transcription endpoint (issue #140)
+        app.post("/v1/audio/transcriptions", (req, res) => {
+            this.requestHandler.processAudioTranscriptionRequest(req, res);
+        });
+
         // OpenAI Response API compatible endpoint
         app.post("/v1/responses", (req, res) => {
             this.requestHandler.processOpenAIResponseRequest(req, res);
