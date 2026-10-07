@@ -23,6 +23,7 @@ const RequestHandler = require("./RequestHandler");
 const UsageStatsService = require("./UsageStatsService");
 const ConfigLoader = require("../utils/ConfigLoader");
 const WebRoutes = require("../routes/WebRoutes");
+const { createBodyCollector } = require("../utils/bodySizeLimit");
 
 /**
  * Proxy Server System
@@ -42,7 +43,8 @@ class ProxyServerSystem extends EventEmitter {
             this.authSource,
             this.logger,
             path.join(process.cwd(), "data"),
-            this.config.enableUsageStats
+            this.config.enableUsageStats,
+            this.config.usageStatsImportMaxLines
         );
 
         // Create ConnectionRegistry with lightweight reconnect callback
@@ -204,6 +206,17 @@ class ProxyServerSystem extends EventEmitter {
         }
 
         this.emit("started");
+    }
+
+    // Returns the max accepted request body size, in bytes, for a given request path.
+    // Only /api/usage-stats/import has a cap today; every other path stays unbounded,
+    // matching existing behavior (those routes send small JSON except the Gemini proxy
+    // endpoints, which legitimately carry multi-MB base64 image/file payloads).
+    _getMaxBodyBytesForPath(path) {
+        if (path === "/api/usage-stats/import") {
+            return this.config.usageStatsImportMaxBodyBytes;
+        }
+        return Infinity;
     }
 
     _createAuthMiddleware() {
@@ -418,46 +431,18 @@ class ProxyServerSystem extends EventEmitter {
             next();
         });
 
-        // Manual body collection middleware (BuildProxy style)
-        // Collects the entire raw body into req.rawBody as a Buffer
-        // Also attempts to parse JSON into req.body for compatibility
-        app.use((req, res, next) => {
-            if (req.method === "GET" || req.method === "OPTIONS" || req.method === "HEAD") {
-                return next();
-            }
-
-            const chunks = [];
-            req.on("data", chunk => chunks.push(chunk));
-            req.on("end", () => {
-                req.rawBody = Buffer.concat(chunks);
-
-                // Try to parse JSON for req.body compatibility
-                if (req.headers["content-type"]?.includes("application/json")) {
-                    try {
-                        req.body = JSON.parse(req.rawBody.toString());
-                    } catch (e) {
-                        // Not valid JSON, keep req.body undefined or empty
-                        req.body = {};
-                    }
-                } else if (req.headers["content-type"]?.includes("application/x-www-form-urlencoded")) {
-                    try {
-                        const qs = require("querystring");
-                        req.body = qs.parse(req.rawBody.toString());
-                    } catch (e) {
-                        req.body = {};
-                    }
-                } else {
-                    req.body = {};
-                }
-
-                next();
-            });
-
-            req.on("error", err => {
-                this.logger.error(`[System] Request stream error: ${err.message}`);
-                next(err);
-            });
-        });
+        // Manual body collection middleware (BuildProxy style), with a per-path byte cap.
+        // Note: this runs before session creation and the auth middleware below, so the
+        // import-specific allowance is reachable by unauthenticated callers too; the
+        // usage-stats-import rate limiter and a conservative byte cap are the real bound
+        // here, not auth. Keep this path-aware, not a generic limits registry, unless a
+        // second override is actually needed.
+        app.use(
+            createBodyCollector({
+                getMaxBytesForPath: path => this._getMaxBodyBytesForPath(path),
+                logger: this.logger,
+            })
+        );
 
         // Serve static files from ui/dist (Vite build output)
         app.use(express.static(path.join(__dirname, "..", "..", "ui", "dist")));

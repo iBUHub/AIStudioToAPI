@@ -67,9 +67,17 @@ class ConfigLoader {
             maxRetries: 3,
             retryDelay: 2000,
             safetySettingsThreshold: "OFF",
+            statusRateLimitMaxAttempts: 60,
+            statusRateLimitWindowMinutes: 1,
             streamingMode: "real",
             streamTimeoutMs: 60000,
             switchOnUses: 40,
+            usageStatsImportMaxBodyBytes: 10 * 1024 * 1024,
+            usageStatsImportMaxLines: 50000,
+            usageStatsImportRateLimitMaxAttempts: 5,
+            usageStatsImportRateLimitWindowMinutes: 1,
+            usageStatsRateLimitMaxAttempts: 30,
+            usageStatsRateLimitWindowMinutes: 1,
             wsPort: 9998,
         };
 
@@ -164,6 +172,47 @@ class ConfigLoader {
             config.enableAuthUpdate = process.env.ENABLE_AUTH_UPDATE.toLowerCase() !== "false";
         if (process.env.ENABLE_USAGE_STATS)
             config.enableUsageStats = process.env.ENABLE_USAGE_STATS.toLowerCase() !== "false";
+
+        if (process.env.STATUS_RATE_LIMIT_MAX_ATTEMPTS) {
+            const parsed = parseInt(process.env.STATUS_RATE_LIMIT_MAX_ATTEMPTS, 10);
+            config.statusRateLimitMaxAttempts =
+                Number.isFinite(parsed) && parsed > 0 ? parsed : config.statusRateLimitMaxAttempts;
+        }
+        if (process.env.STATUS_RATE_LIMIT_WINDOW_MINUTES) {
+            const parsed = parseInt(process.env.STATUS_RATE_LIMIT_WINDOW_MINUTES, 10);
+            config.statusRateLimitWindowMinutes =
+                Number.isFinite(parsed) && parsed > 0 ? parsed : config.statusRateLimitWindowMinutes;
+        }
+        if (process.env.USAGE_STATS_RATE_LIMIT_MAX_ATTEMPTS) {
+            const parsed = parseInt(process.env.USAGE_STATS_RATE_LIMIT_MAX_ATTEMPTS, 10);
+            config.usageStatsRateLimitMaxAttempts =
+                Number.isFinite(parsed) && parsed > 0 ? parsed : config.usageStatsRateLimitMaxAttempts;
+        }
+        if (process.env.USAGE_STATS_RATE_LIMIT_WINDOW_MINUTES) {
+            const parsed = parseInt(process.env.USAGE_STATS_RATE_LIMIT_WINDOW_MINUTES, 10);
+            config.usageStatsRateLimitWindowMinutes =
+                Number.isFinite(parsed) && parsed > 0 ? parsed : config.usageStatsRateLimitWindowMinutes;
+        }
+        if (process.env.USAGE_STATS_IMPORT_RATE_LIMIT_MAX_ATTEMPTS) {
+            const parsed = parseInt(process.env.USAGE_STATS_IMPORT_RATE_LIMIT_MAX_ATTEMPTS, 10);
+            config.usageStatsImportRateLimitMaxAttempts =
+                Number.isFinite(parsed) && parsed > 0 ? parsed : config.usageStatsImportRateLimitMaxAttempts;
+        }
+        if (process.env.USAGE_STATS_IMPORT_RATE_LIMIT_WINDOW_MINUTES) {
+            const parsed = parseInt(process.env.USAGE_STATS_IMPORT_RATE_LIMIT_WINDOW_MINUTES, 10);
+            config.usageStatsImportRateLimitWindowMinutes =
+                Number.isFinite(parsed) && parsed > 0 ? parsed : config.usageStatsImportRateLimitWindowMinutes;
+        }
+        if (process.env.USAGE_STATS_IMPORT_MAX_BODY_SIZE_MB) {
+            const parsed = parseInt(process.env.USAGE_STATS_IMPORT_MAX_BODY_SIZE_MB, 10);
+            config.usageStatsImportMaxBodyBytes =
+                Number.isFinite(parsed) && parsed > 0 ? parsed * 1024 * 1024 : config.usageStatsImportMaxBodyBytes;
+        }
+        if (process.env.USAGE_STATS_IMPORT_MAX_LINES) {
+            const parsed = parseInt(process.env.USAGE_STATS_IMPORT_MAX_LINES, 10);
+            config.usageStatsImportMaxLines =
+                Number.isFinite(parsed) && parsed > 0 ? parsed : config.usageStatsImportMaxLines;
+        }
 
         let rawCodes = process.env.IMMEDIATE_SWITCH_STATUS_CODES;
         let codesSource = "environment variable";
