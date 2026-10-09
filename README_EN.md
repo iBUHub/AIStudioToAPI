@@ -177,13 +177,6 @@ If you need to access via a domain name or want unified management at the revers
 
 > 📖 For detailed Nginx configuration instructions, see: [Nginx Reverse Proxy Configuration](docs/en/nginx-setup.md)
 
-### 🐾 Claw Cloud Run Deployment
-
-> ℹ **Claw Cloud Run announcement:** Since **May 11, 2026, 00:00 UTC**, Claw Cloud Run has discontinued its product and related services. See the official announcement for details:
-> [Announcement](https://question.run.claw.cloud/questions/10010000000003261)
-
-> 📖 For the legacy deployment guide, see: [Deploy on Claw Cloud Run](docs/en/claw-cloud-run.md)
-
 ### 🦓 Zeabur Deployment
 
 > ℹ **Zeabur announcement:** Since **March 15, 2026**, Zeabur has stopped allowing new projects to be created on the **Shared Cluster**. **Services already running on the Shared Cluster are not affected.** See the official changelog for details:
