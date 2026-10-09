@@ -99,6 +99,28 @@
                         <path d="M7 16l4-4 3 3 5-7"></path>
                     </svg>
                 </button>
+                <button
+                    class="menu-item"
+                    :title="t('modelPlaza')"
+                    @click="goPlaza"
+                >
+                    <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="24"
+                        height="24"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    >
+                        <rect x="3" y="3" width="7" height="7"></rect>
+                        <rect x="14" y="3" width="7" height="7"></rect>
+                        <rect x="3" y="14" width="7" height="7"></rect>
+                        <rect x="14" y="14" width="7" height="7"></rect>
+                    </svg>
+                </button>
             </div>
 
             <div class="sidebar-footer">
@@ -772,6 +794,43 @@
                                     </svg>
                                 </button>
                                 <button
+                                    :disabled="isBusy || !!state.tierJob"
+                                    :title="state.tierJob ? t('tierJobRunning') : t('btnProbeAllTiers')"
+                                    @click="probeAllTiers"
+                                >
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="20"
+                                        height="20"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                    >
+                                        <path d="M20 6 9 17l-5-5"></path>
+                                    </svg>
+                                </button>
+                                <button :title="t('modelPlaza')" @click="goPlaza">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="20"
+                                        height="20"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                    >
+                                        <rect x="3" y="3" width="7" height="7"></rect>
+                                        <rect x="14" y="3" width="7" height="7"></rect>
+                                        <rect x="3" y="14" width="7" height="7"></rect>
+                                        <rect x="14" y="14" width="7" height="7"></rect>
+                                    </svg>
+                                </button>
+                                <button
                                     class="btn-warning"
                                     :disabled="isBusy"
                                     :title="t('btnDeduplicateAuth')"
@@ -832,6 +891,13 @@
                                         </span>
                                         <span v-if="item.isExpired" class="expired-badge">
                                             {{ t("tagExpired") }}
+                                        </span>
+                                        <span
+                                            class="tier-badge"
+                                            :class="`tier-${item.tier ? item.tier.tier : 'untested'}`"
+                                            :title="tierTooltip(item)"
+                                        >
+                                            {{ tierLabel(item) }}
                                         </span>
                                     </div>
                                 </el-tooltip>
@@ -902,6 +968,27 @@
                                             ></path>
                                             <line x1="10" y1="11" x2="10" y2="17"></line>
                                             <line x1="14" y1="11" x2="14" y2="17"></line>
+                                        </svg>
+                                    </button>
+                                    <button
+                                        class="btn-probe"
+                                        :disabled="isBusy || !!state.tierJob"
+                                        :title="t('probeTierHint')"
+                                        @click.stop="probeAccountTier(item.index)"
+                                    >
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            width="16"
+                                            height="16"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            stroke-width="2"
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                        >
+                                            <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"></path>
+                                            <circle cx="12" cy="12" r="3"></circle>
                                         </svg>
                                     </button>
                                     <button :title="t('download')" @click.stop="downloadAccountByIndex(item.index)">
@@ -3736,6 +3823,7 @@ const state = reactive({
     hasUpdate: false,
     isSwitchingAccount: false,
     isSystemBusy: false,
+    tierJob: null,
     isUpdating: false,
     latestVersion: null,
     logCount: 0,
@@ -4084,6 +4172,95 @@ const getAccountDisplayName = account => {
 
 const addUser = () => {
     router.push("/auth");
+};
+
+const goPlaza = () => {
+    router.push("/models");
+};
+
+const tierLabel = item => {
+    if (state.tierJob && (state.tierJob.type === "all" || state.tierJob.target === item.index)) {
+        if (state.tierJob.type === "all" && !item.tier) return t("tierPending");
+    }
+    if (!item.tier) return t("tierUntested");
+    if (item.tier.tier === "Pro") return "Pro";
+    if (item.tier.tier === "Free") return "Free";
+    return t("tierUnknown");
+};
+
+const tierTooltip = item => {
+    if (!item.tier) return t("tierUntestedHint");
+    const time = item.tier.checkedAt ? new Date(item.tier.checkedAt).toLocaleString() : "";
+    const detail = item.tier.detail ? ` · ${item.tier.detail}` : "";
+    return `${t("tierCheckedAt")}: ${time}${detail}`;
+};
+
+const fetchTierJob = async () => {
+    try {
+        const res = await fetch("/api/tiers");
+        if (!res.ok) return;
+        const data = await res.json();
+        state.tierJob = data.job || null;
+    } catch (_) {}
+};
+
+const probeAllTiers = async () => {
+    if (state.tierJob) return;
+    try {
+        await ElMessageBox.confirm(t("probeAllConfirm"), t("btnProbeAllTiers"), {
+            cancelButtonText: t("cancel"),
+            confirmButtonText: t("ok"),
+            type: "warning",
+        });
+    } catch (_) {
+        return;
+    }
+    try {
+        const res = await fetch("/api/tiers/probe-all", { method: "POST" });
+        const data = await res.json();
+        if (!res.ok) {
+            ElMessage.error(t(data.message || "tierProbeFailed"));
+            return;
+        }
+        ElMessage.success(t("tierProbeStarted"));
+        state.tierJob = { done: 0, total: data.total, type: "all" };
+        pollTierJob();
+    } catch (error) {
+        ElMessage.error(error.message);
+    }
+};
+
+const pollTierJob = () => {
+    const timer = setInterval(async () => {
+        await fetchTierJob();
+        await updateContent();
+        if (!state.tierJob) {
+            clearInterval(timer);
+        }
+    }, 4000);
+};
+
+const probeAccountTier = async targetIndex => {
+    if (state.tierJob) return;
+    state.tierJob = { target: targetIndex, type: "single" };
+    try {
+        const res = await fetch("/api/tiers/probe", {
+            body: JSON.stringify({ targetIndex }),
+            headers: { "Content-Type": "application/json" },
+            method: "POST",
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            ElMessage.error(t(data.message || "tierProbeFailed", data));
+        } else {
+            ElMessage.success(`#${targetIndex}: ${data.record.tier}`);
+        }
+    } catch (error) {
+        ElMessage.error(error.message);
+    } finally {
+        state.tierJob = null;
+        await updateContent();
+    }
 };
 
 // Delete account by index
@@ -5560,6 +5737,37 @@ watchEffect(() => {
     flex-shrink: 0;
     margin-left: 0;
     margin-right: 6px;
+}
+
+.tier-badge {
+    font-size: 0.75rem;
+    padding: 2px 8px;
+    border-radius: 12px;
+    flex-shrink: 0;
+    margin-left: 0;
+    margin-right: 6px;
+
+    &.tier-Pro {
+        background: @success-color;
+        color: @text-on-primary;
+    }
+
+    &.tier-Free {
+        background: var(--el-color-info, #909399);
+        color: @text-on-primary;
+    }
+
+    &.tier-unknown,
+    &.tier-untested {
+        background: transparent;
+        border: 1px dashed var(--el-color-info, #909399);
+        color: var(--el-color-info, #909399);
+    }
+}
+
+.btn-probe:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
 }
 
 .account-actions {
