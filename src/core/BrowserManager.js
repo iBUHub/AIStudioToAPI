@@ -11,6 +11,7 @@ const { firefox } = require("playwright");
 const os = require("os");
 
 const { parseProxyFromEnv } = require("../utils/ProxyUtils");
+const ProxyAuthRelay = require("../utils/ProxyRelay");
 const StickyProxyManager = require("../utils/StickyProxyManager");
 const {
     AuthExpiredError,
@@ -35,6 +36,7 @@ class BrowserManager {
         this.config = config;
         this.authSource = authSource;
         this.stickyProxyManager = new StickyProxyManager(logger, authSource);
+        this.proxyRelay = new ProxyAuthRelay(logger);
         this.stickyProxyManager.isEnabled();
         this.browser = null;
 
@@ -1324,14 +1326,15 @@ class BrowserManager {
             throw new Error(`Browser executable not found at path: ${browserExecutablePath}`);
         }
 
-        const proxyConfig = stickyProxy ? stickyProxy.proxy : parseProxyFromEnv();
-        if (proxyConfig) {
+        const upstreamProxyConfig = stickyProxy ? stickyProxy.proxy : parseProxyFromEnv();
+        if (upstreamProxyConfig) {
             this.logger.info(
                 stickyProxy
                     ? `[VNC] Launching browser with proxy: ${stickyProxy.display}`
-                    : `[VNC] 🌐 Using proxy: ${proxyConfig.server}`
+                    : `[VNC] 🌐 Using proxy: ${upstreamProxyConfig.server}`
             );
         }
+        const proxyConfig = await this._resolveProxyConfig(upstreamProxyConfig);
 
         // This browser instance is temporary and specific to the VNC session.
         // It does NOT affect the main `this.browser` used for the API proxy.
@@ -1478,13 +1481,28 @@ class BrowserManager {
     }
 
     /**
+     * Resolve an authenticated proxy through the local credential-injecting relay.
+     * Unauthenticated and non-HTTP(S) proxies are returned unchanged.
+     * @param {object|null} proxyConfig - Playwright proxy configuration
+     * @returns {Promise<object|null>}
+     */
+    async _resolveProxyConfig(proxyConfig) {
+        try {
+            return await this.proxyRelay.resolve(proxyConfig);
+        } catch (error) {
+            this.logger.error(`❌ [Browser] Proxy relay initialization failed: ${error.message}`);
+            throw error;
+        }
+    }
+
+    /**
      * Launch browser instance if not already running
      */
     async _ensureBrowser() {
         if (this.browser) return;
 
         const isStickyProxyEnabled = this.stickyProxyManager.isEnabled();
-        const proxyConfig = isStickyProxyEnabled ? null : parseProxyFromEnv();
+        const upstreamProxyConfig = isStickyProxyEnabled ? null : parseProxyFromEnv();
         if (isStickyProxyEnabled) {
             this.logger.info(
                 "[Browser] Sticky proxy mode enabled; main browser launch will not use environment proxy."
@@ -1496,6 +1514,7 @@ class BrowserManager {
             this._currentAuthIndex = -1;
             throw new Error(`Browser executable not found at path: ${browserExecutablePath}`);
         }
+        const proxyConfig = await this._resolveProxyConfig(upstreamProxyConfig);
         this.browser = await firefox.launch({
             args: this.launchArgs,
             executablePath: browserExecutablePath,
@@ -2049,12 +2068,13 @@ class BrowserManager {
             this._wsInitState.set(authIndex, { failed: false, success: false });
 
             const stickyProxy = this.stickyProxyManager.getProxyForAuth(authIndex);
-            const proxyConfig = stickyProxy ? stickyProxy.proxy : parseProxyFromEnv();
+            const upstreamProxyConfig = stickyProxy ? stickyProxy.proxy : parseProxyFromEnv();
             if (stickyProxy) {
                 this.logger.info(
                     `[Context#${authIndex}] Using sticky proxy for account "${stickyProxy.accountKey}": ${stickyProxy.display}`
                 );
             }
+            const proxyConfig = await this._resolveProxyConfig(upstreamProxyConfig);
             const storageStateObject = this.authSource.getAuth(authIndex);
             if (!storageStateObject) {
                 throw new Error(`Failed to get or parse auth source for index ${authIndex}.`);
