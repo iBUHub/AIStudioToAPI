@@ -11,6 +11,7 @@ const archiver = require("archiver");
 const VersionChecker = require("../utils/VersionChecker");
 const LoggingService = require("../utils/LoggingService");
 const UsageStatsService = require("../core/UsageStatsService");
+const { getTierStore } = require("../auth/TierStore");
 
 /**
  * Status Routes Manager
@@ -99,6 +100,10 @@ class StatusRoutes {
         });
 
         app.get("/auth", isAuthenticated, (req, res) => {
+            res.sendFile(this.distIndexPath);
+        });
+
+        app.get("/models", isAuthenticated, (req, res) => {
             res.sendFile(this.distIndexPath);
         });
 
@@ -988,6 +993,7 @@ class StatusRoutes {
         const allLogs = this.logger.logBuffer || [];
         const displayLogs = allLogs.slice(-limit);
         const accountNameMap = authSource.accountNameMap;
+        const tierStore = getTierStore(this.serverSystem.logger);
         const accountDetails = initialIndices.map(index => {
             const isInvalid = invalidIndices.includes(index);
             const name = isInvalid ? null : accountNameMap.get(index) || null;
@@ -998,8 +1004,9 @@ class StatusRoutes {
             const isExpired = expiredIndices.includes(index);
 
             const hasContext = browserManager.contexts.has(index);
+            const tier = isInvalid ? null : tierStore.get(index);
 
-            return { canonicalIndex, hasContext, index, isDuplicate, isExpired, isInvalid, isRotation, name };
+            return { canonicalIndex, hasContext, index, isDuplicate, isExpired, isInvalid, isRotation, name, tier };
         });
 
         const currentAuthIndex = requestHandler.currentAuthIndex;
