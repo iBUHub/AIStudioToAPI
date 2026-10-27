@@ -9,12 +9,13 @@ const fs = require("fs");
 const path = require("path");
 
 class UsageStatsService {
-    constructor(authSource, logger, dataDir, enabled = true) {
+    constructor(authSource, logger, dataDir, enabled = true, maxImportLines = Infinity) {
         this.authSource = authSource;
         this.logger = logger;
         this.dataDir = dataDir || path.join(process.cwd(), "data");
         this.statsFilePath = path.join(this.dataDir, "usage-stats.jsonl");
         this.enabled = enabled !== false;
+        this.maxImportLines = maxImportLines;
         this.appendPromise = Promise.resolve();
         this.isImportingStats = false;
 
@@ -328,6 +329,16 @@ class UsageStatsService {
      * rewrite the file in finishedAt order, and rebuild memory state.
      */
     async _importJsonlContent(content) {
+        const lines = content.split(/\r?\n/);
+        const nonEmptyLineCount = lines.reduce((count, line) => (line.trim() ? count + 1 : count), 0);
+        if (nonEmptyLineCount > this.maxImportLines) {
+            const error = new Error(
+                `Import exceeds maximum of ${this.maxImportLines} records (received ${nonEmptyLineCount})`
+            );
+            error.code = "USAGE_STATS_IMPORT_TOO_MANY_LINES";
+            throw error;
+        }
+
         if (!fs.existsSync(this.dataDir)) {
             fs.mkdirSync(this.dataDir, { recursive: true });
         }
@@ -357,7 +368,6 @@ class UsageStatsService {
 
         const importedRecords = [];
         let invalidLineCount = 0;
-        const lines = content.split(/\r?\n/);
 
         for (const line of lines) {
             const trimmed = line.trim();

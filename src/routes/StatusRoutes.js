@@ -11,6 +11,7 @@ const archiver = require("archiver");
 const VersionChecker = require("../utils/VersionChecker");
 const LoggingService = require("../utils/LoggingService");
 const UsageStatsService = require("../core/UsageStatsService");
+const { createRateLimiter } = require("../utils/rateLimiter");
 
 /**
  * Status Routes Manager
@@ -23,6 +24,18 @@ class StatusRoutes {
         this.config = serverSystem.config;
         this.distIndexPath = serverSystem.distIndexPath;
         this.versionChecker = new VersionChecker(this.logger);
+        this.statusRateLimiter = createRateLimiter({
+            max: this.config.statusRateLimitMaxAttempts,
+            windowMs: this.config.statusRateLimitWindowMinutes * 60 * 1000,
+        });
+        this.usageStatsRateLimiter = createRateLimiter({
+            max: this.config.usageStatsRateLimitMaxAttempts,
+            windowMs: this.config.usageStatsRateLimitWindowMinutes * 60 * 1000,
+        });
+        this.usageStatsImportRateLimiter = createRateLimiter({
+            max: this.config.usageStatsImportRateLimitMaxAttempts,
+            windowMs: this.config.usageStatsImportRateLimitWindowMinutes * 60 * 1000,
+        });
         this.allowedSafetyThresholds = new Set([
             "HARM_BLOCK_THRESHOLD_UNSPECIFIED",
             "BLOCK_LOW_AND_ABOVE",
@@ -125,7 +138,7 @@ class StatusRoutes {
             }
         });
 
-        app.get("/api/status", isAuthenticated, async (req, res) => {
+        app.get("/api/status", isAuthenticated, this.statusRateLimiter, async (req, res) => {
             // Force a reload of auth sources on each status check for real-time accuracy
             const hasChanges = this.serverSystem.authSource.reloadAuthSources();
 
@@ -177,7 +190,7 @@ class StatusRoutes {
             res.json(this._getStatusData());
         });
 
-        app.get("/api/usage-stats", isAuthenticated, (req, res) => {
+        app.get("/api/usage-stats", isAuthenticated, this.usageStatsRateLimiter, (req, res) => {
             const parseOptionalTime = value => {
                 if (value === undefined) return null;
                 if (typeof value !== "string" || !value.trim()) return NaN;
@@ -198,7 +211,7 @@ class StatusRoutes {
             res.json(snapshot || UsageStatsService.createEmptySnapshot());
         });
 
-        app.get("/api/usage-stats/download", isAuthenticated, async (req, res) => {
+        app.get("/api/usage-stats/download", isAuthenticated, this.usageStatsRateLimiter, async (req, res) => {
             try {
                 const usageStatsService = this.serverSystem.usageStatsService;
                 if (!usageStatsService?.enabled) {
@@ -230,7 +243,7 @@ class StatusRoutes {
             }
         });
 
-        app.post("/api/usage-stats/import", isAuthenticated, async (req, res) => {
+        app.post("/api/usage-stats/import", isAuthenticated, this.usageStatsImportRateLimiter, async (req, res) => {
             try {
                 const usageStatsService = this.serverSystem.usageStatsService;
                 if (!usageStatsService?.enabled) {
@@ -258,6 +271,12 @@ class StatusRoutes {
                     totalRecords: result.totalRecords,
                 });
             } catch (error) {
+                if (error.code === "USAGE_STATS_IMPORT_TOO_MANY_LINES") {
+                    return res.status(400).json({
+                        maxLines: this.serverSystem.usageStatsService.maxImportLines,
+                        message: "usageStatsImportTooManyLines",
+                    });
+                }
                 this.logger.error(`[WebUI] Failed to import usage stats: ${error.message}`);
                 res.status(500).json({ error: error.message, message: "usageStatsImportFailed" });
             }
